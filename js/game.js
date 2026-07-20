@@ -1820,12 +1820,30 @@ const Game = {
     if (m.type === 'recel_vehicule') return this.tickRecelVehicule(m);
     const d = UTIL.dist({ x: this.x, y: this.y }, m);
     if (d < 5) {
-      this.dirtyMoney += m.reward; Audio.cash(); m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
-      RPJournal.log('Mission', `Mission illicite accomplie : ${m.title}, ${UTIL.formatMoney(m.reward)}.`, 'alert');
-      announce(`Mission accomplie ! Vous gagnez ${UTIL.formatMoney(m.reward)} d'argent sale.`, 'assertive'); updateHud();
+      // Certaines missions sont clairement illégales : elles paient en argent
+      // sale. Les autres (livraison, taxi, secours, réparation...) sont des jobs
+      // légaux payés normalement — avant, TOUTES créditaient de l'argent sale et
+      // étaient annoncées comme « illicites », ce qui était faux.
+      const illegalTypes = ['trade', 'hunt', 'contrebande', 'gofast', 'recel_vehicule', 'braquage_superette', 'depot_armes_gang', 'planque_gardee'];
+      const illegal = illegalTypes.includes(m.type);
+      if (illegal) this.dirtyMoney += m.reward; else this.money += m.reward;
+      Audio.cash(); m.completed = true; m.active = false; this.activeMission = null; this.completedMissions.push(m.id);
+      // Le guidage GPS pointait vers ce point : on le coupe pour ne pas continuer
+      // à guider vers une mission déjà terminée.
+      this.guidanceTarget = null; this.guidanceAxis = null;
+      RPJournal.log('Mission', `Mission accomplie : ${m.title}, ${UTIL.formatMoney(m.reward)}.`, illegal ? 'alert' : 'info');
+      announce(`Vous êtes arrivé au point de mission. Mission accomplie ! Vous gagnez ${UTIL.formatMoney(m.reward)}${illegal ? ' d\'argent sale' : ''}.`, 'assertive');
+      updateHud();
     } else {
-      const bearing = UTIL.bearing(m.x - this.x, m.y - this.y);
-      announce(`Mission : ${Math.round(d)} m, cap ${bearing}.`, 'polite');
+      // Rappel de distance limité à une fois toutes les 4 secondes : la boucle de
+      // jeu appelle checkMission à chaque image, on ne veut pas dépendre du
+      // hasard « la voix est occupée » pour ne pas répéter en continu.
+      const now = Date.now();
+      if (now - (this._lastMissionPing || 0) > 4000) {
+        this._lastMissionPing = now;
+        const bearing = UTIL.bearing(m.x - this.x, m.y - this.y);
+        announce(`Mission : ${Math.round(d)} m, cap ${bearing}.`, 'polite');
+      }
     }
   },
 

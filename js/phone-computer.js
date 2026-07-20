@@ -46,6 +46,7 @@ const Phone = {
     announce(this.airplane ? 'Mode avion activé. Pas de réseau.' : 'Mode avion désactivé. Réseau restauré.', 'polite');
   },
   renderApp(name) {
+    this._appRenderedAt = Date.now(); // horodatage anti-appel fantôme (voir call())
     el('phoneHome').style.display = 'none'; el('phoneApp').style.display = 'block'; const a = el('phoneApp'); a.innerHTML = '';
     if (name === 'contacts') {
       a.innerHTML = '<h3>👥 Contacts</h3><ul class="contact-list" id="phoneContactList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
@@ -360,6 +361,15 @@ const Phone = {
     input.value = '';
   },
   call(contact) {
+    // Anti-appel fantôme : ouvrir l'app Contacts affichait une liste dont le
+    // premier bouton « appeler » pouvait recevoir le clic résiduel du tap qui
+    // venait d'ouvrir l'app (re-rendu sous le doigt), et « ça sonnait » tout
+    // seul. On ignore donc tout appel déclenché juste après l'affichage d'une
+    // app : il faut un geste délibéré, une fois la liste entendue.
+    if (Date.now() - (this._appRenderedAt || 0) < 600) {
+      announce('Choisissez d\'abord un contact, puis lancez l\'appel.', 'polite');
+      return;
+    }
     if (this.airplane) return announce('Mode avion actif. Impossible d\'appeler.', 'assertive');
     if (contact.isPlayer) {
       if (!Net.connected) return announce('Vous n\'êtes pas connecté à un serveur multijoueur.', 'assertive');

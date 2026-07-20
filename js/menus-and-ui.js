@@ -90,10 +90,27 @@ function openMainMenu() {
   }
   renderMenu(items, handleMenuItem);
   el('menuOverlay').style.display = 'flex';
-  announce('Menu principal ouvert. Choisissez une rubrique.', 'polite');
+  announce('Menu principal ouvert. Choisissez une rubrique. Une carte Retour, deux doigts vers la gauche, ou la touche Échap, ramènent au niveau précédent.', 'polite');
 }
+// Historique des menus pour la fonction « Retour ». Tous les menus passent par
+// renderMenu ; on y mémorise (titre, items, handler) de chaque menu affiché,
+// ce qui permet de revenir au menu précédent d'un seul geste, sans que chaque
+// sous-menu ait à gérer son propre bouton retour.
+const MenuNav = { stack: [], navigating: false };
 function renderMenu(items, handler) {
   const c = el('menuContent'); c.innerHTML = '';
+  const title = el('menuTitle') ? el('menuTitle').textContent : '';
+  if (MenuNav.navigating) {
+    // On est en train de revenir en arrière : ne pas ré-empiler le menu.
+    MenuNav.navigating = false;
+  } else {
+    // Si ce menu est déjà dans la pile (même titre), on déroule jusqu'à lui au
+    // lieu d'empiler un doublon (cas d'un menu qui se ré-affiche après une
+    // action, ou d'un retour explicite vers un menu parent).
+    const idx = MenuNav.stack.findIndex(s => s.title === title);
+    if (idx >= 0) { MenuNav.stack.length = idx + 1; MenuNav.stack[idx] = { title, items, handler }; }
+    else MenuNav.stack.push({ title, items, handler });
+  }
   items.forEach((it, i) => {
     const card = document.createElement('div'); card.className = 'menu-card'; card.tabIndex = 0; card.setAttribute('role', 'button');
     card.innerHTML = `<h4>${it.title}</h4><p>${it.desc}</p>`;
@@ -101,9 +118,28 @@ function renderMenu(items, handler) {
     card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(it); } });
     c.appendChild(card);
   });
+  // Carte « Retour » ajoutée automatiquement dès qu'un menu précédent existe.
+  if (MenuNav.stack.length > 1) {
+    const prevTitle = MenuNav.stack[MenuNav.stack.length - 2].title;
+    const back = document.createElement('div'); back.className = 'menu-card menu-card-back'; back.tabIndex = 0; back.setAttribute('role', 'button');
+    back.innerHTML = `<h4>↩️ Retour</h4><p>Revenir au menu précédent${prevTitle ? ' : ' + prevTitle : ''}.</p>`;
+    back.addEventListener('click', menuGoBack);
+    back.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); menuGoBack(); } });
+    c.appendChild(back);
+  }
   const first = c.querySelector('.menu-card');
   if (first) setTimeout(() => first.focus(), 30);
   announceTouchLabels();
+}
+// Remonte d'un niveau dans les menus. Au menu racine, ferme le menu.
+function menuGoBack() {
+  if (MenuNav.stack.length <= 1) { closeMenu(); return; }
+  MenuNav.stack.pop();
+  const prev = MenuNav.stack[MenuNav.stack.length - 1];
+  if (el('menuTitle')) el('menuTitle').textContent = prev.title;
+  MenuNav.navigating = true;
+  renderMenu(prev.items, prev.handler);
+  announce('Retour : ' + prev.title, 'polite');
 }
 function handleMenuItem(it) {
   if (it.id === 'vehicles') openVehicleMenu();
@@ -130,7 +166,7 @@ function handleMenuItem(it) {
   else if (it.id === 'realtaxi') { closeMenu(); Game.callRealTaxiDriver(); }
   else if (it.id === 'callmechanic') { closeMenu(); Game.callMechanic(); }
 }
-function closeMenu() { el('menuOverlay').style.display = 'none'; document.activeElement?.blur(); }
+function closeMenu() { el('menuOverlay').style.display = 'none'; MenuNav.stack = []; MenuNav.navigating = false; document.activeElement?.blur(); }
 function openRoleMenu() {
   el('menuTitle').textContent = 'Métiers de la ville';
   const items = Object.entries(Roles.list).filter(([k, v]) => !v.hidden).map(([k, v]) => ({
@@ -610,6 +646,7 @@ function announceGestureHelp() {
     'Trois doigts, taper : une fois, cibler la personne la plus proche ; deux fois, sirène ; trois fois, menu police.',
     'Quatre doigts, glisser : haut, téléphone ; bas, ordinateur ; gauche, menu du véhicule ; droite, visite guidée de la ville.',
     'Quatre doigts, taper, ou quatre taps à deux ou trois doigts : réentendre ce guide.',
+    'Dans un menu : un doigt glisser gauche ou droite pour parcourir, double tap pour valider ; deux doigts vers la gauche pour revenir au menu précédent ; deux doigts vers le bas pour fermer.',
   ];
   announce(lignes.join(' '), 'assertive');
 }
@@ -837,6 +874,7 @@ function setupInput() {
       if (cards.length) {
         if (fingers === 1 && isSwipe && Math.abs(dx) > Math.abs(dy)) { let idx = cards.indexOf(document.activeElement); idx = idx === -1 ? 0 : (dx > 0 ? Math.min(cards.length - 1, idx + 1) : Math.max(0, idx - 1)); cards[idx].focus(); speak(cards[idx].querySelector('h4')?.textContent || '', 'polite'); return; }
         if (fingers === 1 && isTap) { const now = Date.now(); if (now - gLastTap < 350 && cards.includes(document.activeElement)) { document.activeElement.click(); gLastTap = 0; } else { gLastTap = now; if (!cards.includes(document.activeElement)) { cards[0].focus(); speak(cards[0].querySelector('h4')?.textContent || '', 'polite'); } } return; }
+        if (fingers === 2 && isSwipe && dir === 'left') { menuGoBack(); return; } // 2 doigts vers la gauche : retour
         if (fingers === 2 && isSwipe && dir === 'down') { closeMenu(); return; }
       }
       return;

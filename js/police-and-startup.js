@@ -1681,9 +1681,10 @@ document.addEventListener('keydown', (e) => {
   }
   const menuOverlayEl = el('menuOverlay');
   const menuOpen = menuOverlayEl && menuOverlayEl.style.display === 'flex';
-  if (menuOpen && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(e.key)) {
+  if (menuOpen && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape', 'Backspace'].includes(e.key)) {
     e.preventDefault(); e.stopImmediatePropagation();
-    if (e.key === 'Escape') { closeMenu(); return; }
+    // Échap ou Retour arrière : remonter d'un niveau de menu (ferme au menu racine).
+    if (e.key === 'Escape' || e.key === 'Backspace') { menuGoBack(); return; }
     const cards = Array.from(document.querySelectorAll('#menuContent .menu-card'));
     if (!cards.length) return;
     let idx = cards.indexOf(document.activeElement);
