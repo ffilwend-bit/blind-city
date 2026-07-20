@@ -1714,6 +1714,18 @@ const AccessibleCardMenu = {
   SWIPE_MIN_DIST: 40,       // px minimum pour compter comme un balayage
   SWIPE_MAX_DURATION: 500,  // ms max pour que ce soit "rapide"
   DOUBLE_TAP_DELAY: 350,    // ms max entre deux tapes pour un double-tape
+  // Libellé parlé d'une carte/bouton : on privilégie aria-label (description
+  // complète, ex. « Me guider à pied vers la station-service, 200 mètres »),
+  // sinon le titre h4 + le paragraphe, sinon le texte brut. Ainsi le même
+  // système sert aussi bien les cartes du menu principal que les boutons des
+  // listes du téléphone (lieux utiles, carte de la ville...).
+  cardLabel(card) {
+    const aria = card.getAttribute && card.getAttribute('aria-label');
+    if (aria) return aria.trim();
+    const h4 = card.querySelector && card.querySelector('h4')?.textContent || '';
+    const p = card.querySelector && card.querySelector('p')?.textContent || '';
+    return (p ? `${h4}. ${p}` : (h4 || card.textContent || '')).trim();
+  },
   attach(container, cardSelector) {
     cardSelector = cardSelector || '.menu-card';
     if (!container || container._a11ySwipeAttached) return;
@@ -1727,9 +1739,7 @@ const AccessibleCardMenu = {
       let idx = cards.indexOf(document.activeElement);
       idx = idx === -1 ? 0 : Math.max(0, Math.min(cards.length - 1, idx + delta));
       cards[idx].focus();
-      const h4 = cards[idx].querySelector('h4')?.textContent || '';
-      const p = cards[idx].querySelector('p')?.textContent || '';
-      speak(p ? `${h4}. ${p}` : (h4 || cards[idx].textContent || ''), 'interrupt');
+      speak(AccessibleCardMenu.cardLabel(cards[idx]), 'interrupt');
     };
     container.addEventListener('touchstart', (e) => {
       const t = e.changedTouches[0];
@@ -1757,7 +1767,7 @@ const AccessibleCardMenu = {
       } else {
         e.preventDefault();
         card.focus();
-        speak(card.querySelector('h4')?.textContent || card.textContent || '', 'interrupt');
+        speak(AccessibleCardMenu.cardLabel(card), 'interrupt');
         lastTapTime = now; lastTapCard = card;
       }
     }, { passive: false });

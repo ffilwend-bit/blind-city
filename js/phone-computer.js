@@ -45,8 +45,20 @@ const Phone = {
     el('phoneAirplane').style.visibility = this.airplane ? 'visible' : 'hidden';
     announce(this.airplane ? 'Mode avion activé. Pas de réseau.' : 'Mode avion désactivé. Réseau restauré.', 'polite');
   },
+  // Rend une liste d'actions du téléphone (lieux utiles, carte de la ville,
+  // carte, mes lieux...) réellement navigable au doigt SANS lecteur d'écran :
+  // balayage gauche/droite pour parcourir chaque bouton en l'énonçant en entier
+  // (nom, distance, direction, action), double tape pour l'activer — le même
+  // système éprouvé que les cartes du menu principal. Le clavier reste géré par
+  // les flèches et l'annonce au focus.
+  _makeListAccessible(ul, introText) {
+    if (!ul) return;
+    if (window.AccessibleCardMenu) AccessibleCardMenu.attach(ul, '.phone-btn');
+    if (introText) { this._skipAutoFocus = true; announce(introText, 'polite'); }
+  },
   renderApp(name) {
     this._appRenderedAt = Date.now(); // horodatage anti-appel fantôme (voir call())
+    this._skipAutoFocus = false;
     el('phoneHome').style.display = 'none'; el('phoneApp').style.display = 'block'; const a = el('phoneApp'); a.innerHTML = '';
     if (name === 'contacts') {
       a.innerHTML = '<h3>👥 Contacts</h3><ul class="contact-list" id="phoneContactList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
@@ -111,10 +123,15 @@ const Phone = {
     if (name === 'map') {
       a.innerHTML = '<h3>🗺️ Carte</h3><p style="color:var(--muted);font-size:0.85rem;">Votre position : ' + Game.getDistrictName() + '</p><ul class="contact-list" id="phoneMapList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
       const ul = el('phoneMapList');
-      City.pois.slice(0, 12).forEach(p => {
-        const li = document.createElement('li'); li.innerHTML = `<span>${p.name} (${Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE)} m)</span><button class="phone-btn">🧭</button>`;
+      const mapPois = City.pois.slice(0, 12);
+      mapPois.forEach(p => {
+        const dist = Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE);
+        const dir = UTIL.bearing(p.x - Game.x, p.y - Game.y);
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${p.name} (${dist} m, ${dir})</span><button class="phone-btn" aria-label="Conduite automatique vers ${p.name}, ${dist} mètres, direction ${dir}">🧭</button>`;
         li.querySelector('button').addEventListener('click', () => { Game.setAutoDrive(p.type, p.name); Phone.closePhone(); }); ul.appendChild(li);
       });
+      this._makeListAccessible(ul, `Carte : ${mapPois.length} lieux. Balayez d'un doigt vers la gauche ou la droite pour parcourir, double tapez pour lancer la conduite automatique.`);
     }
     if (name === 'missions') {
       Game.openMissions();
@@ -165,7 +182,10 @@ const Phone = {
         const nearest = list[0];
         const li = document.createElement('li');
         if (nearest) {
-          li.innerHTML = `<span>${t.label} : ${nearest.name} (${Math.round(nearest.dist * CONFIG.METERS_PER_TILE)} m)</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers ${nearest.name}">🚶</button><button class="phone-btn" data-drive aria-label="Conduite automatique vers ${nearest.name}">🧭</button>`;
+          const dist = Math.round(nearest.dist * CONFIG.METERS_PER_TILE);
+          const dir = UTIL.bearing(nearest.x - Game.x, nearest.y - Game.y);
+          const plain = t.label.replace(/^[^\p{L}]*/u, ''); // libellé sans l'emoji, pour la voix
+          li.innerHTML = `<span>${t.label} : ${nearest.name} (${dist} m, ${dir})</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers ${plain} : ${nearest.name}, ${dist} mètres, direction ${dir}">🚶</button><button class="phone-btn" data-drive aria-label="Conduite automatique vers ${plain} : ${nearest.name}, ${dist} mètres">🧭</button>`;
           li.querySelector('[data-walk]').addEventListener('click', () => { Game.setGuidance(nearest); Phone.closePhone(); });
           li.querySelector('[data-drive]').addEventListener('click', () => { Game.setAutoDrive(nearest.type, nearest.name); Phone.closePhone(); });
         } else {
@@ -173,6 +193,7 @@ const Phone = {
         }
         ul.appendChild(li);
       });
+      this._makeListAccessible(ul, 'Lieux utiles. Balayez d\'un doigt vers la gauche ou la droite pour parcourir les lieux et leurs boutons ; double tapez pour lancer le guidage à pied ou la conduite automatique.');
     }
     if (name === 'myplaces') {
       a.innerHTML = '<h3>📌 Mes lieux</h3><div style="display:flex;gap:6px;margin-bottom:8px;"><input id="myPlaceNameInput" placeholder="Nom du lieu..." aria-label="Nom du lieu à enregistrer ici" style="flex:1;background:#11161e;border:1px solid var(--border);color:#fff;border-radius:8px;padding:8px;"><button class="phone-btn" id="myPlaceSaveBtn">Enregistrer ici</button></div><ul class="contact-list" id="phoneMyPlacesList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
@@ -186,13 +207,15 @@ const Phone = {
       const places = Game.savedPlaces || [];
       if (!places.length) ul.innerHTML = '<p style="color:var(--muted);font-size:0.8rem;">Aucun lieu enregistré. Rendez-vous quelque part puis tapez un nom ci-dessus.</p>';
       places.forEach((p, i) => {
-        const dist = UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE;
+        const dist = Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE);
+        const dir = UTIL.bearing(p.x - Game.x, p.y - Game.y);
         const li = document.createElement('li');
-        li.innerHTML = `<span>${p.name} (${Math.round(dist)} m)</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers ${p.name}">🚶</button><button class="phone-btn" data-del aria-label="Supprimer ${p.name}">🗑️</button>`;
+        li.innerHTML = `<span>${p.name} (${dist} m, ${dir})</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers ${p.name}, ${dist} mètres, direction ${dir}">🚶</button><button class="phone-btn" data-del aria-label="Supprimer le lieu ${p.name}">🗑️</button>`;
         li.querySelector('[data-walk]').addEventListener('click', () => { Game.setGuidance(p); Phone.closePhone(); });
         li.querySelector('[data-del]').addEventListener('click', () => { Game.removeSavedPlace(i); Phone.renderApp('myplaces'); });
         ul.appendChild(li);
       });
+      if (places.length) this._makeListAccessible(ul, `Mes lieux : ${places.length} enregistré${places.length > 1 ? 's' : ''}. Balayez d'un doigt pour parcourir, double tapez pour vous faire guider ou supprimer.`);
     }
     if (name === 'citymap') {
       a.innerHTML = `<h3>🗺️ Carte de la ville</h3><p style="color:var(--muted);font-size:0.75rem;">Ville de ${City.W * CONFIG.METERS_PER_TILE} m sur ${City.H * CONFIG.METERS_PER_TILE} m, ${City.districts.length} quartiers.</p><ul class="contact-list" id="phoneCityMapList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>`;
@@ -206,11 +229,12 @@ const Phone = {
         } else {
           const dir = UTIL.bearing(cx - Game.x, cy - Game.y);
           const dist = Math.round(UTIL.dist({ x: cx, y: cy }, Game) * CONFIG.METERS_PER_TILE);
-          li.innerHTML = `<span>${d.name} — vers le ${dir}, ${dist} m</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers ${d.name}">🚶</button>`;
+          li.innerHTML = `<span>${d.name} — vers le ${dir}, ${dist} m</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers le quartier ${d.name}, vers le ${dir}, ${dist} mètres">🚶</button>`;
           li.querySelector('[data-walk]').addEventListener('click', () => { Game.setGuidance({ name: d.name, x: cx, y: cy }); Phone.closePhone(); });
         }
         ul.appendChild(li);
       });
+      this._makeListAccessible(ul, `Carte de la ville. Vous êtes dans ${here.name}. Balayez d'un doigt vers la gauche ou la droite pour parcourir les quartiers ; double tapez pour vous faire guider à pied vers l'un d'eux.`);
     }
     if (name === 'jobs') {
       a.innerHTML = '<h3>🛡️ Métiers</h3><p style="color:var(--muted);font-size:0.8rem;">Métier actuel : <strong>' + Roles.list[Roles.current].name + '</strong></p><ul class="contact-list" id="phoneJobsList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
@@ -293,7 +317,7 @@ const Phone = {
       });
     }
     const firstFocusable = a.querySelector('button, input, select, textarea, [tabindex]');
-    if (firstFocusable) {
+    if (firstFocusable && !this._skipAutoFocus) {
       const isTextLikeInput = firstFocusable.tagName === 'TEXTAREA' || (firstFocusable.tagName === 'INPUT' && !['range', 'radio', 'checkbox', 'button', 'submit'].includes(firstFocusable.type));
       if (isTextLikeInput) focusTextInput(firstFocusable);
       else firstFocusable.focus();
