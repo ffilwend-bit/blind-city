@@ -680,6 +680,10 @@ function setupInput() {
     else if (key === 'j') { const live = Game.getLiveTarget(); if (live?.menotte || live?.knockedOut || live?.dead) Game.searchTarget(); else announce('Cible non fouillable : menottez ou assommez-la d\'abord.', 'assertive'); }
     else if (key === 'pageup') { if (Game.inVehicle && VEHICLE_CATALOG[Game.vehicle.type].flies) { Game.altitude = Math.min(120, Game.altitude + 5); Game.vehicle.altitude = Game.altitude; announce('Altitude ' + Math.round(Game.altitude) + ' m.', 'polite'); } }
     else if (key === 'pagedown') { if (Game.inVehicle && VEHICLE_CATALOG[Game.vehicle.type].flies) { Game.altitude = Math.max(0, Game.altitude - 5); Game.vehicle.altitude = Game.altitude; announce('Altitude ' + Math.round(Game.altitude) + ' m.', 'polite'); } }
+    // Verrouillage de cible 1 à 9. On lit e.code (Digit1.../Numpad1...) plutôt que
+    // e.key : sur un clavier AZERTY, la rangée du haut sans Maj donne & é " ' ( etc.,
+    // donc e.key n'était jamais "1".."9" et le ciblage ne marchait pas.
+    else if (e.code && /^(Digit|Numpad)[1-9]$/.test(e.code)) Game.target(parseInt(e.code.replace(/\D/g, ''), 10));
     else if (['1','2','3','4','5','6','7','8','9'].includes(key)) Game.target(parseInt(key, 10));
     else if (key === '!') Game.setHeadingDirect(0); // Nord
     else if (key === ';') Game.setHeadingDirect(2); // Est

@@ -54,7 +54,16 @@ const Phone = {
   _makeListAccessible(ul, introText) {
     if (!ul) return;
     if (window.AccessibleCardMenu) AccessibleCardMenu.attach(ul, '.phone-btn');
-    if (introText) { this._skipAutoFocus = true; announce(introText, 'polite'); }
+    const mobile = (typeof Platform !== 'undefined') && Platform.isMobile;
+    if (mobile) {
+      // Tactile : on ne met pas le focus automatiquement (le balayage part de la
+      // première carte au premier geste) et on énonce comment naviguer.
+      this._skipAutoFocus = true;
+      if (introText) announce(introText, 'assertive');
+    }
+    // Ordinateur : on garde le focus clavier automatique sur le premier bouton
+    // (sinon le focus retombe sur le body, hors du conteneur, et les flèches ne
+    // naviguent plus la liste) ; son libellé complet est lu à la prise de focus.
   },
   renderApp(name) {
     this._appRenderedAt = Date.now(); // horodatage anti-appel fantôme (voir call())
@@ -123,15 +132,20 @@ const Phone = {
     if (name === 'map') {
       a.innerHTML = '<h3>🗺️ Carte</h3><p style="color:var(--muted);font-size:0.85rem;">Votre position : ' + Game.getDistrictName() + '</p><ul class="contact-list" id="phoneMapList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
       const ul = el('phoneMapList');
-      const mapPois = City.pois.slice(0, 12);
+      // TOUS les lieux de la ville, du plus proche au plus loin (avant : 12
+      // seulement). Chaque lieu offre le guidage à pied (qui contourne les murs)
+      // et la conduite automatique.
+      const mapPois = City.pois.map(p => ({ p, d: UTIL.dist(p, Game) })).sort((a, b) => a.d - b.d).map(o => o.p);
       mapPois.forEach(p => {
         const dist = Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE);
         const dir = UTIL.bearing(p.x - Game.x, p.y - Game.y);
         const li = document.createElement('li');
-        li.innerHTML = `<span>${p.name} (${dist} m, ${dir})</span><button class="phone-btn" aria-label="Conduite automatique vers ${p.name}, ${dist} mètres, direction ${dir}">🧭</button>`;
-        li.querySelector('button').addEventListener('click', () => { Game.setAutoDrive(p.type, p.name); Phone.closePhone(); }); ul.appendChild(li);
+        li.innerHTML = `<span>${p.name} (${dist} m, ${dir})</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers ${p.name}, ${dist} mètres, direction ${dir}">🚶</button><button class="phone-btn" data-drive aria-label="Conduite automatique vers ${p.name}, ${dist} mètres">🧭</button>`;
+        li.querySelector('[data-walk]').addEventListener('click', () => { Game.setGuidance({ name: p.name, x: p.x, y: p.y }); Phone.closePhone(); });
+        li.querySelector('[data-drive]').addEventListener('click', () => { Game.setAutoDrive(p.type, p.name); Phone.closePhone(); });
+        ul.appendChild(li);
       });
-      this._makeListAccessible(ul, `Carte : ${mapPois.length} lieux. Balayez d'un doigt vers la gauche ou la droite pour parcourir, double tapez pour lancer la conduite automatique.`);
+      this._makeListAccessible(ul, `Carte : ${mapPois.length} lieux dans toute la ville, du plus proche au plus loin. Balayez d'un doigt pour parcourir, double tapez pour vous faire guider à pied ou en voiture.`);
     }
     if (name === 'missions') {
       Game.openMissions();

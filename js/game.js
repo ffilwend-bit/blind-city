@@ -603,7 +603,8 @@ const Game = {
   setGuidance(poi) {
     this.guidanceTarget = poi;
     this.guidanceAxis = null;
-    announce(`Guidage activé vers ${poi.name}. Je vous indique la direction au fur et à mesure.`, 'interrupt');
+    this.guidancePath = null; this._pathGoal = null; // force un nouveau calcul de chemin
+    announce(`Guidage activé vers ${poi.name}. Je vous indique la direction au fur et à mesure, en contournant les obstacles.`, 'interrupt');
     this._lastGuidanceMsg = 0;
     this.updateGuidance(true);
   },
@@ -611,52 +612,27 @@ const Game = {
     if (this.guidanceTarget) { announce('Guidage arrêté.', 'interrupt'); this.guidanceTarget = null; this.guidanceAxis = null; }
   },
   _lastGuidanceMsg: 0,
+  guidancePath: null, _pathGoal: null, _pathComputedAt: 0, _pathIdx: 0,
   updateGuidance(force) {
     const t = this.guidanceTarget; if (!t) return;
-    const dx = t.x - this.x, dy = t.y - this.y;
     const dist = UTIL.dist(t, this);
     if (dist < 2) {
       announce(`Vous êtes arrivé à ${t.name}.`, 'interrupt');
       Audio.cash();
-      this.guidanceTarget = null; this.guidanceAxis = null; return;
+      this.guidanceTarget = null; this.guidanceAxis = null; this.guidancePath = null; this._pathGoal = null; return;
     }
     const now = Date.now();
     if (!force && now - this._lastGuidanceMsg < 2500) return;
     this._lastGuidanceMsg = now;
 
-    const absDx = Math.abs(dx), absDy = Math.abs(dy);
-    // Choix de l'axe à corriger en priorité, avec une marge large (5 cases)
-    // pour ne changer d'avis qu'une fois l'autre axe VRAIMENT plus urgent —
-    // une marge trop petite faisait dire "tout droit" puis "tournez" en
-    // boucle sans que ça dure jamais, ce qui était signalé comme incohérent.
-    if (!this.guidanceAxis) this.guidanceAxis = absDx >= absDy ? 'x' : 'y';
-    else {
-      const current = this.guidanceAxis === 'x' ? absDx : absDy;
-      const other = this.guidanceAxis === 'x' ? absDy : absDx;
-      if (current === 0 || other > current + 5) this.guidanceAxis = this.guidanceAxis === 'x' ? 'y' : 'x';
-    }
-    let axis = this.guidanceAxis;
-    let remaining = axis === 'x' ? absDx : absDy;
-    if (remaining === 0) { axis = this.guidanceAxis = (axis === 'x' ? 'y' : 'x'); remaining = axis === 'x' ? absDx : absDy; }
+    // Guidage le long d'un VRAI chemin praticable (contourne les bâtiments et
+    // l'eau) : on ne dirige jamais quelqu'un vers un mur. Si aucun chemin n'est
+    // trouvé (destination trop lointaine ou isolée), on retombe sur l'ancien
+    // guidage direct par axe.
+    this._ensurePath(t);
+    let instruction = this._pathInstruction();
+    if (!instruction) instruction = this._axisInstruction(t);
 
-    // Cap qu'il faudrait avoir pour cet axe (0=nord,2=est,4=sud,6=ouest).
-    const targetHeading = axis === 'x' ? (dx > 0 ? 2 : 6) : (dy > 0 ? 4 : 0);
-    // Écart entre le cap actuel et le cap voulu, en pas de 90° : 0=devant,
-    // 2=à droite, 4=demi-tour, 6=à gauche. Toujours exact, jamais approximatif.
-    const diff = ((targetHeading - this.heading) % 8 + 8) % 8;
-    const meters = Math.round(remaining * CONFIG.METERS_PER_TILE);
-    let instruction;
-    if (diff === 0) instruction = `Tout droit, ${meters} mètres.`;
-    else if (diff === 2) instruction = `Tournez à droite, puis ${meters} mètres.`;
-    else if (diff === 6) instruction = `Tournez à gauche, puis ${meters} mètres.`;
-    else instruction = `Faites demi-tour, puis ${meters} mètres.`;
-    // Avertir d'un obstacle juste devant AVANT de foncer dedans, pas après
-    // seulement (avant, on ne le disait qu'une fois rentré dans le mur).
-    if (diff === 0) {
-      const { dx: hdx, dy: hdy } = this.headingToDelta(this.heading);
-      const nx = Math.round(this.x + hdx), ny = Math.round(this.y + hdy);
-      if (City.isSolid(nx, ny)) instruction = `Attention, obstacle juste devant. ${instruction}`;
-    }
     // Détection de sur-place : si exactement la même consigne à la même
     // distance revient plusieurs fois d'affilée, c'est que le joueur ne
     // progresse pas — on le lui dit clairement au lieu de répéter en boucle.
@@ -673,6 +649,159 @@ const Game = {
     }
     Audio.tone({ freq: 700, type: 'sine', duration: 0.1, gain: 0.08, pan: this.panForPoint(t.x, t.y) });
     speak(instruction, 'interrupt');
+  },
+  // Direction cardinale d'une case à sa voisine (0=nord,2=est,4=sud,6=ouest ;
+  // -1 si pas cardinalement adjacentes).
+  _dirOf(x0, y0, x1, y1) { const dx = x1 - x0, dy = y1 - y0; if (dx > 0 && dy === 0) return 2; if (dx < 0 && dy === 0) return 6; if (dy > 0 && dx === 0) return 4; if (dy < 0 && dx === 0) return 0; return -1; },
+  // (Re)calcule le chemin vers la destination quand c'est nécessaire : au
+  // changement de but, si le joueur a quitté le chemin, ou périodiquement (le
+  // monde peut changer). Mémorise l'index du point de chemin le plus proche.
+  _ensurePath(t) {
+    const now = Date.now();
+    const px = Math.round(this.x), py = Math.round(this.y);
+    const gx = Math.round(t.x), gy = Math.round(t.y);
+    const goalMoved = !this._pathGoal || this._pathGoal.x !== gx || this._pathGoal.y !== gy;
+    let offPath = true;
+    if (this.guidancePath && this.guidancePath.length && !goalMoved) {
+      let best = Infinity, bi = 0;
+      for (let i = 0; i < this.guidancePath.length; i++) {
+        const d = Math.abs(this.guidancePath[i].x - px) + Math.abs(this.guidancePath[i].y - py);
+        if (d < best) { best = d; bi = i; }
+      }
+      this._pathIdx = bi; offPath = best > 1;
+    }
+    const stale = now - (this._pathComputedAt || 0) > 6000;
+    if (goalMoved || !this.guidancePath || !this.guidancePath.length || offPath || stale) {
+      this.guidancePath = this.computePath(px, py, t.x, t.y);
+      this._pathGoal = { x: gx, y: gy }; this._pathComputedAt = now; this._pathIdx = 0;
+    }
+  },
+  // Consigne pas-à-pas déduite du chemin : direction du segment droit en cours,
+  // distance jusqu'au prochain virage, et aperçu du virage suivant. Comme le
+  // segment est toujours praticable, "tout droit" ne mène jamais dans un mur.
+  _pathInstruction() {
+    const path = this.guidancePath;
+    if (!path || path.length < 2) return null;
+    const px = Math.round(this.x), py = Math.round(this.y);
+    let i = Math.min(this._pathIdx || 0, path.length - 1);
+    while (i < path.length - 1 && path[i].x === px && path[i].y === py) i++;
+    const firstDir = this._dirOf(px, py, path[i].x, path[i].y);
+    if (firstDir < 0) return null; // désaligné : repli, recalcul au prochain tick
+    let e = i;
+    while (e < path.length - 1 && this._dirOf(path[e].x, path[e].y, path[e + 1].x, path[e + 1].y) === firstDir) e++;
+    const distToTurn = Math.abs(path[e].x - px) + Math.abs(path[e].y - py);
+    const meters = Math.max(CONFIG.METERS_PER_TILE, Math.round(distToTurn * CONFIG.METERS_PER_TILE));
+    const diff = ((firstDir - this.heading) % 8 + 8) % 8;
+    let instr;
+    if (diff === 0) instr = `Tout droit, ${meters} mètres`;
+    else if (diff === 2) instr = `Tournez à droite, puis ${meters} mètres`;
+    else if (diff === 6) instr = `Tournez à gauche, puis ${meters} mètres`;
+    else instr = `Faites demi-tour, puis ${meters} mètres`;
+    let nextDir = -1;
+    if (e < path.length - 1) nextDir = this._dirOf(path[e].x, path[e].y, path[e + 1].x, path[e + 1].y);
+    if (nextDir >= 0) {
+      const nd = ((nextDir - firstDir) % 8 + 8) % 8;
+      const w = nd === 2 ? 'à droite' : nd === 6 ? 'à gauche' : nd === 4 ? 'demi-tour' : '';
+      if (w) instr += `, puis ${w}`;
+    } else {
+      instr += ', vous arrivez';
+    }
+    return instr + '.';
+  },
+  // Ancien guidage direct (repli) : vise l'axe le plus urgent en ligne droite.
+  _axisInstruction(t) {
+    const dx = t.x - this.x, dy = t.y - this.y;
+    const absDx = Math.abs(dx), absDy = Math.abs(dy);
+    if (!this.guidanceAxis) this.guidanceAxis = absDx >= absDy ? 'x' : 'y';
+    else {
+      const current = this.guidanceAxis === 'x' ? absDx : absDy;
+      const other = this.guidanceAxis === 'x' ? absDy : absDx;
+      if (current === 0 || other > current + 5) this.guidanceAxis = this.guidanceAxis === 'x' ? 'y' : 'x';
+    }
+    let axis = this.guidanceAxis;
+    let remaining = axis === 'x' ? absDx : absDy;
+    if (remaining === 0) { axis = this.guidanceAxis = (axis === 'x' ? 'y' : 'x'); remaining = axis === 'x' ? absDx : absDy; }
+    const targetHeading = axis === 'x' ? (dx > 0 ? 2 : 6) : (dy > 0 ? 4 : 0);
+    const diff = ((targetHeading - this.heading) % 8 + 8) % 8;
+    const meters = Math.round(remaining * CONFIG.METERS_PER_TILE);
+    let instruction;
+    if (diff === 0) instruction = `Tout droit, ${meters} mètres.`;
+    else if (diff === 2) instruction = `Tournez à droite, puis ${meters} mètres.`;
+    else if (diff === 6) instruction = `Tournez à gauche, puis ${meters} mètres.`;
+    else instruction = `Faites demi-tour, puis ${meters} mètres.`;
+    if (diff === 0) {
+      const { dx: hdx, dy: hdy } = this.headingToDelta(this.heading);
+      const nx = Math.round(this.x + hdx), ny = Math.round(this.y + hdy);
+      if (City.isSolid(nx, ny)) instruction = `Attention, obstacle juste devant. ${instruction}`;
+    }
+    return instruction;
+  },
+  // A* piéton sur la grille : ne traverse ni bâtiment (case solide) ni eau.
+  // Renvoie la liste des cases de la position au but (case praticable la plus
+  // proche du but si le but lui-même est un bâtiment), ou null si rien.
+  computePath(sx, sy, tx, ty) {
+    const W = City.W, H = City.H;
+    const walkable = (x, y) => x >= 0 && y >= 0 && x < W && y < H && !City.isSolid(x, y) && City.getTile(x, y) !== 'eau';
+    const nearestWalkable = (cx, cy) => {
+      cx = UTIL.clamp(Math.round(cx), 0, W - 1); cy = UTIL.clamp(Math.round(cy), 0, H - 1);
+      if (walkable(cx, cy)) return { x: cx, y: cy };
+      for (let r = 1; r <= 10; r++) {
+        for (let ox = -r; ox <= r; ox++) for (let oy = -r; oy <= r; oy++) {
+          if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
+          if (walkable(cx + ox, cy + oy)) return { x: cx + ox, y: cy + oy };
+        }
+      }
+      return null;
+    };
+    const start = nearestWalkable(sx, sy), goal = nearestWalkable(tx, ty);
+    if (!start || !goal) return null;
+    const sIdx = start.y * W + start.x, gIdx = goal.y * W + goal.x;
+    if (sIdx === gIdx) return [{ x: start.x, y: start.y }];
+    const came = new Int32Array(W * H).fill(-1);
+    const gScore = new Float64Array(W * H);
+    const closed = new Uint8Array(W * H);
+    const inOpen = new Uint8Array(W * H);
+    const heapF = [], heapI = [];
+    const push = (f, idx) => {
+      heapF.push(f); heapI.push(idx); let c = heapF.length - 1;
+      while (c > 0) { const p = (c - 1) >> 1; if (heapF[p] <= heapF[c]) break; const tf = heapF[p]; heapF[p] = heapF[c]; heapF[c] = tf; const ti = heapI[p]; heapI[p] = heapI[c]; heapI[c] = ti; c = p; }
+    };
+    const pop = () => {
+      const ri = heapI[0], n = heapF.length - 1;
+      heapF[0] = heapF[n]; heapI[0] = heapI[n]; heapF.pop(); heapI.pop();
+      let c = 0; const len = heapF.length;
+      while (true) { const l = 2 * c + 1, r = 2 * c + 2; let s = c;
+        if (l < len && heapF[l] < heapF[s]) s = l;
+        if (r < len && heapF[r] < heapF[s]) s = r;
+        if (s === c) break;
+        const tf = heapF[s]; heapF[s] = heapF[c]; heapF[c] = tf; const ti = heapI[s]; heapI[s] = heapI[c]; heapI[c] = ti; c = s;
+      }
+      return ri;
+    };
+    gScore[sIdx] = 0; push(Math.abs(start.x - goal.x) + Math.abs(start.y - goal.y), sIdx); inOpen[sIdx] = 1;
+    let processed = 0; const MAX = 90000;
+    while (heapF.length) {
+      const cur = pop(); inOpen[cur] = 0;
+      if (cur === gIdx) break;
+      if (closed[cur]) continue;
+      closed[cur] = 1;
+      if (++processed > MAX) return null; // trop coûteux : repli sur guidage direct
+      const cx = cur % W, cy = (cur / W) | 0, g0 = gScore[cur];
+      const cand = [[cx + 1, cy, cur + 1], [cx - 1, cy, cur - 1], [cx, cy + 1, cur + W], [cx, cy - 1, cur - W]];
+      for (let k = 0; k < 4; k++) {
+        const nx = cand[k][0], ny = cand[k][1], ni = cand[k][2];
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H || closed[ni] || !walkable(nx, ny)) continue;
+        const ng = g0 + 1;
+        if (inOpen[ni] && ng >= gScore[ni]) continue;
+        gScore[ni] = ng; came[ni] = cur;
+        push(ng + Math.abs(nx - goal.x) + Math.abs(ny - goal.y), ni); inOpen[ni] = 1;
+      }
+    }
+    if (gIdx !== sIdx && came[gIdx] === -1) return null;
+    const path = []; let c = gIdx;
+    while (c !== -1) { path.push({ x: c % W, y: (c / W) | 0 }); if (c === sIdx) break; c = came[c]; }
+    path.reverse();
+    return path;
   },
 
   // Détection de bord : bip discret quand on passe du trottoir à la route ou
