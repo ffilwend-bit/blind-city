@@ -3470,6 +3470,10 @@ const Game = {
   applySaveData(d) {
     try {
       Object.assign(this, d);
+      // Une sauvegarde (locale ou de compte) vient d'être restaurée : ce joueur
+      // n'est pas un nouveau venu, on garde sa position enregistrée plutôt que
+      // de le faire réapparaître à l'aéroport.
+      this._loadedFromSave = true;
       if (!this.player) this.player = { firstName: 'Joueur', lastName: 'Anonyme', gender: 'homme', registered: false };
       if (!this.outfit) this.outfit = { haut: null, bas: null, chaussures: null, couleurHaut: null, couleurBas: null, couleurChaussures: null, coiffure: null, lunettes: null, accessoires: [] };
       else for (const k of ['couleurHaut', 'couleurBas', 'couleurChaussures', 'coiffure', 'lunettes']) if (!(k in this.outfit)) this.outfit[k] = null;

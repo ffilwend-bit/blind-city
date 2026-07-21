@@ -1,5 +1,5 @@
 const CONFIG = {
-  W: 420, H: 420, // ville agrandie (était 240×240)
+  W: 560, H: 560, // agrandie pour loger les villes lointaines Bobo-Dioulasso et Kongoussi (était 240×240, puis 420×420)
   METERS_PER_TILE: 4, // échelle officielle : 1 case = 4 mètres
   SCAN_RADIUS: 60,
   POCKET_CAPACITY: 15,

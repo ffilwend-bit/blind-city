@@ -17,24 +17,27 @@ const City = {
   generate() {
     this.grid.clear(); this.pois = []; this.npcs = []; this.vehicles = []; this.roadAxes = []; this.districts = []; this.houses = []; this.missions = []; this.gangs = []; this.miningSites = []; this.groundItems = [];
     // Districts
+    // La capitale de Blind City reprend les noms de quartiers de Ouagadougou.
     this.districts = [
-      { name: 'Centre-ville', x1: 90, y1: 90, x2: 150, y2: 150, type: 'centre', density: 0.6 },
-      { name: 'Résidentiel Nord', x1: 20, y1: 20, x2: 110, y2: 80, type: 'residentiel', density: 0.4 },
-      { name: 'Résidentiel Est', x1: 160, y1: 30, x2: 230, y2: 100, type: 'residentiel', density: 0.35 },
-      { name: 'Zone industrielle', x1: 10, y1: 160, x2: 90, y2: 230, type: 'industriel', density: 0.3 },
-      { name: 'Portuaire', x1: 100, y1: 170, x2: 180, y2: 230, type: 'port', density: 0.25 },
+      { name: 'Koulouba', x1: 90, y1: 90, x2: 150, y2: 150, type: 'centre', density: 0.6 },              // quartier administratif et stratégique
+      { name: 'Tampouy', x1: 20, y1: 20, x2: 110, y2: 80, type: 'residentiel', density: 0.4 },           // quartier populaire et très vivant
+      { name: 'Ouaga 2000', x1: 160, y1: 30, x2: 230, y2: 100, type: 'residentiel', density: 0.35 },     // quartier moderne et prestigieux
+      { name: 'Zone industrielle de Kossodo', x1: 10, y1: 160, x2: 90, y2: 230, type: 'industriel', density: 0.3 },
+      { name: 'Zone du barrage', x1: 100, y1: 170, x2: 180, y2: 230, type: 'port', density: 0.25 },      // plan d'eau (les barrages de Ouaga)
       { name: 'Aéroport', x1: 190, y1: 170, x2: 235, y2: 235, type: 'aeroport', density: 0.1 },
-      { name: 'Parc national', x1: 20, y1: 100, x2: 80, y2: 150, type: 'parc', density: 0.1 },
-      { name: 'Quartier sud', x1: 120, y1: 160, x2: 230, y2: 230, type: 'commercial', density: 0.45 },
-      { name: 'Wila Ouest', x1: 10, y1: 80, x2: 70, y2: 130, type: 'residentiel', density: 0.35 },
-      { name: 'Wila Est', x1: 170, y1: 60, x2: 235, y2: 110, type: 'residentiel', density: 0.35 },
-      { name: 'Wila Nord', x1: 60, y1: 10, x2: 130, y2: 50, type: 'residentiel', density: 0.35 },
+      { name: 'Parc urbain Bangr-Weoogo', x1: 20, y1: 100, x2: 80, y2: 150, type: 'parc', density: 0.1 },
+      { name: 'Gounghin', x1: 120, y1: 160, x2: 230, y2: 230, type: 'commercial', density: 0.45 },       // quartier très animé et commercial
+      { name: 'Karpala', x1: 10, y1: 80, x2: 70, y2: 130, type: 'residentiel', density: 0.35 },          // quartier en pleine expansion
+      { name: 'Dassasgho', x1: 170, y1: 60, x2: 235, y2: 110, type: 'residentiel', density: 0.35 },
+      { name: 'Nongr-Massom', x1: 60, y1: 10, x2: 130, y2: 50, type: 'residentiel', density: 0.35 },
       { name: 'Zone minière', x1: 5, y1: 5, x2: 55, y2: 55, type: 'mine', density: 0.15 },
-      { name: 'Gang territoire', x1: 170, y1: 120, x2: 230, y2: 160, type: 'ghetto', density: 0.4 },
-      // Ville voisine isolée, loin de tout : la traversée par la route serait
-      // interminable à travers du terrain sauvage. En pratique, seule la voie
-      // des airs (avion/hélicoptère) est réaliste pour s'y rendre et en revenir.
-      { name: 'Ville voisine', x1: 380, y1: 380, x2: 415, y2: 415, type: 'residentiel', density: 0.12 },
+      { name: 'Cissin', x1: 170, y1: 120, x2: 230, y2: 160, type: 'ghetto', density: 0.4 },              // quartier populaire, plus rude
+      // Deuxième grande ville : Bobo-Dioulasso, loin au sud-est, isolée par du
+      // terrain sauvage — on s'y rend surtout par la voie des airs.
+      { name: 'Bobo-Dioulasso', x1: 445, y1: 445, x2: 510, y2: 510, type: 'commercial', density: 0.3 },
+      // Troisième ville : Kongoussi, encore bien plus loin au nord-est, ambiance
+      // plus rurale et stratégique.
+      { name: 'Kongoussi', x1: 490, y1: 25, x2: 550, y2: 85, type: 'residentiel', density: 0.2 },
     ];
     // Major road axes
     this.roadAxes = [
@@ -55,10 +58,17 @@ const City = {
     this.generateWater();
     // Nouveaux quartiers dans l'espace ajouté par l'agrandissement de la ville
     this.generateExpansionDistricts();
-    // La "Ville voisine" chevauche la zone d'extension est : on la réapplique
-    // par-dessus pour être sûr qu'elle n'a pas été écrasée par l'agrandissement.
-    const villeVoisine = this.districts.find(d => d.name === 'Ville voisine');
-    if (villeVoisine) this.fillDistrict(villeVoisine);
+    // Les villes lointaines (Bobo-Dioulasso, Kongoussi) sont au-delà de la
+    // banlieue développée : on les (re)pose proprement, avec deux axes internes
+    // pour pouvoir y circuler, en s'assurant qu'aucune extension ne les a écrasées.
+    ['Bobo-Dioulasso', 'Kongoussi'].forEach(nm => {
+      const d = this.districts.find(x => x.name === nm);
+      if (!d) return;
+      this.fillDistrict(d);
+      const mx = Math.floor((d.x1 + d.x2) / 2), my = Math.floor((d.y1 + d.y2) / 2);
+      for (let x = d.x1; x <= d.x2; x++) this.setTile(x, my, 'route');
+      for (let y = d.y1; y <= d.y2; y++) this.setTile(mx, y, 'route');
+    });
     // Generate houses
     this.generateHouses();
     // Generate POIs
@@ -81,6 +91,14 @@ const City = {
 
     // Generate missions
     this.generateMissions();
+
+    // Point d'arrivée : c'est là qu'atterrit tout nouveau joueur, près de
+    // l'aéroport (il « débarque » en ville). Case libre à côté de l'aérogare.
+    const airport = this.pois.find(p => p.type === 'aeroport' && p.name === 'Aéroport') || this.pois.find(p => p.type === 'aeroport');
+    const airportD = this.districts.find(d => d.name === 'Aéroport');
+    if (airport) this.spawnPoint = this.findFree(airport.x - 3, airport.y - 3, airport.x + 3, airport.y + 3);
+    else if (airportD) this.spawnPoint = this.findFree(airportD.x1 + 2, airportD.y1 + 2, airportD.x2 - 2, airportD.y2 - 2);
+    else this.spawnPoint = { x: 120, y: 120 };
   },
 
   setTile(x, y, t) { if (x >= 0 && y >= 0 && x < this.W && y < this.H) this.grid.set(UTIL.gridKey(x, y), t); },
@@ -117,25 +135,29 @@ const City = {
   // avec de nouveaux quartiers variés, connectés par une route principale.
   generateExpansionDistricts() {
     const OLD_W = 240, OLD_H = 240; // taille d'origine, avant agrandissement
-    if (this.W <= OLD_W && this.H <= OLD_H) return; // rien à ajouter
+    // On ne développe la banlieue que jusqu'ici : au-delà, on laisse du terrain
+    // sauvage qui ISOLE les villes lointaines (Bobo-Dioulasso, Kongoussi), pour
+    // qu'on ne s'y rende de façon réaliste que par la voie des airs.
+    const DEV = 420;
+    const devW = Math.min(this.W, DEV), devH = Math.min(this.H, DEV);
+    if (devW <= OLD_W && devH <= OLD_H) return; // rien à ajouter
     // Route principale de jonction entre l'ancienne et la nouvelle zone
-    for (let x = 0; x < this.W; x++) this.setTile(x, Math.min(OLD_H + 5, this.H - 1), 'route');
-    for (let y = 0; y < this.H; y++) this.setTile(Math.min(OLD_W + 5, this.W - 1), y, 'route');
+    for (let x = 0; x < devW; x++) this.setTile(x, Math.min(OLD_H + 5, devH - 1), 'route');
+    for (let y = 0; y < devH; y++) this.setTile(Math.min(OLD_W + 5, devW - 1), y, 'route');
     // Bande est (à droite de l'ancienne ville)
-    if (this.W > OLD_W) {
-      const bandW = this.W - OLD_W - 10;
+    if (devW > OLD_W) {
       const types = ['residentiel', 'commercial', 'industriel', 'parc'];
-      const step = Math.floor(this.H / types.length);
+      const step = Math.floor(devH / types.length);
       types.forEach((type, i) => {
-        this.addDistrict(`Extension Est ${i + 1}`, type, OLD_W + 10, i * step + 5, this.W - 5, Math.min(this.H - 5, (i + 1) * step - 5));
+        this.addDistrict(`Extension Est ${i + 1}`, type, OLD_W + 10, i * step + 5, devW - 5, Math.min(devH - 5, (i + 1) * step - 5));
       });
     }
     // Bande sud (en dessous de l'ancienne ville)
-    if (this.H > OLD_H) {
+    if (devH > OLD_H) {
       const types = ['residentiel', 'commercial', 'port'];
       const step = Math.floor(OLD_W / types.length);
       types.forEach((type, i) => {
-        this.addDistrict(`Extension Sud ${i + 1}`, type, i * step + 5, OLD_H + 10, Math.min(OLD_W - 5, (i + 1) * step - 5), this.H - 5);
+        this.addDistrict(`Extension Sud ${i + 1}`, type, i * step + 5, OLD_H + 10, Math.min(OLD_W - 5, (i + 1) * step - 5), devH - 5);
       });
     }
   },
@@ -194,20 +216,20 @@ const City = {
         this.pois.push({ id: type + '_' + i, name, type, x: pos.x, y: pos.y, floors: type === 'immeuble' ? UTIL.randInt(2, CONFIG.MAX_HEIGHT) : 1, stock: [] });
       }
     };
-    add('Commissariat', 'police', 'Centre-ville', CONFIG.POLICE_STATIONS);
-    add('Prison centrale', 'prison', 'Zone industrielle', 1);
-    add('Commissariat Sud', 'police', 'Quartier sud', 1);
-    add('Hôpital central', 'hopital', 'Centre-ville', CONFIG.HOSPITALS);
-    add('Banque', 'banque', 'Centre-ville', 2);
-    add('QG des missions extrêmes', 'qg_extreme', 'Zone industrielle', 1);
-    add('Auto-école', 'auto_ecole', 'Centre-ville', 1);
+    add('Commissariat', 'police', 'Koulouba', CONFIG.POLICE_STATIONS);
+    add('Prison centrale', 'prison', 'Zone industrielle de Kossodo', 1);
+    add('Commissariat de Gounghin', 'police', 'Gounghin', 1);
+    add('Hôpital central', 'hopital', 'Koulouba', CONFIG.HOSPITALS);
+    add('Banque', 'banque', 'Koulouba', 2);
+    add('QG des missions extrêmes', 'qg_extreme', 'Zone industrielle de Kossodo', 1);
+    add('Auto-école', 'auto_ecole', 'Koulouba', 1);
     add('École de pilotage', 'ecole_pilotage', 'Aéroport', 1);
     // Lieux emblématiques de la cité.
-    add('Cour Pénale', 'tribunal', 'Centre-ville', 1);
-    add('Monument de la Musique', 'monument', 'Centre-ville', 1);
-    add('Gouvernorat', 'gouvernorat', 'Centre-ville', 1);
-    add('Morgue', 'morgue', 'Centre-ville', 1);
-    add('Cimetière', 'cimetiere', 'Quartier sud', 1);
+    add('Cour Pénale', 'tribunal', 'Koulouba', 1);
+    add('Monument de la Musique', 'monument', 'Koulouba', 1);
+    add('Gouvernorat', 'gouvernorat', 'Koulouba', 1);
+    add('Morgue', 'morgue', 'Koulouba', 1);
+    add('Cimetière', 'cimetiere', 'Gounghin', 1);
     // Profil de sécurité propre à chaque banque : ce n'est jamais la même
     // routine d'un braquage à l'autre. Révélé au joueur via le repérage.
     this.pois.filter(p => p.type === 'banque').forEach(p => {
@@ -215,36 +237,54 @@ const City = {
       p.guards = UTIL.randInt(0, 3);
       p.cameras = Math.random() < 0.6;
     });
-    add('Armurerie', 'armurerie', 'Centre-ville', 2);
-    add('Armurerie sud', 'armurerie', 'Quartier sud', 1);
-    add('Supermarché', 'magasin', 'Centre-ville', 3);
-    add('Marché', 'magasin', 'Quartier sud', 2);
-    add('Restaurant', 'restaurant', 'Centre-ville', 4);
-    add('Restaurant sud', 'restaurant', 'Quartier sud', 3);
-    add('Boutique de vêtements', 'vetements', 'Centre-ville', 3);
-    add('Boutique de vêtements sud', 'vetements', 'Quartier sud', 2);
-    add('Boutique de vêtements résidentielle', 'vetements', 'Résidentiel Nord', 1);
-    add('Pharmacie', 'pharmacie', 'Centre-ville', 3);
-    add('Pharmacie résidentielle', 'pharmacie', 'Résidentiel Nord', 1);
-    add('Concessionnaire', 'concessionnaire', 'Quartier sud', 2);
+    add('Armurerie', 'armurerie', 'Koulouba', 2);
+    add('Armurerie de Gounghin', 'armurerie', 'Gounghin', 1);
+    add('Supermarché', 'magasin', 'Koulouba', 3);
+    add('Marché de Gounghin', 'magasin', 'Gounghin', 2);
+    add('Restaurant', 'restaurant', 'Koulouba', 4);
+    add('Restaurant de Gounghin', 'restaurant', 'Gounghin', 3);
+    add('Boutique de vêtements', 'vetements', 'Koulouba', 3);
+    add('Boutique de vêtements de Gounghin', 'vetements', 'Gounghin', 2);
+    add('Boutique de vêtements de Tampouy', 'vetements', 'Tampouy', 1);
+    add('Pharmacie', 'pharmacie', 'Koulouba', 3);
+    add('Pharmacie de Tampouy', 'pharmacie', 'Tampouy', 1);
+    add('Concessionnaire', 'concessionnaire', 'Gounghin', 2);
     add('Aéroport', 'aeroport', 'Aéroport', 1);
     add('Héliport', 'heliport', 'Aéroport', 1);
-    add('Héliport centre', 'heliport', 'Centre-ville', 1);
-    add('Port', 'port', 'Portuaire', 2);
-    add('Station-service', 'station_essence', 'Quartier sud', 3);
-    add('Station-service centre', 'station_essence', 'Centre-ville', 2);
-    add('Garage', 'garage', 'Zone industrielle', 2);
-    add('Entrepôt', 'entrepot', 'Zone industrielle', 4);
-    add('Usine', 'usine', 'Zone industrielle', 3);
-    add('Bar', 'bar', 'Quartier sud', 2);
-    add('Bar centre', 'bar', 'Centre-ville', 2);
-    add('Marché noir', 'marche_noir', 'Gang territoire', 1);
-    add('Marché noir international', 'marche_noir_lointain', 'Ville voisine', 1);
-    add('Immeuble', 'immeuble', 'Centre-ville', 6);
-    add('Immeuble résidentiel', 'immeuble', 'Résidentiel Nord', 4);
-    add('Immeuble résidentiel Est', 'immeuble', 'Résidentiel Est', 3);
+    add('Héliport de Koulouba', 'heliport', 'Koulouba', 1);
+    add('Port du barrage', 'port', 'Zone du barrage', 2);
+    add('Station-service', 'station_essence', 'Gounghin', 3);
+    add('Station-service de Koulouba', 'station_essence', 'Koulouba', 2);
+    add('Garage', 'garage', 'Zone industrielle de Kossodo', 2);
+    add('Entrepôt', 'entrepot', 'Zone industrielle de Kossodo', 4);
+    add('Usine', 'usine', 'Zone industrielle de Kossodo', 3);
+    add('Bar', 'bar', 'Gounghin', 2);
+    add('Bar de Koulouba', 'bar', 'Koulouba', 2);
+    add('Marché noir', 'marche_noir', 'Cissin', 1);
+    add('Marché noir international', 'marche_noir_lointain', 'Bobo-Dioulasso', 1);
+    add('Immeuble', 'immeuble', 'Koulouba', 6);
+    add('Immeuble de Tampouy', 'immeuble', 'Tampouy', 4);
+    add('Immeuble de Ouaga 2000', 'immeuble', 'Ouaga 2000', 3);
     add('Tour de guet', 'tour', 'Zone minière', 2);
-    add('Tour de guet gang', 'tour', 'Gang territoire', 2);
+    add('Tour de guet de Cissin', 'tour', 'Cissin', 2);
+    // --- Bobo-Dioulasso (2e ville) : commerce, transport, un peu de tout ---
+    add('Aéroport de Bobo-Dioulasso', 'aeroport', 'Bobo-Dioulasso', 1);
+    add('Héliport de Bobo-Dioulasso', 'heliport', 'Bobo-Dioulasso', 1);
+    add('Grand marché de Bobo', 'magasin', 'Bobo-Dioulasso', 2);
+    add('Restaurant de Bobo', 'restaurant', 'Bobo-Dioulasso', 2);
+    add('Station-service de Bobo', 'station_essence', 'Bobo-Dioulasso', 1);
+    add('Garage de Bobo', 'garage', 'Bobo-Dioulasso', 1);
+    add('Boutique de vêtements de Bobo', 'vetements', 'Bobo-Dioulasso', 1);
+    add('Pharmacie de Bobo', 'pharmacie', 'Bobo-Dioulasso', 1);
+    add('Banque de Bobo', 'banque', 'Bobo-Dioulasso', 1);
+    add('Concessionnaire de Bobo', 'concessionnaire', 'Bobo-Dioulasso', 1);
+    // --- Kongoussi (3e ville, plus rurale et stratégique) ---
+    add('Héliport de Kongoussi', 'heliport', 'Kongoussi', 1);
+    add('Marché de Kongoussi', 'magasin', 'Kongoussi', 1);
+    add('Station-service de Kongoussi', 'station_essence', 'Kongoussi', 1);
+    add('Garage de Kongoussi', 'garage', 'Kongoussi', 1);
+    add('Restaurant de Kongoussi', 'restaurant', 'Kongoussi', 1);
+    add('Pharmacie de Kongoussi', 'pharmacie', 'Kongoussi', 1);
     // Populate shop stocks
     for (const p of this.pois) {
       if (p.type === 'magasin') p.stock = this.generateStock('food+general', 40);

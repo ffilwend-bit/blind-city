@@ -1036,17 +1036,22 @@ function startGame(seed) {
   } else {
     try { Game.load(); } catch (e) { console.error('Game.load() a échoué :', e); }
   }
+  // Nouveau joueur (aucune sauvegarde restaurée) : il ATTERRIT au point
+  // d'arrivée, près de l'aéroport. Un joueur qui recharge sa partie, lui, garde
+  // la position qu'il avait quittée.
+  if (!Game._loadedFromSave && City.spawnPoint) { Game.x = City.spawnPoint.x; Game.y = City.spawnPoint.y; }
   // Ensure player is on free tile
   try {
     let guard = 0;
-    while (City.isSolid(Game.x, Game.y) && guard < 500) { Game.x = UTIL.randInt(110, 130); Game.y = UTIL.randInt(110, 130); guard++; }
+    const fallback = () => { const s = City.spawnPoint || { x: 120, y: 120 }; Game.x = UTIL.clamp(s.x + UTIL.randInt(-3, 3), 0, City.W - 1); Game.y = UTIL.clamp(s.y + UTIL.randInt(-3, 3), 0, City.H - 1); };
+    while (City.isSolid(Game.x, Game.y) && guard < 500) { fallback(); guard++; }
     // Filet supplémentaire : si le joueur charge une partie où les 4 cases
     // adjacentes sont TOUTES solides (encerclé, impossible de bouger), on le
     // repositionne aussi — sinon il serait coincé sans issue.
     const surrounded = () => [[1,0],[-1,0],[0,1],[0,-1]].every(([dx,dy]) => City.isSolid(Game.x + dx, Game.y + dy));
     guard = 0;
-    while (surrounded() && guard < 500) { Game.x = UTIL.randInt(110, 130); Game.y = UTIL.randInt(110, 130); guard++; }
-  } catch (e) { console.error('Placement initial du joueur en échec :', e); Game.x = 120; Game.y = 120; }
+    while (surrounded() && guard < 500) { fallback(); guard++; }
+  } catch (e) { console.error('Placement initial du joueur en échec :', e); const s = City.spawnPoint || { x: 120, y: 120 }; Game.x = s.x; Game.y = s.y; }
   // Numéro de téléphone principal : généré une seule fois, à la toute
   // première partie (ou pour une ancienne sauvegarde qui n'en a pas encore).
   if (!Array.isArray(Game.phones) || !Game.phones.length) {
@@ -1064,7 +1069,8 @@ function startGame(seed) {
     const repere = Platform.isMobile
       ? `Vous jouez sur ${Platform.name}. Pour vous déplacer, glissez un doigt et gardez-le appuyé : vers le haut avancer, vers le bas reculer, vers la gauche et la droite tourner. Un glissement rapide fait un seul pas. Pour vous repérer : balayez deux doigts vers le haut pour la boussole, ou deux doigts vers le bas pour le radar des lieux. Pour entendre la liste complète des gestes, tapez quatre fois avec deux doigts.`
       : `Pour vous repérer : appuyez sur Maj plus C pour une visite guidée de la ville, F pour balayer les lieux autour de vous, C pour la boussole, et Maj plus B pour activer les balises sonores.`;
-    announce(`Vous êtes maintenant dans Blind City. À partir de maintenant, le jeu décrit tout à voix haute : veuillez désactiver votre lecteur d'écran, VoiceOver, TalkBack ou NVDA, pour ne pas entendre deux voix en même temps. Bienvenue, ${p.firstName} ${p.lastName}. ${repere} Les champs de texte sont lus par le jeu lui-même. Rendez-vous au commissariat pour votre enregistrement avant de choisir un métier.`, 'assertive');
+    const arrivee = !Game._loadedFromSave ? 'Vous venez d\'arriver à l\'aéroport de la capitale. ' : '';
+    announce(`Vous êtes maintenant dans Blind City, la capitale. ${arrivee}À partir de maintenant, le jeu décrit tout à voix haute : veuillez désactiver votre lecteur d'écran, VoiceOver, TalkBack ou NVDA, pour ne pas entendre deux voix en même temps. Bienvenue, ${p.firstName} ${p.lastName}. ${repere} Les champs de texte sont lus par le jeu lui-même. Rendez-vous au commissariat pour votre enregistrement avant de choisir un métier.`, 'assertive');
     setTimeout(() => Game.help(), 1500);
   } catch (e) { console.error('Annonce de bienvenue en échec :', e); }
   // Intervals : protégés eux aussi, pour que gameLoop() démarre toujours ci-dessous
