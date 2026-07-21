@@ -414,11 +414,13 @@ const Game = {
   ridingWith: null,
   getNearbyRemoteDriver() {
     if (!Net.connected) return null;
+    // Rayon large (8 cases ~ 32 m) : le taxi qu'on a appelé s'arrête souvent à
+    // quelques pas, pas pile sur nous.
     let best = null, bd = Infinity;
     for (const p of Net.remotePlayers.values()) {
       if (!p.inVehicle) continue;
       const d = UTIL.dist(p, this);
-      if (d < 5 && d < bd) { bd = d; best = p; }
+      if (d < 8 && d < bd) { bd = d; best = p; }
     }
     return best;
   },
@@ -756,10 +758,14 @@ const Game = {
   // 4 demi-tour, 5 franchement à gauche, 6 à gauche, 7 légèrement à gauche.
   _turnInstruction(diff, meters) {
     diff = ((diff % 8) + 8) % 8;
-    if (diff === 0) return `Tout droit, ${meters} mètres`;
+    // Un écart de 45° ou moins (diff 0, 1 ou 7) est traité comme « tout droit » :
+    // avec la rotation fine à 45°, un simple dépassement d'un cran faisait sinon
+    // dire « légèrement à gauche » puis « légèrement à droite » en boucle (le
+    // zigzag signalé). On ne demande un virage que pour un écart d'au moins 90°.
+    if (diff === 0 || diff === 1 || diff === 7) return `Tout droit, ${meters} mètres`;
     if (diff === 4) return `Faites demi-tour, puis ${meters} mètres`;
     const cote = diff <= 3 ? 'à droite' : 'à gauche';
-    const nuance = (diff === 1 || diff === 7) ? 'légèrement ' : (diff === 3 || diff === 5) ? 'franchement ' : '';
+    const nuance = (diff === 3 || diff === 5) ? 'franchement ' : '';
     return `Tournez ${nuance}${cote}, puis ${meters} mètres`;
   },
   // (Re)calcule le chemin vers la destination quand c'est nécessaire : au

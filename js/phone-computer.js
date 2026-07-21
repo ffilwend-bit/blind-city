@@ -68,6 +68,12 @@ const Phone = {
   renderApp(name) {
     this._appRenderedAt = Date.now(); // horodatage anti-appel fantôme (voir call())
     this._skipAutoFocus = false;
+    // Les cartes / listes de lieux du téléphone réutilisent désormais le système
+    // de menus à cartes, pleinement accessible au clavier ET au doigt (le même
+    // que « Carte » dans le menu principal). On ferme le téléphone et on ouvre
+    // le menu correspondant, au lieu d'une liste à part moins accessible.
+    if (name === 'map' || name === 'citymap') { this.closePhone(); if (typeof openMapMenu === 'function') openMapMenu(); return; }
+    if (name === 'places') { this.closePhone(); if (typeof openNearestMenu === 'function') openNearestMenu(); return; }
     el('phoneHome').style.display = 'none'; el('phoneApp').style.display = 'block'; const a = el('phoneApp'); a.innerHTML = '';
     if (name === 'contacts') {
       a.innerHTML = '<h3>👥 Contacts</h3><ul class="contact-list" id="phoneContactList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';

@@ -201,6 +201,7 @@ function openRoleMenu() {
   });
 }
 function openNearestMenu() {
+  ensureMenuOpen();
   el('menuTitle').textContent = 'Lieux utiles les plus proches';
   const types = [
     { type: 'station_essence', label: '⛽ Station-service (essence + recharge électrique)' },
@@ -216,8 +217,8 @@ function openNearestMenu() {
   });
   renderMenu(items, (it) => {
     const poi = City.pois.find(p => p.id === it.id);
-    if (poi) { Game.setAutoDrive(poi.type, poi.name); announce(`Direction ${poi.name}.`, 'assertive'); }
     closeMenu();
+    if (poi) { announce(`Direction ${poi.name}.`, 'assertive'); guideToPoi(poi); }
   });
 }
 function openAdminMenu() {
@@ -636,12 +637,40 @@ function openShopsMenu() {
   const nearby = City.pois.filter(p => UTIL.dist(p, Game) < 40).sort((a, b) => UTIL.dist(a, Game) - UTIL.dist(b, Game)).slice(0, 10);
   const items = nearby.map(p => ({ id: p.id, title: p.name, desc: `${p.type}, ${Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE)} m.` }));
   if (!items.length) items.push({ id: 'none', title: 'Aucune boutique proche', desc: 'Déplacez-vous vers le centre-ville ou le sud.' });
-  renderMenu(items, (it) => { const poi = City.pois.find(p => p.id === it.id); if (poi) Game.enterPOI(poi); closeMenu(); });
+  renderMenu(items, (it) => {
+    if (it.id === 'none') { closeMenu(); return; }
+    const poi = City.pois.find(p => p.id === it.id);
+    closeMenu();
+    // Choisir une boutique GUIDE désormais vers elle (au lieu de ne rien faire
+    // si on n'est pas déjà collé dessus).
+    guideToPoi(poi);
+  });
+}
+// Ouvre l'overlay de menu s'il était fermé (ex. appelé depuis le téléphone),
+// en repartant d'une pile de navigation propre. S'il est déjà ouvert (menu
+// imbriqué), on ne touche à rien pour préserver la fonction Retour.
+function ensureMenuOpen() {
+  if (el('menuOverlay').style.display !== 'flex') {
+    MenuNav.stack = []; MenuNav.navigating = false;
+    el('menuOverlay').style.display = 'flex';
+  }
+}
+// Guide vers un lieu : déjà sur place, on entre ; en véhicule, conduite auto ;
+// à pied, guidage vocal pas-à-pas qui contourne les murs.
+function guideToPoi(poi) {
+  if (!poi) return;
+  if (UTIL.dist(poi, Game) < 3) Game.enterPOI(poi);
+  else if (Game.inVehicle) Game.setAutoDrive(poi.type, poi.name);
+  else Game.setGuidance({ name: poi.name, x: poi.x, y: poi.y });
 }
 function openMapMenu() {
+  ensureMenuOpen();
   el('menuTitle').textContent = 'Carte et lieux';
-  const items = City.pois.map(p => ({ id: p.id, title: p.name, desc: `${p.type}, ${Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE)} m, ${UTIL.bearing(p.x - Game.x, p.y - Game.y)}.` })).slice(0, 15);
-  renderMenu(items, (it) => { const poi = City.pois.find(p => p.id === it.id); if (poi) Game.setAutoDrive(poi.type, poi.name); closeMenu(); });
+  // TOUS les lieux, du plus proche au plus loin (avant : 15 seulement), et
+  // choisir un lieu GUIDE vers lui (à pied par défaut).
+  const items = City.pois.map(p => ({ p, d: UTIL.dist(p, Game) })).sort((a, b) => a.d - b.d)
+    .map(({ p, d }) => ({ id: p.id, title: p.name, desc: `${SERVICE_TYPES[p.type] || DISTRICT_TYPES[p.type] || p.type}, ${Math.round(d * CONFIG.METERS_PER_TILE)} m, ${UTIL.bearing(p.x - Game.x, p.y - Game.y)}.` }));
+  renderMenu(items, (it) => { const poi = City.pois.find(p => p.id === it.id); closeMenu(); guideToPoi(poi); });
 }
 
 /* ============================================================
@@ -867,13 +896,20 @@ function setupInput() {
   }, { passive: false });
 
   document.body.addEventListener('touchend', (e) => {
-    if (!inGame()) return;
+    const allUp = e.touches.length === 0;
+    const wasHolding = !!gHoldDir;
+    // Filet anti « déplacement qui ne s'arrête jamais » : dès que tous les doigts
+    // sont levés, on coupe TOUJOURS le déplacement continu — même si un overlay
+    // s'est ouvert entre-temps (inGame() faux), sinon le personnage continuait
+    // d'avancer ou de tourner tout seul en boucle.
+    if (allUp && wasHolding) gStopHold();
+    if (!inGame()) { if (allUp) { gActive = false; gMaxFingers = 0; } return; }
     if (e.touches.length > 0) return; // attendre que tous les doigts soient levés
     if (!gActive) return;
     gActive = false;
     const fingers = gMaxFingers, moved = gMoved, duration = Date.now() - gStartT;
     gMaxFingers = 0;
-    if (gHoldDir) { gStopHold(); return; } // déplacement continu terminé
+    if (wasHolding) return; // déplacement continu terminé
     const end = e.changedTouches && e.changedTouches[0];
     const dx = end ? end.clientX - gStartX : 0, dy = end ? end.clientY - gStartY : 0;
     const isSwipe = Math.abs(dx) > SW || Math.abs(dy) > SW;
@@ -918,6 +954,14 @@ function setupInput() {
   }, { passive: false });
 
   document.body.addEventListener('touchcancel', () => { gStopHold(); gActive = false; gMaxFingers = 0; }, { passive: true });
+
+  // Filet de sécurité clavier : si la fenêtre perd le focus (Alt-Tab, notification,
+  // changement d'onglet...), un keyup peut être manqué et une flèche resterait
+  // "enfoncée" dans Game.keys — le personnage avancerait/tournerait alors tout
+  // seul sans fin. On vide les touches et on coupe tout déplacement continu.
+  const stopAllContinuous = () => { Game.keys.clear(); gStopHold(); };
+  window.addEventListener('blur', stopAllContinuous);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopAllContinuous(); });
 
   // Prevent zoom
   document.addEventListener('gesturestart', (e) => e.preventDefault());
