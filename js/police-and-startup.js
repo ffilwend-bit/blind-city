@@ -5,10 +5,16 @@ function setupExtraInput() {
     if (e.repeat) return;
     const key = e.key.toLowerCase();
     const ctrl = e.ctrlKey, alt = e.altKey, shift = e.shiftKey;
-    if (ctrl && alt && shift && key === 'p') { e.preventDefault(); openAdminMenu(); return; }
-    if (key === 'p' && !ctrl && !alt) { e.preventDefault(); Phone.openPhone(); }
-    else if (key === 'k' && !ctrl && !alt) { e.preventDefault(); Computer.boot(); }
-    else if (key === 'b' && !ctrl && !alt) { e.preventDefault(); Game.announceInventory(); }
+    // Panneau d'administration. On teste aussi e.code (KeyP) car sur un clavier
+    // AZERTY, Ctrl+Alt agit comme AltGr et change e.key : "p" n'était alors
+    // jamais reconnu.
+    if (ctrl && alt && shift && (key === 'p' || e.code === 'KeyP')) { e.preventDefault(); openAdminMenu(); return; }
+    // IMPORTANT : les raccourcis "touche seule" excluent aussi Maj, sinon
+    // Maj+P / Maj+B étaient capturés ici (téléphone / inventaire) au lieu
+    // d'atteindre plus bas Maj+P (appareils de poche) et Maj+B (balises).
+    if (key === 'p' && !ctrl && !alt && !shift) { e.preventDefault(); Phone.openPhone(); }
+    else if (key === 'k' && !ctrl && !alt && !shift) { e.preventDefault(); Computer.boot(); }
+    else if (key === 'b' && !ctrl && !alt && !shift) { e.preventDefault(); Game.announceInventory(); }
     else if (key === 'l' && !ctrl && !alt) { e.preventDefault(); Game.announceLocation(); }
     else if (ctrl && key === 'l') { e.preventDefault(); Game.toggleVehicleLock(); }
     else if (ctrl && key === 'i') { e.preventDefault(); Game.announceMyId(); }

@@ -862,6 +862,13 @@ const Game = {
     const gScore = new Float64Array(W * H);
     const closed = new Uint8Array(W * H);
     const inOpen = new Uint8Array(W * H);
+    // Direction empruntée pour ARRIVER à chaque case (0=est,1=ouest,2=sud,
+    // 3=nord) : sert à pénaliser légèrement un changement de direction, pour
+    // que l'algorithme préfère une ligne droite à un chemin en escalier (même
+    // distance totale, mais ça donnait "gauche, droite, gauche, droite" en
+    // boucle à la voix au lieu d'un "tout droit" qui dure).
+    const dirAt = new Int8Array(W * H).fill(-1);
+    const TURN_PENALTY = 0.35;
     const heapF = [], heapI = [];
     const push = (f, idx) => {
       heapF.push(f); heapI.push(idx); let c = heapF.length - 1;
@@ -888,13 +895,14 @@ const Game = {
       closed[cur] = 1;
       if (++processed > MAX) return null; // trop coûteux : repli sur guidage direct
       const cx = cur % W, cy = (cur / W) | 0, g0 = gScore[cur];
-      const cand = [[cx + 1, cy, cur + 1], [cx - 1, cy, cur - 1], [cx, cy + 1, cur + W], [cx, cy - 1, cur - W]];
+      const cand = [[cx + 1, cy, cur + 1, 0], [cx - 1, cy, cur - 1, 1], [cx, cy + 1, cur + W, 2], [cx, cy - 1, cur - W, 3]];
       for (let k = 0; k < 4; k++) {
-        const nx = cand[k][0], ny = cand[k][1], ni = cand[k][2];
+        const nx = cand[k][0], ny = cand[k][1], ni = cand[k][2], dir = cand[k][3];
         if (nx < 0 || ny < 0 || nx >= W || ny >= H || closed[ni] || !walkable(nx, ny)) continue;
-        const ng = g0 + 1;
+        const turnCost = (dirAt[cur] !== -1 && dirAt[cur] !== dir) ? TURN_PENALTY : 0;
+        const ng = g0 + 1 + turnCost;
         if (inOpen[ni] && ng >= gScore[ni]) continue;
-        gScore[ni] = ng; came[ni] = cur;
+        gScore[ni] = ng; came[ni] = cur; dirAt[ni] = dir;
         push(ng + Math.abs(nx - goal.x) + Math.abs(ny - goal.y), ni); inOpen[ni] = 1;
       }
     }

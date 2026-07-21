@@ -131,7 +131,7 @@ const StaffMode = {
       announce('Mode staff désactivé.', 'assertive'); updateHud();
       return;
     }
-    if (!Net.connected) { announce('Le mode staff nécessite d\'être connecté au serveur.', 'assertive'); return; }
+    if (!Net.connected) { announce('Le mode staff ne fonctionne qu\'en multijoueur, connecté au serveur avec un compte. Vous êtes actuellement en solo (hors ligne) : rechargez le jeu et, à l\'écran d\'accueil, choisissez de créer ou d\'utiliser un compte au lieu de « jouer seul », pour vous connecter au serveur. Ensuite seulement, le code administrateur sera vérifié.', 'assertive'); return; }
     if (!inputCode) { announce('Code administrateur requis.', 'assertive'); return; }
     Net.send({ type: 'staff_auth', code: inputCode });
     announce('Vérification du code...', 'polite');
