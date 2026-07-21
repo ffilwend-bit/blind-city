@@ -83,16 +83,23 @@ async function supabaseSave(key, value) {
 }
 
 const STAFF_FILE = path.join(__dirname, 'staff-data.json');
-// Codes administrateur : lus depuis les variables d'environnement (jamais en
-// clair dans le code, pour ne pas les exposer sur un dépôt public). Définissez
-// STAFF_CODE_PRINCIPAL et STAFF_CODE_MODERATEUR sur votre hébergeur (Render,
-// Railway...) ou dans staff-data.json. Les valeurs par défaut ci-dessous ne
-// sont que des exemples à changer — elles ne donnent aucun accès réel.
+// Codes administrateur AUTORITAIRES : ils ont la PRIORITÉ absolue. On prend la
+// variable d'environnement si elle est définie (recommandé pour garder le code
+// secret), sinon la valeur ci-dessous. Ces codes écrasent toujours ceux qui
+// pourraient être stockés dans staff-data.json ou dans Supabase — ainsi le code
+// choisi ici fonctionne à coup sûr, sans être bloqué par une ancienne valeur.
+const AUTH_CODES = {
+  principal: process.env.STAFF_CODE_PRINCIPAL || 'admin200016',
+  moderateur: process.env.STAFF_CODE_MODERATEUR || 'Admin002061',
+};
+// Réimpose les codes autoritaires par-dessus tout état chargé (fichier/Supabase).
+function enforceAuthCodes() {
+  if (!staffData.codes) staffData.codes = {};
+  staffData.codes.principal = AUTH_CODES.principal;
+  staffData.codes.moderateur = AUTH_CODES.moderateur;
+}
 let staffData = {
-  codes: {
-    principal: process.env.STAFF_CODE_PRINCIPAL || 'changez-ce-code-principal',
-    moderateur: process.env.STAFF_CODE_MODERATEUR || 'changez-ce-code-moderateur',
-  },
+  codes: { principal: AUTH_CODES.principal, moderateur: AUTH_CODES.moderateur },
   bans: [], cityEdits: [], worldEdits: [], morgue: [], graves: [],
 };
 // Garantit que toutes les listes attendues existent (compatibilité avec un
@@ -107,6 +114,7 @@ try {
   const loaded = JSON.parse(raw);
   if (loaded && loaded.codes) { staffData = loaded; ensureStaffArrays(); }
 } catch (e) { /* fichier absent au premier démarrage : on garde les valeurs par défaut ci-dessus */ }
+enforceAuthCodes(); // priorité aux codes autoritaires, quoi qu'il ait été chargé
 function saveStaffData() {
   // En mode Supabase, on n'écrit que si le chargement initial a réussi
   // (persistenceReady), pour ne jamais écraser la base avec un état incomplet.
@@ -1005,6 +1013,8 @@ async function loadFromSupabase() {
     if (st && st.codes) {
       staffData = st;
       ensureStaffArrays();
+      enforceAuthCodes(); // les codes autoritaires priment sur ceux stockés dans Supabase
+      await supabaseSave('staff', staffData); // et on réécrit pour que la base reflète les bons codes
     } else {
       // Tout premier démarrage : on transfère les codes/données du fichier vers Supabase.
       await supabaseSave('staff', staffData);
