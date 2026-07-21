@@ -3,6 +3,15 @@ function makeInputSpeakable(input, label) {
   input._speakableWired = true;
   const fieldLabel = label || input.getAttribute('aria-label') || input.placeholder || 'Champ de texte';
   let wordBuffer = '';
+  // Prononciation d'un caractère isolé : on distingue clairement les MAJUSCULES
+  // (sinon "A" et "a" s'entendent pareil, impossible de vérifier un code ou un
+  // mot de passe sensible à la casse), et on nomme l'espace.
+  const speakChar = (ch) => {
+    if (ch === undefined || ch === null) return;
+    if (ch === ' ') { speak('espace', 'interrupt'); return; }
+    const isUpper = ch.length === 1 && ch !== ch.toLowerCase() && ch === ch.toUpperCase();
+    speak(isUpper ? `majuscule ${ch}` : ch, 'interrupt');
+  };
   input.addEventListener('focus', () => {
     wordBuffer = '';
     const content = input.value ? `Contenu actuel : ${input.value}.` : 'Vide.';
@@ -17,7 +26,7 @@ function makeInputSpeakable(input, label) {
         const pos = input.selectionStart ?? 0;
         const ch = e.key === 'ArrowRight' ? input.value[pos - 1] : input.value[pos];
         if (ch === undefined) speak(e.key === 'ArrowRight' ? 'fin du texte' : 'début du texte', 'interrupt');
-        else speak(ch === ' ' ? 'espace' : ch, 'interrupt');
+        else speakChar(ch);
       }, 0);
       return;
     }
@@ -41,7 +50,7 @@ function makeInputSpeakable(input, label) {
     } else if (e.key.length === 1) {
       // Une seule vraie touche de caractère (pas Shift, Tab, flèches...)
       wordBuffer += e.key;
-      speak(e.key === ' ' ? 'espace' : e.key, 'interrupt');
+      speakChar(e.key);
     }
   });
   // Relit tout le champ sur demande (utile pour vérifier avant d'envoyer).

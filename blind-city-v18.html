@@ -329,10 +329,10 @@ body {
       <div class="wiz-progress" id="wizAccountProgress">Vos identifiants</div>
       <div class="wiz-step-title" tabindex="-1">🔑 Vos identifiants</div>
       <label class="wiz-field">Identifiant
-        <input type="text" id="accountUsername" placeholder="identifiant" autocomplete="off">
+        <input type="text" id="accountUsername" placeholder="identifiant" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
       </label>
       <label class="wiz-field">Mot de passe
-        <input type="password" id="accountPassword" placeholder="mot de passe" autocomplete="off">
+        <input type="password" id="accountPassword" placeholder="mot de passe" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
       </label>
       <p style="font-size:0.75rem; color:var(--muted); margin-top:8px;">Notez-les bien : ils vous permettront de retrouver votre progression sur n'importe quel appareil.</p>
       <button type="button" id="forgotPasswordBtn" class="phone-btn" style="margin-top:10px;" hidden>🔓 Mot de passe oublié ?</button>
@@ -361,7 +361,7 @@ body {
         </select>
       </label>
       <label class="wiz-field">Réponse à la question de sécurité
-        <input type="text" id="securityAnswer" placeholder="réponse" autocomplete="off">
+        <input type="text" id="securityAnswer" placeholder="réponse" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
       </label>
       <div class="wiz-nav">
         <button type="button" class="back" data-wiz-back="wizStepAccount">◀ Retour</button>
@@ -493,7 +493,7 @@ body {
   <div class="freq-box">
     <h3 id="textPromptTitle">Saisie</h3>
     <p id="textPromptDesc" style="font-size:0.78rem; color:var(--muted); margin-bottom:4px;"></p>
-    <input type="text" id="textPromptInput" autocomplete="off" aria-label="Champ de saisie">
+    <input type="text" id="textPromptInput" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Champ de saisie">
     <div class="freq-row">
       <button class="phone-btn" id="textPromptConfirm">✅ Valider</button>
       <button class="phone-btn" id="textPromptCancel">❌ Annuler</button>
