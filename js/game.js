@@ -574,16 +574,25 @@ const Game = {
   updateBeacons() {
     if (!this.beaconsOn || this.inVehicle) return;
     const now = Date.now();
-    // Le lieu le plus proche pilote la cadence.
-    let nearest = null, nd = Infinity;
-    for (const p of City.pois) { const d = UTIL.dist(p, this); if (d < nd) { nd = d; nearest = p; } }
-    if (!nearest || nd > 30) return;
-    // Cadence : de ~1200 ms (loin) à ~200 ms (très près).
-    const interval = Math.max(200, 200 + (nd / 30) * 1000);
+    // Source de la balise : la DESTINATION guidée si un guidage est actif (vraie
+    // balise de ralliement, jusqu'à 500 m), sinon le lieu le plus proche (30 m).
+    let target = null, nd = Infinity;
+    if (this.guidanceTarget) { target = this.guidanceTarget; nd = UTIL.dist(target, this); }
+    else { for (const p of City.pois) { const d = UTIL.dist(p, this); if (d < nd) { nd = d; target = p; } } }
+    const maxRange = this.guidanceTarget ? 500 : 30;
+    if (!target || nd > maxRange) return;
+    // Cadence : plus c'est proche, plus les bips s'enchaînent (200 ms près,
+    // ~1200 ms loin), comme un détecteur qui s'affole à l'approche.
+    const interval = Math.max(200, 200 + (Math.min(nd, 40) / 40) * 1000);
     if (now - this._lastBeacon < interval) return;
     this._lastBeacon = now;
-    const pan = this.panForPoint(nearest.x, nearest.y);
-    const freq = 500 + Math.max(0, (30 - nd)) * 20;
+    // Cadrage directionnel : le pan gauche/droite place la cible dans l'espace,
+    // et la hauteur du son dit si elle est DEVANT (aigu) ou DERRIÈRE (grave). On
+    // tourne jusqu'à ce que le bip soit à la fois centré ET aigu : on est pile
+    // en face. Un vrai repère sonore bien cadré, pas juste un bip.
+    const pan = this.panForPoint(target.x, target.y);
+    const facing = 1 - this.relativeAngle(target.x, target.y) / Math.PI; // 1 devant, 0 derrière
+    const freq = 380 + facing * 620 + Math.max(0, (30 - Math.min(nd, 30))) * 6;
     Audio.tone({ freq, type: 'sine', duration: 0.08, gain: 0.07, pan });
   },
 
@@ -602,24 +611,56 @@ const Game = {
   guidanceAxis: null,
   setGuidance(poi) {
     this.guidanceTarget = poi;
-    this.guidanceAxis = null;
+    this.guidanceAxis = null; this.guidanceFollowId = null;
     this.guidancePath = null; this._pathGoal = null; // force un nouveau calcul de chemin
     announce(`Guidage activé vers ${poi.name}. Je vous indique la direction au fur et à mesure, en contournant les obstacles.`, 'interrupt');
     this._lastGuidanceMsg = 0;
     this.updateGuidance(true);
   },
   stopGuidance() {
-    if (this.guidanceTarget) { announce('Guidage arrêté.', 'interrupt'); this.guidanceTarget = null; this.guidanceAxis = null; }
+    if (this.guidanceTarget) { announce('Guidage arrêté.', 'interrupt'); this.guidanceTarget = null; this.guidanceAxis = null; this.guidanceFollowId = null; this.guidancePath = null; this._pathGoal = null; }
+  },
+  // Guidage automatique EN DIRECT vers un joueur réel qui a partagé sa position
+  // GPS avec vous. Le chemin (qui contourne les murs) se met à jour au fur et à
+  // mesure qu'il se déplace, jusqu'à ce que vous le rejoigniez.
+  followPlayerGPS(id, name) {
+    const live = Net.remotePlayers.get(id);
+    if (!live) return announce(`${name} n'est pas joignable pour le moment.`, 'assertive');
+    this.guidanceFollowId = id;
+    this.guidanceTarget = { name, x: live.x, y: live.y };
+    this.guidanceAxis = null; this.guidancePath = null; this._pathGoal = null;
+    announce(`Guidage automatique vers ${name}. Je vous mène jusqu'à cette personne en contournant les obstacles ; le trajet s'adapte si elle bouge.`, 'interrupt');
+    this._lastGuidanceMsg = 0;
+    this.updateGuidance(true);
+  },
+  // Envoie votre position GPS à un joueur réel : il pourra se faire guider
+  // vocalement, automatiquement, jusqu'à vous.
+  shareMyGPS(targetId, targetName) {
+    if (!Net.connected) return announce('Nécessite une connexion au serveur multijoueur.', 'assertive');
+    if (!targetId) return announce('Aucune personne sélectionnée.', 'assertive');
+    Net.send({ type: 'share_gps', targetId });
+    announce(`Votre position GPS a été envoyée à ${targetName || 'cette personne'}. Elle peut maintenant se faire guider automatiquement jusqu'à vous.`, 'assertive');
   },
   _lastGuidanceMsg: 0,
-  guidancePath: null, _pathGoal: null, _pathComputedAt: 0, _pathIdx: 0,
+  guidancePath: null, _pathGoal: null, _pathComputedAt: 0, _pathIdx: 0, guidanceFollowId: null,
   updateGuidance(force) {
     const t = this.guidanceTarget; if (!t) return;
+    // Cible mobile : guidage EN DIRECT vers un joueur qui a partagé sa position.
+    // On rafraîchit ses coordonnées à chaque calcul ; s'il se déplace, le chemin
+    // se recalcule tout seul (voir _ensurePath).
+    if (this.guidanceFollowId) {
+      const live = Net.remotePlayers.get(this.guidanceFollowId);
+      if (!live) {
+        announce(`${t.name} n'est plus joignable. Guidage arrêté.`, 'assertive');
+        this.guidanceTarget = null; this.guidanceFollowId = null; this.guidancePath = null; this._pathGoal = null; return;
+      }
+      t.x = live.x; t.y = live.y;
+    }
     const dist = UTIL.dist(t, this);
     if (dist < 2) {
-      announce(`Vous êtes arrivé à ${t.name}.`, 'interrupt');
+      announce(this.guidanceFollowId ? `Vous avez rejoint ${t.name}.` : `Vous êtes arrivé à ${t.name}.`, 'interrupt');
       Audio.cash();
-      this.guidanceTarget = null; this.guidanceAxis = null; this.guidancePath = null; this._pathGoal = null; return;
+      this.guidanceTarget = null; this.guidanceAxis = null; this.guidancePath = null; this._pathGoal = null; this.guidanceFollowId = null; return;
     }
     const now = Date.now();
     if (!force && now - this._lastGuidanceMsg < 2500) return;

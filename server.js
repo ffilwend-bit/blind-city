@@ -447,6 +447,15 @@ wss.on('connection', (ws, req) => {
       send(target.ws, { type: 'money_received', fromName: `${player.firstName} ${player.lastName}`, amount });
     }
 
+    else if (msg.type === 'share_gps') {
+      // Partage de position GPS : on prévient la cible, qui pourra se faire
+      // guider en direct jusqu'à l'expéditeur (sa position est déjà diffusée par
+      // les messages "state", donc rien d'autre à transmettre ici).
+      const target = players.get(msg.targetId);
+      if (!target) return;
+      send(target.ws, { type: 'share_gps', fromId: id, fromName: `${player.firstName} ${player.lastName}` });
+    }
+
     else if (msg.type === 'house_sale_offer') {
       const target = players.get(msg.targetId);
       if (!target) return;

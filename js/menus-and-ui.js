@@ -78,6 +78,7 @@ function openMainMenu() {
     { id: 'save', title: '💾 Sauvegarder', desc: 'Enregistrer la partie.' },
     { id: 'bills', title: '🧾 Mes factures', desc: `Factures reçues à payer${Game.pendingBills.length ? ' (' + Game.pendingBills.length + ' en attente)' : ''}.` },
     { id: 'paycash', title: '💵 Payer en liquide', desc: 'Donner de l\'argent directement, ou le déposer au sol pour que l\'autre le ramasse.' },
+    { id: 'sharegps', title: '📍 Partager ma position GPS', desc: 'Envoyer votre position à un joueur réel : il sera guidé vocalement, automatiquement, jusqu\'à vous.' },
     { id: 'realtaxi', title: '🚕 Appeler un vrai chauffeur', desc: 'Un joueur réel chauffeur professionnel viendra vous chercher, s\'il accepte.' },
     { id: 'callmechanic', title: '🔧 Appeler un garagiste', desc: 'Pour venir réparer votre véhicule sur place. Montez d\'abord dedans.' },
     { id: 'help', title: '❓ Aide', desc: 'Rappel vocal de toutes les commandes du jeu.' },
@@ -163,10 +164,24 @@ function handleMenuItem(it) {
   else if (it.id === 'myjob') { Game.openMyJobMenu(); }
   else if (it.id === 'bills') { Game.openMyBills(); }
   else if (it.id === 'paycash') { Game.openPayCashMenu(); }
+  else if (it.id === 'sharegps') { openShareGpsMenu(); }
   else if (it.id === 'realtaxi') { closeMenu(); Game.callRealTaxiDriver(); }
   else if (it.id === 'callmechanic') { closeMenu(); Game.callMechanic(); }
 }
 function closeMenu() { el('menuOverlay').style.display = 'none'; MenuNav.stack = []; MenuNav.navigating = false; document.activeElement?.blur(); }
+// Choisir à quel joueur réel connecté envoyer sa position GPS.
+function openShareGpsMenu() {
+  el('menuTitle').textContent = 'Partager ma position GPS';
+  if (!Net.connected) { renderMenu([{ id: 'none', title: 'Hors ligne', desc: 'Le partage de position nécessite une connexion au serveur multijoueur.' }], () => closeMenu()); return; }
+  const players = Array.from(Net.remotePlayers.values());
+  if (!players.length) { renderMenu([{ id: 'none', title: 'Aucun joueur connecté', desc: 'Personne à qui envoyer votre position pour le moment.' }], () => closeMenu()); return; }
+  const items = players.map(p => ({ id: p.id, title: `${p.firstName} ${p.lastName}`, desc: `À ${Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE)} mètres. Lui envoyer votre position pour qu'il soit guidé jusqu'à vous.` }));
+  renderMenu(items, (sel) => {
+    const p = players.find(pp => pp.id === sel.id);
+    closeMenu();
+    if (p) Game.shareMyGPS(p.id, `${p.firstName} ${p.lastName}`);
+  });
+}
 function openRoleMenu() {
   el('menuTitle').textContent = 'Métiers de la ville';
   const items = Object.entries(Roles.list).filter(([k, v]) => !v.hidden).map(([k, v]) => ({

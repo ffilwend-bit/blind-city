@@ -96,6 +96,14 @@ const Net = {
       Audio.cash();
       announce(`${msg.fromName} vous donne ${UTIL.formatMoney(msg.amount)} en liquide.`, 'assertive');
       updateHud();
+    } else if (msg.type === 'share_gps') {
+      // Quelqu'un partage sa position GPS : on propose le guidage automatique
+      // en direct jusqu'à lui.
+      AudioLib.playNotification();
+      AccessibleConfirm.open(`${msg.fromName} partage sa position GPS`, `Vous faire guider automatiquement, à la voix, jusqu'à ${msg.fromName} ?`, (acc) => {
+        if (acc) Game.followPlayerGPS(msg.fromId, msg.fromName);
+        else announce('Guidage refusé.', 'polite');
+      });
     } else if (msg.type === 'crime_alert') {
       Game.onCrimeAlert(msg.kind, msg.detail, msg.x, msg.y);
     } else if (msg.type === 'death_state') {
