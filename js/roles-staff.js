@@ -261,9 +261,14 @@ const AccessibleConfirm = {
     el('confirmPromptTitle').textContent = title;
     el('confirmPromptDesc').textContent = desc || '';
     el('confirmPromptOverlay').style.display = 'flex';
-    announce(`${title}. ${desc || ''} Oui ou non ?`, 'assertive');
     const yesBtn = el('confirmPromptYes');
     setTimeout(() => yesBtn.focus(), 30);
+    // La question est annoncée APRÈS la prise de focus du bouton "Oui" : sinon
+    // l'annonce automatique du bouton au focus ("Oui, bouton") coupait la
+    // question et on n'entendait plus que "oui / non" sans savoir de quoi il
+    // s'agissait (par ex. « Acheter cette maison ? »). Ainsi la question passe
+    // en dernier et est lue en entier.
+    setTimeout(() => { if (this.active) announce(`${title}. ${desc || ''} Oui ou non ?`, 'assertive'); }, 140);
   },
   resolve(val) {
     const cb = this.onResult; this.close();
