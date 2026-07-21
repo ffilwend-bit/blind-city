@@ -221,7 +221,7 @@ function dist(a, b) { return Math.hypot((a.x || 0) - (b.x || 0), (a.y || 0) - (b
 // Démarre un appel entre deux joueurs, que ce soit via un contact (call_offer)
 // ou en composant un numéro (dial_number) — même minuterie de 30 secondes,
 // même relais des messages une fois décroché.
-function startCall(callerWs, callerId, callerPlayer, targetPlayer, fromLabel) {
+function startCall(callerWs, callerId, callerPlayer, targetPlayer, fromLabel, masked) {
   const callId = 'c' + (nextId++);
   const call = { callId, callerId, targetId: targetPlayer.id, status: 'ringing' };
   calls.set(callId, call);
@@ -231,7 +231,11 @@ function startCall(callerWs, callerId, callerPlayer, targetPlayer, fromLabel) {
     send(callerWs, { type: 'call_timeout', callId });
     send(targetPlayer.ws, { type: 'call_timeout', callId });
   }, 30000);
-  send(targetPlayer.ws, { type: 'call_offer', callId, fromId: callerId, fromName: fromLabel });
+  // Appel masqué : le destinataire ne voit ni le nom ni de quoi identifier
+  // l'appelant. On envoie quand même fromId (nécessaire au routage/à la voix)
+  // mais avec le drapeau masked, que le client honnête respecte en n'affichant
+  // pas l'identité.
+  send(targetPlayer.ws, { type: 'call_offer', callId, fromId: callerId, fromName: masked ? 'Numéro masqué' : fromLabel, masked: !!masked });
   send(callerWs, { type: 'call_ringing', callId, targetId: targetPlayer.id, targetName: `${targetPlayer.firstName} ${targetPlayer.lastName}` });
 }
 
@@ -717,7 +721,7 @@ wss.on('connection', (ws, req) => {
         if (entry) { target = p; targetEntry = entry; break; }
       }
       if (!target || !target.joined || target.airplane) { send(ws, { type: 'dial_result', ok: false, reason: 'Numéro injoignable ou inconnu.' }); return; }
-      startCall(ws, id, player, target, safeName(msg.fromLabel, `${player.firstName} ${player.lastName}`, 40));
+      startCall(ws, id, player, target, safeName(msg.fromLabel, `${player.firstName} ${player.lastName}`, 40), !!msg.masked);
       send(ws, { type: 'dial_result', ok: true });
     }
 
@@ -750,7 +754,38 @@ wss.on('connection', (ws, req) => {
     else if (msg.type === 'call_offer') {
       const target = players.get(msg.targetId);
       if (!target || !target.joined || target.airplane) { send(ws, { type: 'call_unavailable', targetId: msg.targetId }); return; }
-      startCall(ws, id, player, target, safeName(msg.fromLabel, `${player.firstName} ${player.lastName}`, 40));
+      startCall(ws, id, player, target, safeName(msg.fromLabel, `${player.firstName} ${player.lastName}`, 40), !!msg.masked);
+    }
+
+    else if (msg.type === 'send_number') {
+      // Envoyer son numéro à une cible (joueur verrouillé) : elle le reçoit et
+      // peut l'enregistrer puis rappeler.
+      const target = players.get(msg.targetId);
+      if (!target || !target.joined) { send(ws, { type: 'send_number_result', ok: false }); return; }
+      send(target.ws, { type: 'number_received', fromId: id, number: safeName(msg.number, '', 30), label: safeName(msg.label, `${player.firstName} ${player.lastName}`, 40) });
+      send(ws, { type: 'send_number_result', ok: true, targetName: `${target.firstName} ${target.lastName}` });
+    }
+
+    else if (msg.type === 'find_number') {
+      // Retrouver le(s) numéro(s) d'un utilisateur d'après un nom : on cherche
+      // dans les noms affichés (labels) ET les vrais noms des joueurs connectés.
+      const q = safeName(msg.query, '', 40).trim().toLowerCase();
+      const results = [];
+      if (q) {
+        for (const p of players.values()) {
+          if (!p.joined) continue;
+          const realName = `${p.firstName} ${p.lastName}`;
+          for (const n of (p.phoneNumbers || [])) {
+            const shown = n.label || realName;
+            if (shown.toLowerCase().includes(q) || realName.toLowerCase().includes(q)) {
+              results.push({ number: n.number, name: shown });
+              if (results.length >= 12) break;
+            }
+          }
+          if (results.length >= 12) break;
+        }
+      }
+      send(ws, { type: 'find_number_result', query: msg.query, results });
     }
 
     else if (msg.type === 'call_answer') {

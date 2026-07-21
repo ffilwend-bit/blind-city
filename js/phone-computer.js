@@ -106,7 +106,7 @@ const Phone = {
       el('callDeclineBtn').addEventListener('click', () => Phone.declineCall());
     }
     if (name === 'call') {
-      a.innerHTML = '<h3>📞 Appeler</h3><p style="color:var(--muted);font-size:0.85rem;">Choisissez un contact ci-dessous, ou composez un numéro.</p><button class="phone-btn" id="dialNumberBtn">🔢 Composer un numéro</button><div class="phone-call"><div class="caller" id="callName">Numéro inconnu</div><div class="status" id="callStatus">Prêt</div><button class="phone-btn" id="callSaveContactBtn" style="margin-top:6px;">💾 Enregistrer ce contact</button><div id="callMsgArea" style="display:none; margin-top:10px;"><input id="callMsgInput" placeholder="Message à dire..." aria-label="Message à dire au correspondant" style="width:100%;background:#11161e;border:1px solid var(--border);color:#fff;border-radius:8px;padding:8px;margin-bottom:6px;"><button class="phone-btn" id="callMsgSend">Dire</button></div><button class="call-btn hangup" onclick="Phone.hangup()">📞</button></div><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
+      a.innerHTML = '<h3>📞 Appeler</h3><p style="color:var(--muted);font-size:0.85rem;">Choisissez un contact ci-dessous, ou composez un numéro.</p><button class="phone-btn" id="dialNumberBtn">🔢 Composer un numéro</button><button class="phone-btn" id="findNumberBtn">📇 Trouver un numéro par nom</button><button class="phone-btn" id="maskedDialBtn">🕵️ Appel masqué</button><div class="phone-call"><div class="caller" id="callName">Numéro inconnu</div><div class="status" id="callStatus">Prêt</div><button class="phone-btn" id="callSaveContactBtn" style="margin-top:6px;">💾 Enregistrer ce contact</button><div id="callMsgArea" style="display:none; margin-top:10px;"><input id="callMsgInput" placeholder="Message à dire..." aria-label="Message à dire au correspondant" style="width:100%;background:#11161e;border:1px solid var(--border);color:#fff;border-radius:8px;padding:8px;margin-bottom:6px;"><button class="phone-btn" id="callMsgSend">Dire</button></div><button class="call-btn hangup" onclick="Phone.hangup()">📞</button></div><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
       const msgBtn = el('callMsgSend');
       if (msgBtn) msgBtn.addEventListener('click', () => {
         const input = el('callMsgInput'); if (!input.value.trim()) return;
@@ -120,6 +120,8 @@ const Phone = {
           Net.dialNumber(number, (res) => { if (res.ok) el('callStatus').textContent = 'Ça sonne...'; });
         });
       });
+      el('findNumberBtn').addEventListener('click', () => this.findNumberByName());
+      el('maskedDialBtn').addEventListener('click', () => this.maskedDial());
       el('callSaveContactBtn').addEventListener('click', () => {
         if (!this.currentCall) return announce('Aucun appel en cours pour enregistrer un contact.', 'assertive');
         Game.saveContact(this.currentCall.id, this.currentCall.name, this._lastDialedNumber || null);
@@ -447,16 +449,81 @@ const Phone = {
     announce('Votre correspondant n\'est pas disponible. Veuillez rappeler ultérieurement.', 'assertive');
     this.hangup(true);
   },
-  receiveCallOffer(callId, fromId, fromName) {
-    this.incomingCall = { callId, fromId, fromName };
+  receiveCallOffer(callId, fromId, fromName, masked) {
+    this.incomingCall = { callId, fromId, fromName, masked: !!masked };
     this.ringtoneKey = AudioLib.randomRingtone();
     AudioLib.playLoop(this.ringtoneKey);
-    const remote = Net.remotePlayers.get(fromId);
-    const contactMatch = remote ? Game.resolveContactName({ isPlayer: true, accountUsername: remote.accountUsername }) : null;
-    const announcedName = contactMatch ? contactMatch.label : fromName;
+    // Appel masqué : on n'essaie pas d'identifier l'appelant (ni par ses
+    // contacts) — on annonce "Numéro masqué", comme un vrai appel anonyme.
+    let announcedName = fromName;
+    if (!masked) {
+      const remote = Net.remotePlayers.get(fromId);
+      const contactMatch = remote ? Game.resolveContactName({ isPlayer: true, accountUsername: remote.accountUsername }) : null;
+      if (contactMatch) announcedName = contactMatch.label;
+    }
     announce(`${announcedName} vous appelle. Décrochez ou refusez dans les 30 secondes.`, 'assertive');
     this.renderApp('incoming_call');
     if (!this.open) { this.open = true; el('phoneOverlay').style.display = 'flex'; }
+  },
+  // Compose un numéro et lance l'appel via l'écran d'appel (masqué ou non).
+  callNumber(number, name, masked) {
+    if (!Net.connected) return announce('Nécessite une connexion au serveur multijoueur.', 'assertive');
+    if (this.airplane) return announce('Mode avion actif. Impossible d\'appeler.', 'assertive');
+    if (!this.open) this.openPhone();
+    this.renderApp('call');
+    this._lastDialedNumber = number;
+    this.currentCall = { name: name || number, isPlayer: true };
+    if (el('callName')) el('callName').textContent = name || number;
+    if (el('callStatus')) el('callStatus').textContent = 'Composition...';
+    announce(`Appel ${masked ? 'masqué ' : ''}du ${number}${name ? ', ' + name : ''}...`, 'polite');
+    Net.dialNumber(number, (res) => { if (res.ok && el('callStatus')) el('callStatus').textContent = 'Ça sonne...'; }, masked);
+  },
+  // Appel masqué : composer un numéro sans révéler son identité à l'appelé.
+  maskedDial() {
+    if (!Net.connected) return announce('Nécessite une connexion au serveur multijoueur.', 'assertive');
+    AccessibleTextPrompt.open('Appel masqué', 'Tapez le numéro à joindre. Votre identité ne sera pas révélée : la personne verra "Numéro masqué".', '', (number) => {
+      if (!number) return;
+      this.callNumber(number.trim(), null, true);
+    });
+  },
+  // Retrouver le numéro d'un utilisateur d'après son nom (nom affiché ou vrai
+  // nom), puis proposer de l'appeler ou de l'enregistrer.
+  findNumberByName() {
+    if (!Net.connected) return announce('Nécessite une connexion au serveur multijoueur.', 'assertive');
+    AccessibleTextPrompt.open('Trouver un numéro par nom', 'Tapez le nom, ou une partie du nom, de la personne recherchée.', '', (name) => {
+      if (!name || !name.trim()) return;
+      announce(`Recherche de "${name.trim()}"...`, 'polite');
+      Net.findNumber(name.trim(), (results, query) => {
+        if (!results.length) return announce(`Aucun numéro trouvé pour "${query}".`, 'assertive');
+        // Le menu à cartes est sous le téléphone (z-index) : on ferme le
+        // téléphone pour afficher les résultats dans le menu accessible.
+        if (this.open) this.closePhone();
+        this.findNumberByNameResults(results, query);
+      });
+    });
+  },
+  // Affiche la liste de résultats de recherche de numéro dans le menu accessible.
+  findNumberByNameResults(results, query) {
+    el('menuTitle').textContent = `Numéros trouvés pour "${query}"`;
+    const items = results.map((r, i) => ({ id: String(i), title: `${r.name} — ${r.number}`, desc: 'Appeler cette personne, ou enregistrer son numéro dans vos contacts.' }));
+    el('menuOverlay').style.display = 'flex';
+    renderMenu(items, (sel) => {
+      const r = results[parseInt(sel.id, 10)];
+      if (!r) { closeMenu(); return; }
+      el('menuTitle').textContent = `${r.name} — ${r.number}`;
+      renderMenu([
+        { id: 'call', title: '📞 Appeler', desc: `Composer le ${r.number}.` },
+        { id: 'masked', title: '🕵️ Appeler en masqué', desc: 'Sans révéler votre identité.' },
+        { id: 'save', title: '💾 Enregistrer le contact', desc: 'Garder ce numéro sous un nom à vous.' },
+        { id: 'back', title: '↩️ Retour', desc: 'Revenir à la liste des résultats.' },
+      ], (act) => {
+        if (act.id === 'back') { this.findNumberByNameResults(results, query); return; }
+        closeMenu();
+        if (act.id === 'call') this.callNumber(r.number, r.name, false);
+        else if (act.id === 'masked') this.callNumber(r.number, r.name, true);
+        else if (act.id === 'save') Game.saveContact(null, r.name, r.number);
+      });
+    });
   },
   answerCall() {
     if (!this.incomingCall) return;

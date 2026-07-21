@@ -3518,6 +3518,17 @@ const Game = {
     const p = this.phones[index];
     announce(`Numéro actif : ${p.number}${p.label ? ', affiché comme ' + p.label : ''}.`, 'assertive');
   },
+  // Envoyer l'un de ses numéros à la cible verrouillée (un joueur réel) : elle le
+  // reçoit, l'enregistre et peut rappeler. Sans index, envoie le numéro actif.
+  sendMyNumberToTarget(index) {
+    if (!Net.connected) return announce('Nécessite une connexion au serveur multijoueur.', 'assertive');
+    const target = this.getLiveTarget();
+    if (!target || !target.isPlayer) return announce('Verrouillez d\'abord un joueur réel comme cible (scan avec W, puis un chiffre) pour lui envoyer votre numéro.', 'assertive');
+    const phone = this.phones[index != null ? index : this.activePhoneIndex];
+    if (!phone) return announce('Vous n\'avez aucun numéro. Achetez un téléphone prépayé.', 'assertive');
+    Net.sendNumber(target.id, phone.number, phone.label || `${this.player.firstName} ${this.player.lastName}`);
+    announce(`Envoi de votre numéro ${phone.number} à ${target.name}...`, 'polite');
+  },
   // Nom affiché aux autres pour l'appel/message en cours : le nom personnalisé
   // du numéro actif, sinon le vrai nom du personnage par défaut.
   activeCallerName() {
@@ -3539,11 +3550,13 @@ const Game = {
       const subItems = [
         { id: 'activate', title: '✅ Activer ce numéro', desc: 'Utilisé pour vos prochains appels/messages.' },
         { id: 'rename', title: '✏️ Renommer', desc: 'Changer le nom affiché aux autres.' },
+        { id: 'send', title: '📤 Envoyer à ma cible verrouillée', desc: 'Donner ce numéro au joueur réel que vous avez verrouillé comme cible, pour qu\'il puisse vous rappeler.' },
         { id: 'back', title: '↩️ Retour', desc: '' },
       ];
       renderMenu(subItems, (sub) => {
         if (sub.id === 'activate') { closeMenu(); this.setActivePhone(idx); }
         else if (sub.id === 'rename') { closeMenu(); this.renamePhoneLabel(idx); }
+        else if (sub.id === 'send') { closeMenu(); this.sendMyNumberToTarget(idx); }
         else this.openMyPhoneNumbers();
       });
     });

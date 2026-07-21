@@ -256,7 +256,24 @@ const Net = {
         else { if (msg.payload) Game.addItem({ ...msg.payload }); announce(`${msg.fromName} refuse. L'objet vous revient.`, 'polite'); }
       }
     } else if (msg.type === 'call_offer') {
-      Phone.receiveCallOffer(msg.callId, msg.fromId, msg.fromName);
+      Phone.receiveCallOffer(msg.callId, msg.fromId, msg.fromName, !!msg.masked);
+    } else if (msg.type === 'number_received') {
+      // Quelqu'un vous a envoyé son numéro : on l'enregistre pour pouvoir le
+      // rappeler, et on l'ajoute aux contacts du téléphone.
+      const remote = Net.remotePlayers.get(msg.fromId);
+      Game.myContacts = Game.myContacts || [];
+      const entry = { number: msg.number || null, username: remote?.accountUsername || null, label: msg.label };
+      const i = msg.number ? Game.myContacts.findIndex(c => c.number === msg.number) : -1;
+      if (i !== -1) Game.myContacts[i] = entry; else Game.myContacts.push(entry);
+      Phone.contacts = Phone.contacts || [];
+      if (msg.number && !Phone.contacts.some(c => c.number === msg.number)) Phone.contacts.push({ id: 'recv_' + msg.number, name: msg.label, number: msg.number, role: 'citoyen' });
+      AudioLib.playNotification();
+      announce(`${msg.label} vous envoie son numéro : ${msg.number}. Enregistré dans vos contacts, vous pouvez le rappeler.`, 'assertive');
+    } else if (msg.type === 'send_number_result') {
+      if (msg.ok) announce(`Votre numéro a été envoyé à ${msg.targetName}.`, 'assertive');
+      else announce('Numéro non envoyé : la cible n\'est plus joignable.', 'assertive');
+    } else if (msg.type === 'find_number_result') {
+      if (this._pendingFindNumberCallback) { const cb = this._pendingFindNumberCallback; this._pendingFindNumberCallback = null; cb(msg.results || [], msg.query); }
     } else if (msg.type === 'call_ringing') {
       Phone.onCallRinging(msg.callId, msg.targetName);
     } else if (msg.type === 'call_unavailable') {
@@ -343,15 +360,17 @@ const Net = {
   talkiePTT(text) { this.send({ type: 'talkie_ptt', text, frequency: Game.talkie.frequency }); },
   giveTalkieTo(targetId) { this.send({ type: 'talkie_give', targetId, payload: { frequency: Game.talkie.frequency } }); },
   giveItemTo(targetId, item) { this.send({ type: 'item_give', targetId, payload: item }); },
-  callOffer(targetId) { this.send({ type: 'call_offer', targetId, fromLabel: Game.activeCallerName() }); },
+  callOffer(targetId, masked) { this.send({ type: 'call_offer', targetId, fromLabel: Game.activeCallerName(), masked: !!masked }); },
+  sendNumber(targetId, number, label) { this.send({ type: 'send_number', targetId, number, label }); },
+  findNumber(query, cb) { this._pendingFindNumberCallback = cb; this.send({ type: 'find_number', query }); },
   registerNumbers() {
     if (!this.connected || !Array.isArray(Game.phones)) return;
     this.send({ type: 'register_numbers', numbers: Game.phones });
   },
-  dialNumber(number, cb) {
+  dialNumber(number, cb, masked) {
     if (!this.connected) return announce('Nécessite une connexion au serveur.', 'assertive');
     this._pendingDialCallback = cb;
-    this.send({ type: 'dial_number', number, fromLabel: Game.activeCallerName() });
+    this.send({ type: 'dial_number', number, fromLabel: Game.activeCallerName(), masked: !!masked });
   },
   smsSend(targetId, text, cb) {
     if (!this.connected) return announce('Nécessite une connexion au serveur.', 'assertive');
