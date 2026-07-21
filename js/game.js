@@ -35,14 +35,22 @@ const Game = {
   // lui-même (orientation), haut/bas avancent ou reculent dans la direction
   // où l'on regarde. Une pression = un pas ; touche maintenue = déplacement
   // continu (le navigateur répète l'évènement tant qu'on appuie).
-  HEADING_NAMES: { 0: 'nord', 2: 'est', 4: 'sud', 6: 'ouest' },
+  HEADING_NAMES: { 0: 'nord', 1: 'nord-est', 2: 'est', 3: 'sud-est', 4: 'sud', 5: 'sud-ouest', 6: 'ouest', 7: 'nord-ouest' },
   turn(delta) {
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
+    if (this.ridingWith) return announce('Vous êtes passager. Appuyez sur Interagir pour descendre.', 'polite');
     if (this.inVehicle && this.vehicle) {
-      this.vehicle.heading = ((this.vehicle.heading + delta) % 8 + 8) % 8; this.heading = this.vehicle.heading;
+      // Au volant, on tourne par quarts (90°) : la conduite ne se fait que sur
+      // les 4 axes de la grille, quel que soit le pas demandé par la touche.
+      const vdelta = delta >= 0 ? 2 : -2;
+      this.vehicle.heading = ((this.vehicle.heading + vdelta) % 8 + 8) % 8; this.heading = this.vehicle.heading;
       const cls = VEHICLE_CATALOG[this.vehicle.type];
       if (cls && !cls.flies) AudioLib.playOnce('clignotant_voiture', { volume: 0.35 });
     }
+    // À pied, on tourne finement par huitièmes (45°) : flèche gauche/droite fait
+    // pivoter un peu à la fois sur soi-même, pour viser un cap précis parmi les
+    // 8 directions ; les touches de cap direct (! ; , :) restent là pour se
+    // placer d'un coup au nord/est/sud/ouest.
     else this.heading = ((this.heading + delta) % 8 + 8) % 8;
     // Si un guidage est actif, on redonne TOUT DE SUITE la consigne mise à jour
     // après le virage : retour immédiat ("Tout droit" une fois aligné), pour que
@@ -84,7 +92,9 @@ const Game = {
     updateHud();
   },
   headingToDelta(h) {
-    return { dx: h === 2 ? 1 : h === 6 ? -1 : 0, dy: h === 4 ? 1 : h === 0 ? -1 : 0 };
+    // 8 directions : 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SO, 6=O, 7=NO.
+    const d = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]][((h % 8) + 8) % 8] || [0, 0];
+    return { dx: d[0], dy: d[1] };
   },
   moveForward() {
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
@@ -99,6 +109,7 @@ const Game = {
     this.move(-dx, -dy, { keepHeading: true, reverse: true });
   },
   move(dx, dy, opts = {}) {
+    if (this.ridingWith) return announce('Vous êtes passager. Appuyez sur Interagir pour descendre avant de marcher.', 'polite');
     if (this.inVehicle && this.vehicle) {
       this.driveVehicle(dx, dy);
       return;
@@ -118,6 +129,13 @@ const Game = {
     }
     this._moveAccum -= 1;
     const nx = Math.round(this.x + dx), ny = Math.round(this.y + dy);
+    // En diagonale, on ne se faufile pas à travers le coin de deux murs : si les
+    // deux cases orthogonales sont solides, le passage est bloqué.
+    if (dx !== 0 && dy !== 0 && City.isSolid(Math.round(this.x + dx), Math.round(this.y)) && City.isSolid(Math.round(this.x), Math.round(this.y + dy))) {
+      Audio.impact(UTIL.clamp(dx, -1, 1) * 0.5);
+      announce('Passage bloqué entre deux murs. Tournez un peu pour les contourner.', 'assertive');
+      return;
+    }
     if (City.isSolid(nx, ny)) {
       Audio.impact(UTIL.clamp(dx, -1, 1) * 0.5);
       announce('Obstacle, vous n\'avancez pas. ' + City.getTile(nx, ny), 'assertive');
@@ -346,10 +364,18 @@ const Game = {
       // Maj+F ou "où est ma voiture") — utile de se garer sans s'inquiéter.
       this.lastParkedVehicle = { id: this.vehicle.id, name: this.vehicle.name };
       announce(`Vous descendez du ${this.vehicle.name}.`, 'assertive'); this.vehicle = null;
+    } else if (this.ridingWith) {
+      // Déjà passager : appuyer de nouveau fait descendre.
+      this.leavePassengerSeat();
     } else {
+      // Un autre joueur est au volant juste à côté (par ex. le taxi qu'on a
+      // appelé) : on monte comme PASSAGER — aucun permis requis, on ne conduit
+      // pas, on suit simplement le trajet du chauffeur.
+      const driver = this.getNearbyRemoteDriver();
+      if (driver) { this.boardAsPassenger(driver); updateHud(); return; }
       const nearby = City.vehicles.filter(v => UTIL.dist({ x: this.x, y: this.y }, v) < 4 && !v.owner);
       const v = nearby.sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
-      if (!v) return announce('Aucun véhicule à proximité.', 'assertive');
+      if (!v) return announce('Aucun véhicule à proximité, et aucun chauffeur à côté pour monter comme passager.', 'assertive');
       if (v.locked && !this.ownedVehicles.includes(v.id)) {
         Audio.beep(0, 700);
         AccessibleConfirm.open(`${v.name} est verrouillé`, 'Forcer la portière ? Cela déclenchera l\'alarme antivol et attirera l\'attention.', (force) => {
@@ -379,6 +405,36 @@ const Game = {
         this.startVehicleDelivery(this.activeMission);
       }
     }
+    updateHud();
+  },
+
+  // Monter comme passager avec un autre joueur (taxi, covoiturage) : aucun
+  // permis requis, on suit sa position. Utile notamment après avoir appelé un
+  // vrai chauffeur : il vient, on monte, il conduit.
+  ridingWith: null,
+  getNearbyRemoteDriver() {
+    if (!Net.connected) return null;
+    let best = null, bd = Infinity;
+    for (const p of Net.remotePlayers.values()) {
+      if (!p.inVehicle) continue;
+      const d = UTIL.dist(p, this);
+      if (d < 5 && d < bd) { bd = d; best = p; }
+    }
+    return best;
+  },
+  boardAsPassenger(driver) {
+    this.ridingWith = { id: driver.id, name: `${driver.firstName} ${driver.lastName}`, vehicleName: driver.vehicleName || null };
+    AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 });
+    setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
+    announce(`Vous montez comme passager avec ${this.ridingWith.name}${driver.vehicleName ? ', dans ' + driver.vehicleName : ''}. Vous suivez le trajet. Appuyez sur Interagir pour descendre.`, 'assertive');
+  },
+  leavePassengerSeat() {
+    if (!this.ridingWith) return;
+    const name = this.ridingWith.name;
+    this.ridingWith = null;
+    AudioLib.playOnce('veh_ceinture_out', { volume: 0.6 });
+    setTimeout(() => AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 }), 200);
+    announce(`Vous descendez du véhicule de ${name}.`, 'assertive');
     updateHud();
   },
 
@@ -694,6 +750,18 @@ const Game = {
   // Direction cardinale d'une case à sa voisine (0=nord,2=est,4=sud,6=ouest ;
   // -1 si pas cardinalement adjacentes).
   _dirOf(x0, y0, x1, y1) { const dx = x1 - x0, dy = y1 - y0; if (dx > 0 && dy === 0) return 2; if (dx < 0 && dy === 0) return 6; if (dy > 0 && dx === 0) return 4; if (dy < 0 && dx === 0) return 0; return -1; },
+  // Consigne de virage selon l'écart de cap (en huitièmes de tour, 0..7) : gère
+  // aussi les diagonales, puisqu'à pied on s'oriente maintenant par 45°.
+  // 0 devant, 1 légèrement à droite, 2 à droite, 3 franchement à droite,
+  // 4 demi-tour, 5 franchement à gauche, 6 à gauche, 7 légèrement à gauche.
+  _turnInstruction(diff, meters) {
+    diff = ((diff % 8) + 8) % 8;
+    if (diff === 0) return `Tout droit, ${meters} mètres`;
+    if (diff === 4) return `Faites demi-tour, puis ${meters} mètres`;
+    const cote = diff <= 3 ? 'à droite' : 'à gauche';
+    const nuance = (diff === 1 || diff === 7) ? 'légèrement ' : (diff === 3 || diff === 5) ? 'franchement ' : '';
+    return `Tournez ${nuance}${cote}, puis ${meters} mètres`;
+  },
   // (Re)calcule le chemin vers la destination quand c'est nécessaire : au
   // changement de but, si le joueur a quitté le chemin, ou périodiquement (le
   // monde peut changer). Mémorise l'index du point de chemin le plus proche.
@@ -733,11 +801,7 @@ const Game = {
     const distToTurn = Math.abs(path[e].x - px) + Math.abs(path[e].y - py);
     const meters = Math.max(CONFIG.METERS_PER_TILE, Math.round(distToTurn * CONFIG.METERS_PER_TILE));
     const diff = ((firstDir - this.heading) % 8 + 8) % 8;
-    let instr;
-    if (diff === 0) instr = `Tout droit, ${meters} mètres`;
-    else if (diff === 2) instr = `Tournez à droite, puis ${meters} mètres`;
-    else if (diff === 6) instr = `Tournez à gauche, puis ${meters} mètres`;
-    else instr = `Faites demi-tour, puis ${meters} mètres`;
+    let instr = this._turnInstruction(diff, meters);
     let nextDir = -1;
     if (e < path.length - 1) nextDir = this._dirOf(path[e].x, path[e].y, path[e + 1].x, path[e + 1].y);
     if (nextDir >= 0) {
@@ -765,11 +829,7 @@ const Game = {
     const targetHeading = axis === 'x' ? (dx > 0 ? 2 : 6) : (dy > 0 ? 4 : 0);
     const diff = ((targetHeading - this.heading) % 8 + 8) % 8;
     const meters = Math.round(remaining * CONFIG.METERS_PER_TILE);
-    let instruction;
-    if (diff === 0) instruction = `Tout droit, ${meters} mètres.`;
-    else if (diff === 2) instruction = `Tournez à droite, puis ${meters} mètres.`;
-    else if (diff === 6) instruction = `Tournez à gauche, puis ${meters} mètres.`;
-    else instruction = `Faites demi-tour, puis ${meters} mètres.`;
+    let instruction = this._turnInstruction(diff, meters) + '.';
     if (diff === 0) {
       const { dx: hdx, dy: hdy } = this.headingToDelta(this.heading);
       const nx = Math.round(this.x + hdx), ny = Math.round(this.y + hdy);

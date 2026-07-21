@@ -348,6 +348,18 @@ const Net = {
         }
       }
     }
+    // Passager d'un autre joueur (taxi, covoiturage) : notre position suit celle
+    // du chauffeur. S'il se déconnecte ou descend de son véhicule, on descend.
+    if (Game.ridingWith) {
+      const driver = this.remotePlayers.get(Game.ridingWith.id);
+      if (!driver || !driver.inVehicle) {
+        const name = Game.ridingWith.name;
+        Game.ridingWith = null;
+        announce(`${name} n'est plus au volant. Vous descendez du véhicule.`, 'assertive');
+      } else {
+        Game.x = driver.x; Game.y = driver.y;
+      }
+    }
     this.send({
       type: 'state', x: Game.x, y: Game.y, heading: Game.heading, health: Game.health, hunger: Game.hunger, thirst: Game.thirst,
       role: Roles.current, policeRank: Game.policeRank, outfit: Game.outfit, inVehicle: Game.inVehicle, vehicleName: Game.vehicle?.name || null,

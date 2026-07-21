@@ -674,8 +674,8 @@ function setupInput() {
     const key = e.key.toLowerCase();
     if (key === 'arrowup') Game.moveForward();
     else if (key === 'arrowdown') Game.moveBackward();
-    else if (key === 'arrowleft') Game.turn(-2);
-    else if (key === 'arrowright') Game.turn(2);
+    else if (key === 'arrowleft') Game.turn(-1);
+    else if (key === 'arrowright') Game.turn(1);
     else if (key === ' ') { e.preventDefault(); Game.inVehicle ? Game.brakeVehicle() : Game.move(0, 1); }
     else if (key === 'e') Game.interact();
     else if (key === 'm') openMainMenu();
@@ -798,8 +798,8 @@ function setupInput() {
     const step = () => {
       if (dir === 'up') Game.moveForward();
       else if (dir === 'down') Game.moveBackward();
-      else if (dir === 'left') Game.turn(-2);
-      else if (dir === 'right') Game.turn(2);
+      else if (dir === 'left') Game.turn(-1);
+      else if (dir === 'right') Game.turn(1);
     };
     step(); // action immédiate : un glissement rapide fait déjà un pas
     gHoldTimer = setInterval(step, 300);
@@ -940,8 +940,8 @@ function gameLoop() {
       if (now - (Game._lastContinuousMove || 0) > 220) {
         if (Game.keys.has('arrowup')) { Game.moveForward(); Game._lastContinuousMove = now; }
         else if (Game.keys.has('arrowdown')) { Game.moveBackward(); Game._lastContinuousMove = now; }
-        else if (Game.keys.has('arrowleft')) { Game.turn(-2); Game._lastContinuousMove = now; }
-        else if (Game.keys.has('arrowright')) { Game.turn(2); Game._lastContinuousMove = now; }
+        else if (Game.keys.has('arrowleft')) { Game.turn(-1); Game._lastContinuousMove = now; }
+        else if (Game.keys.has('arrowright')) { Game.turn(1); Game._lastContinuousMove = now; }
       }
     } else if (Game.inVehicle && Game.vehicle && !Game.vehicle.auto && !menuIsOpen) {
       // Conduite : accélération/freinage à chaque image pour une sensation fluide
@@ -954,8 +954,8 @@ function gameLoop() {
       else Game.driveVehicle(0, 0); // relâché : freinage naturel jusqu'à l'arrêt
       const now2 = Date.now();
       if (now2 - (Game._lastContinuousMove || 0) > 220) {
-        if (Game.keys.has('arrowleft')) { Game.turn(-2); Game._lastContinuousMove = now2; }
-        else if (Game.keys.has('arrowright')) { Game.turn(2); Game._lastContinuousMove = now2; }
+        if (Game.keys.has('arrowleft')) { Game.turn(-1); Game._lastContinuousMove = now2; }
+        else if (Game.keys.has('arrowright')) { Game.turn(1); Game._lastContinuousMove = now2; }
       }
     }
     // Auto-drive step
