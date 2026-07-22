@@ -260,6 +260,11 @@ const City = {
     add('Usine', 'usine', 'Zone industrielle de Kossodo', 3);
     add('Bar', 'bar', 'Gounghin', 2);
     add('Bar de Koulouba', 'bar', 'Koulouba', 2);
+    // Chien guide : où l'acheter/l'équiper (animalerie) et le soigner (vétérinaire).
+    add('Animalerie', 'animalerie', 'Gounghin', 1);
+    add('Animalerie de Koulouba', 'animalerie', 'Koulouba', 1);
+    add('Vétérinaire', 'veterinaire', 'Koulouba', 1);
+    add('Vétérinaire de Gounghin', 'veterinaire', 'Gounghin', 1);
     add('Marché noir', 'marche_noir', 'Cissin', 1);
     add('Marché noir international', 'marche_noir_lointain', 'Bobo-Dioulasso', 1);
     add('Immeuble', 'immeuble', 'Koulouba', 6);

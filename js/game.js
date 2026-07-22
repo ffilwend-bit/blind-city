@@ -637,7 +637,7 @@ const Game = {
     if (msg.key.slice(0, 6) === 'synth:') {
       const fx = msg.key.slice(6);
       if (!window.Audio) return;
-      if (fx === 'gunshot') Audio.gunshot('', pan);
+      if (fx === 'gunshot') { Audio.gunshot('', pan); if (typeof GuideDog !== 'undefined') GuideDog.onDangerNear(msg.x, msg.y); }
       else if (fx === 'impact') Audio.impact(pan);
       else if (fx === 'siren') Audio.siren(vol);
       else if (fx === 'screech') Audio.screech(pan);
@@ -1235,6 +1235,7 @@ const Game = {
     this.ammo[w.ammoType]--;
     Audio.gunshot(w.name, 0);
     if (Net.connected) Net.emitSound('synth:gunshot', { vol: 0.95 }); // audible par les joueurs proches
+    if (typeof GuideDog !== 'undefined') GuideDog.onDangerNear(this.x, this.y); // le chien alerte / se cache
     setTimeout(() => Audio.shellDrop(0), 150);
     if (Date.now() - (this._lastGunfireReport || 0) > 8000) {
       this._lastGunfireReport = Date.now();
@@ -1702,6 +1703,8 @@ const Game = {
     else if (poi.type === 'aeroport' || poi.type === 'heliport') { this.aircraftMenu(poi); }
     else if (poi.type === 'mine') { const mine = City.miningSites.find(m => m.x === poi.x && m.y === poi.y); if (mine) { if (!this.miningMachine) announce(`Site minier. Ressource : ${mine.resource}. Achetez une machine d'extraction (750 000 FCFA, touche Ctrl+M) pour un bien meilleur rendement.`, 'polite'); this.mine(mine); } }
     else if (poi.type === 'entrepot') { this.openWarehouse(poi); }
+    else if (poi.type === 'animalerie') { if (typeof GuideDog !== 'undefined') GuideDog.openPetShopMenu(); }
+    else if (poi.type === 'veterinaire') { if (typeof GuideDog !== 'undefined') GuideDog.openVetMenu(); }
     else if (poi.type === 'qg_extreme') {
       // Façon RP GTA : la police est jouée par de vrais joueurs humains, donc
       // il n'y a pas de pénalité automatique garantie. Le seul vrai risque,
@@ -3679,7 +3682,7 @@ const Game = {
     announce('Conduite automatique : dites un lieu, par exemple hôpital, police, banque, magasin, armurerie, aéroport, héliport, port, mine.', 'polite');
   },
   help() {
-    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+G arrêter le guidage, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
+    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+G arrêter le guidage, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
   },
 
   // Save / load
@@ -3700,6 +3703,7 @@ const Game = {
       rolesCurrent: Roles.current, rolesRecruiters: Roles.recruiters, savedPlaces: this.savedPlaces, ownsTablet: this.ownsTablet,
       phones: this.phones, activePhoneIndex: this.activePhoneIndex, lastParkedVehicle: this.lastParkedVehicle, theoryPassed: this.theoryPassed, flightTheoryPassed: this.flightTheoryPassed, myContacts: this.myContacts,
       hasHelmet: this.hasHelmet, hasVest: this.hasVest, pendingBills: this.pendingBills,
+      guideDog: this.guideDog, // chien guide (position, état, équipement) — coûteux, doit persister
     };
     localStorage.setItem('blind_city_v18', JSON.stringify(payload));
     // Si un compte joueur est connecté, pousse aussi la sauvegarde côté
@@ -3727,6 +3731,8 @@ const Game = {
       if (!('isPolice' in this.outfit)) this.outfit.isPolice = false;
       if (!('masque' in this.outfit)) this.outfit.masque = false;
       if (!this.talkie) this.talkie = { owned: false, battery: 1, on: false, frequency: 151.5 };
+      // Chien guide : resynchronise le module GuideDog avec l'état restauré.
+      if (typeof GuideDog !== 'undefined') GuideDog.data = (this.guideDog && this.guideDog.alive) ? this.guideDog : null;
       if (!Array.isArray(this.savedPlaces)) this.savedPlaces = [];
       if (!Array.isArray(this.myContacts)) this.myContacts = [];
       if (!Array.isArray(this.pendingBills)) this.pendingBills = [];

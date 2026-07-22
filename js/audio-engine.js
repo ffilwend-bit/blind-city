@@ -352,6 +352,12 @@ const SOUND_FILES = {
   veh1_ouverture_porte: 'sounds/veh1_ouverture_porte.mp3',
   veh1_verrouillage: 'sounds/veh1_verrouillage.mp3',
   sfx_porte_vehicule: 'sounds/sfx_porte_vehicule.wav', // signal des portières (choix de portière, balise de porte)
+  // Chien guide (labrador) : aboiements de 1 à 5 fois selon l'intensité.
+  chien_aboie_court: 'sounds/chien_aboie_court.wav', // repère de position discret
+  chien_aboie_1: 'sounds/chien_aboie_1.wav',
+  chien_aboie_2: 'sounds/chien_aboie_2.wav',
+  chien_aboie_3: 'sounds/chien_aboie_3.wav',
+  chien_aboie_5: 'sounds/chien_aboie_5.wav',       // alerte de danger
   // Sons annexes indépendants (pas encore intégrés à un système précis —
   // disponibles pour la suite : frein à main, ceinture, klaxon, essuie-glace,
   // clignotant, passage d'un véhicule/avion à l'extérieur).

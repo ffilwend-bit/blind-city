@@ -734,8 +734,8 @@ function setupInput() {
     // Verrouillage de cible 1 à 9. On lit e.code (Digit1.../Numpad1...) plutôt que
     // e.key : sur un clavier AZERTY, la rangée du haut sans Maj donne & é " ' ( etc.,
     // donc e.key n'était jamais "1".."9" et le ciblage ne marchait pas.
-    else if (e.code && /^(Digit|Numpad)[1-9]$/.test(e.code)) Game.target(parseInt(e.code.replace(/\D/g, ''), 10));
-    else if (['1','2','3','4','5','6','7','8','9'].includes(key)) Game.target(parseInt(key, 10));
+    else if (e.code && /^(Digit|Numpad)[1-9]$/.test(e.code) && !e.shiftKey && !e.altKey && !e.ctrlKey) Game.target(parseInt(e.code.replace(/\D/g, ''), 10));
+    else if (['1','2','3','4','5','6','7','8','9'].includes(key) && !e.shiftKey && !e.altKey && !e.ctrlKey) Game.target(parseInt(key, 10));
     else if (key === '!') Game.setHeadingDirect(0); // Nord
     else if (key === ';') Game.setHeadingDirect(2); // Est
     else if (key === ',') Game.setHeadingDirect(4); // Sud
@@ -1062,6 +1062,9 @@ function gameLoop() {
 
     // Mission proximity check
     if (Game.activeMission) Game.checkMission();
+
+    // Chien guide : suivi, guidage à la laisse, besoins (faim/soif/fatigue).
+    if (typeof GuideDog !== 'undefined') GuideDog.tick();
   } catch (e) {
     // Une erreur ponctuelle ici ne doit jamais arrêter toute la boucle de jeu
     // (sons d'ambiance, moteur, police, missions) pour le reste de la session.
