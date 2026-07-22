@@ -37,6 +37,8 @@ function setupExtraInput() {
     else if (ctrl && key === 't') { e.preventDefault(); openTalkieMenu(); }
     else if (ctrl && key === 'y') { e.preventDefault(); Game.rpTalk(); }
     else if (ctrl && key === 'e') { e.preventDefault(); Game.throwGrenade(); }
+    else if (shift && key === 'e') { e.preventDefault(); Game.changeFloor(1); }   // monter d'un étage
+    else if (alt && key === 'e') { e.preventDefault(); Game.changeFloor(-1); }     // descendre d'un étage
     else if (ctrl && (['1','2','3','4','5','6','7','8','9'].includes(key))) { e.preventDefault(); Game.target(parseInt(key, 10)); }
     else if (alt && key === 'f') { e.preventDefault(); Game.searchSelf(); }
     else if (alt && key === 'v') { e.preventDefault(); Game.openVehicleInfo(Game.vehicle || City.vehicles.find(v => UTIL.dist(v, Game) < 4)); }

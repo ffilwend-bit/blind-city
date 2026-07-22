@@ -1,5 +1,5 @@
 const Game = {
-  x: 120, y: 120, altitude: 0, heading: 0, health: 100, maxHealth: 100,
+  x: 120, y: 120, altitude: 0, floor: 0, heading: 0, health: 100, maxHealth: 100,
   money: 100000, bank: 0, dirtyMoney: 0, handsUp: false, hunger: 50, thirst: 50, energy: 100,
   inVehicle: false, vehicle: null, ownedVehicles: [],
   inventory: [], backpack: false, belt: false, holster: null,
@@ -154,6 +154,7 @@ const Game = {
       AudioLib.stopLoop('eau_mer_amb');
       if (this.underwater) { this.underwater = false; AudioLib.stopLoop('eau_nage_sous'); }
     }
+    this._syncFloorOnMove();
     if (!(surface === 'water' && this.underwater)) Audio.footstep(surface);
     // En déplacement continu (touche maintenue), annoncer "vous avancez" à chaque
     // pas ferait annuler la synthèse vocale avant qu'elle n'ait eu le temps de
@@ -418,7 +419,7 @@ const Game = {
       AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 });
       setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
     }
-    this.vehicle = v; this.inVehicle = true; this.altitude = v.altitude || 0;
+    this.vehicle = v; this.inVehicle = true; this.altitude = v.altitude || 0; this.floor = 0;
     announce(`Vous montez au volant de ${v.name}. Flèches pour conduire, espace pour freiner, M pour conduite auto.`, 'assertive');
     if (this.activeMission && this.activeMission.type === 'convoyage' && this.activeMission.vehicleId === v.id && !this.deliveryState) this.startVehicleDelivery(this.activeMission);
     updateHud();
@@ -568,7 +569,8 @@ const Game = {
     const street = City.isRoad(this.x, this.y) ? 'sur la route' : `près d\'un ${City.getTile(this.x, this.y)}`;
     const bearing = UTIL.cardinals[this.heading];
     const alt = this.altitude > 0 ? `, altitude ${Math.round(this.altitude)} mètres` : '';
-    announce(`Vous êtes dans ${d.name}, ${street}, cap vers le ${bearing}${alt}.`, 'polite');
+    const etage = (!this.inVehicle && this.floor > 0) ? `, étage ${this.floor}` : '';
+    announce(`Vous êtes dans ${d.name}, ${street}, cap vers le ${bearing}${etage}${alt}.`, 'polite');
   },
 
   /* ==========================================================
@@ -1043,6 +1045,47 @@ const Game = {
     announce(`Porte de ${t.name}, ${cote}, ${pas} pas.`, 'assertive');
   },
 
+  // Positions surélevées (étages). On peut monter dans un bâtiment à étages
+  // pour prendre un avantage de tireur embusqué : +5 % de précision par étage
+  // gravi. On redescend automatiquement au rez-de-chaussée en quittant le
+  // bâtiment. Bornage à MAX_FLOOR_BONUS pour rester équilibré.
+  MAX_FLOOR_BONUS: 0.4, // +40 % max (au-delà du 8e étage, plus de gain)
+
+  // Bâtiment à étages sur lequel se tient le joueur (rez-de-chaussée compris).
+  getCurrentTallBuilding() {
+    let best = null, bd = 2.5;
+    (City.pois || []).forEach(p => {
+      if ((p.floors || 1) <= 1) return;
+      const d = UTIL.dist(p, this);
+      if (d < bd) { bd = d; best = p; }
+    });
+    return best;
+  },
+  // Monte (+1) ou descend (−1) d'un étage dans le bâtiment courant.
+  changeFloor(dir) {
+    if (this.inVehicle) return announce('Impossible de changer d\'étage en véhicule.', 'assertive');
+    const b = this.getCurrentTallBuilding();
+    if (!b) return announce('Vous n\'êtes pas dans un bâtiment à étages. Approchez-vous d\'un immeuble.', 'assertive');
+    const maxFloor = (b.floors || 1) - 1;
+    const nf = UTIL.clamp((this.floor || 0) + dir, 0, maxFloor);
+    if (nf === this.floor) {
+      return announce(dir > 0 ? `Dernier étage atteint : étage ${nf} sur ${maxFloor}.` : 'Vous êtes déjà au rez-de-chaussée.', 'assertive');
+    }
+    this.floor = nf;
+    // Son d'ascension/descente (aigu en montant, grave en descendant).
+    if (window.Audio && Audio.tone) Audio.tone({ freq: dir > 0 ? 660 : 330, type: 'sine', duration: 0.14, gain: 0.1, pan: 0 });
+    const bonus = Math.min(this.MAX_FLOOR_BONUS, this.floor * 0.05);
+    const etage = this.floor === 0 ? 'rez-de-chaussée' : `étage ${this.floor}`;
+    announce(`${b.name}, ${etage}${this.floor > 0 ? `, précision de tir plus ${Math.round(bonus * 100)} pour cent` : ''}.`, 'assertive');
+  },
+  // Appelé au déplacement à pied : si l'on s'éloigne du bâtiment, on redescend.
+  _syncFloorOnMove() {
+    if ((this.floor || 0) > 0 && !this.getCurrentTallBuilding()) {
+      this.floor = 0;
+      announce('Vous quittez le bâtiment. Retour au rez-de-chaussée.', 'polite');
+    }
+  },
+
   // Visite guidée vocale de la ville : structure générale, quartiers et leur
   // direction depuis la position actuelle. Relançable par une touche.
   cityTour() {
@@ -1146,12 +1189,13 @@ const Game = {
     const live = this.getLiveTarget();
     const target = live ? { ...this.lockedTarget, ...live } : null;
     const range = target ? UTIL.dist(target, this) : 0;
-    // altitude advantage
+    // Avantage de hauteur : altitude (véhicule volant) OU étage (à pied).
     const heightBonus = this.altitude > 0 ? Math.min(0.15, this.altitude * 0.01) : 0;
+    const floorBonus = (!this.inVehicle && this.floor > 0) ? Math.min(this.MAX_FLOOR_BONUS, this.floor * 0.05) : 0;
     let acc = w.accuracy;
     if (this.aimPart === 'tete') acc *= 0.75; else if (this.aimPart === 'jambes') acc *= 0.85;
     if (range > w.range) acc *= 0.3;
-    acc += heightBonus;
+    acc += heightBonus + floorBonus;
     this.ammo[w.ammoType]--;
     Audio.gunshot(w.name, 0);
     setTimeout(() => Audio.shellDrop(0), 150);
@@ -1940,6 +1984,62 @@ const Game = {
     const price = Math.floor((it.price || 1000) * 0.6);
     this.money += price; this.removeItem(it.id, 1);
     Audio.cash(); announce(`Vous vendez ${it.name} pour ${UTIL.formatMoney(price)}.`, 'polite'); updateHud();
+  },
+
+  // Demande de revente aux passants selon le quartier : plus un quartier est
+  // commerçant et animé, plus les passants achètent cher et ont du budget.
+  // Gounghin (forte) > Cissin (moyenne) > Koulouba (faible) > Aéroport (très
+  // faible). Renvoie un multiplicateur de prix et une fourchette de budget.
+  npcDemandFactor(districtName) {
+    const name = districtName || '';
+    if (/Gounghin/i.test(name)) return { mult: 1.3, budgetMin: 20000, budgetMax: 50000, label: 'forte' };
+    if (/Cissin/i.test(name)) return { mult: 1.0, budgetMin: 12000, budgetMax: 30000, label: 'moyenne' };
+    if (/Koulouba/i.test(name)) return { mult: 0.7, budgetMin: 8000, budgetMax: 18000, label: 'faible' };
+    if (/A[ée]roport/i.test(name)) return { mult: 0.4, budgetMin: 5000, budgetMax: 12000, label: 'très faible' };
+    return { mult: 0.85, budgetMin: 8000, budgetMax: 25000, label: 'ordinaire' };
+  },
+  // Vendre un objet de l'inventaire à un passant. On cherche un civil proche,
+  // non hostile ; s'il a le budget (selon le quartier), il se dirige vers le
+  // vendeur et la vente se conclut à son arrivée (voir npcTick).
+  sellToNPC(itemId, qty = 1) {
+    const it = this.inventory.find(i => i.id === itemId) || this.inventory[0];
+    if (!it) return announce('Rien à vendre.', 'assertive');
+    qty = Math.min(Math.max(1, Math.floor(qty) || 1), it.q || 1);
+    // Acheteur : un passant civil, non hostile, vivant, non déjà occupé, proche.
+    const buyer = (City.npcs || [])
+      .filter(n => !n.dead && !n.hostile && !n.menotte && !n.knockedOut && !n.wantsToBuyItem
+        && (n.job === 'civil' || n.job === 'commercant' || n.job === 'vendeur' || n.job === 'etudiant' || n.job === 'employe' || n.job === 'retraite')
+        && UTIL.dist(n, this) < 14)
+      .sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+    if (!buyer) return announce('Aucun passant intéressé à proximité. Rapprochez-vous d\'une zone animée.', 'assertive');
+    const demand = this.npcDemandFactor(City.getDistrictAt(this.x, this.y).name);
+    const price = Math.max(1, Math.floor((it.price || 1000) * demand.mult * qty));
+    // Budget du passant dans ce quartier.
+    const budget = UTIL.randInt(demand.budgetMin, demand.budgetMax);
+    if (budget < price) {
+      return announce(`${buyer.name} n'a pas les moyens : ${UTIL.formatMoney(budget)} en poche, vous demandez ${UTIL.formatMoney(price)}. La demande est ${demand.label} ici.`, 'assertive');
+    }
+    buyer.money = budget;
+    buyer.wantsToBuyItem = { itemId: it.id, qty, price, name: it.name, expires: Date.now() + 30000 };
+    // Repère sonore de l'acheteur qui approche.
+    if (window.Audio && Audio.tone) Audio.tone({ freq: 620, type: 'sine', duration: 0.12, gain: 0.1, pan: this.panForPoint(buyer.x, buyer.y) });
+    announce(`${buyer.name} est intéressé par ${it.name} pour ${UTIL.formatMoney(price)} et se dirige vers vous. Demande ${demand.label} dans ce quartier. Restez sur place.`, 'assertive');
+  },
+  // Conclut la vente quand l'acheteur arrive à portée du vendeur.
+  completeNPCSale(n) {
+    const deal = n.wantsToBuyItem;
+    if (!deal) return;
+    n.wantsToBuyItem = null;
+    const it = this.inventory.find(i => i.id === deal.itemId);
+    if (!it || (it.q || 1) < deal.qty) {
+      return announce(`${n.name} est venu acheter ${deal.name}, mais vous ne l'avez plus.`, 'polite');
+    }
+    this.money += deal.price;
+    n.money = Math.max(0, (n.money || 0) - deal.price);
+    this.removeItem(deal.itemId, deal.qty);
+    Audio.cash();
+    announce(`Vente conclue : ${deal.qty} ${deal.name} à ${n.name} pour ${UTIL.formatMoney(deal.price)}.`, 'assertive');
+    updateHud();
   },
   openVehicleShop(poi) {
     const available = Object.entries(VEHICLE_CATALOG).map(([k, v]) => ({ id: k, ...v }));
@@ -3542,7 +3642,7 @@ const Game = {
     announce('Conduite automatique : dites un lieu, par exemple hôpital, police, banque, magasin, armurerie, aéroport, héliport, port, mine.', 'polite');
   },
   help() {
-    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+G arrêter le guidage, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
+    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+G arrêter le guidage, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
   },
 
   // Save / load

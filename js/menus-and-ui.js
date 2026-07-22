@@ -39,6 +39,7 @@ function openItemActionMenu(itemId) {
   const actions = [
     { id: 'use', title: '🖐️ Utiliser / Porter', desc: 'Utiliser, porter ou consommer cet objet.' },
     { id: 'give', title: '🤝 Donner', desc: qty > 1 ? `Choisir la quantité à donner (jusqu'à ${qty}) à la cible verrouillée.` : 'Donner l\'objet à la cible verrouillée.' },
+    { id: 'sellnpc', title: '💰 Vendre à un passant', desc: 'Proposer l\'objet à un passant proche ; s\'il a le budget, il vient l\'acheter. Le prix dépend du quartier.' },
     { id: 'drop', title: '⬇️ Déposer au sol', desc: qty > 1 ? `Choisir la quantité à déposer (jusqu'à ${qty}).` : 'Déposer l\'objet au sol.' },
     { id: 'back', title: '↩️ Retour à l\'inventaire', desc: 'Revenir à la liste des objets.' },
   ];
@@ -48,6 +49,11 @@ function openItemActionMenu(itemId) {
     if (a.id === 'give') {
       if (qty > 1) QtyPicker.open(`Donner ${it.name}`, qty, (n) => { Game.giveItem(itemId, null, n); });
       else Game.giveItem(itemId, null, 1);
+      closeMenu(); return;
+    }
+    if (a.id === 'sellnpc') {
+      if (qty > 1) QtyPicker.open(`Vendre ${it.name} à un passant`, qty, (n) => { Game.sellToNPC(itemId, n); });
+      else Game.sellToNPC(itemId, 1);
       closeMenu(); return;
     }
     if (a.id === 'drop') {
@@ -706,7 +712,7 @@ function setupInput() {
     else if (key === 'arrowleft') Game.turn(-1);
     else if (key === 'arrowright') Game.turn(1);
     else if (key === ' ') { e.preventDefault(); Game.inVehicle ? Game.brakeVehicle() : Game.move(0, 1); }
-    else if (key === 'e') Game.interact();
+    else if (key === 'e' && !e.ctrlKey && !e.shiftKey && !e.altKey) Game.interact();
     else if (key === 'm') openMainMenu();
     else if (key === 'v') toggleProxVoice(); // micro de proximité : bascule, on active puis on désactive
     else if (key === 's' && !e.ctrlKey && !e.shiftKey && !e.altKey) talkieVoiceStart(); // talkie : maintenir pour parler

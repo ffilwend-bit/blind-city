@@ -24,6 +24,21 @@ SHOP_CATALOG.push(...VALUABLE_CATALOG);
 function npcTick() {
   for (const n of City.npcs) {
     if (n.dead) continue;
+    // Passant venu acheter un objet au joueur : il se dirige vers le vendeur et
+    // conclut la vente à son arrivée. Abandon si le délai expire.
+    if (n.wantsToBuyItem) {
+      if (Date.now() > n.wantsToBuyItem.expires) {
+        announce(`${n.name} s'est lassé d'attendre et renonce à l'achat.`, 'polite');
+        n.wantsToBuyItem = null;
+      } else if (UTIL.dist(n, Game) < 2) {
+        Game.completeNPCSale(n);
+      } else {
+        const dx = Math.sign(Game.x - n.x), dy = Math.sign(Game.y - n.y);
+        const nx = n.x + (dx || 0), ny = n.y + (dy || 0);
+        if (nx >= 0 && ny >= 0 && nx < City.W && ny < City.H && !City.isSolid(nx, ny)) { n.x = nx; n.y = ny; }
+      }
+      continue;
+    }
     // Un fugitif recherché (chasse aux primes) fuit activement le joueur tant
     // qu'il n'est pas menotté, au lieu d'errer au hasard.
     if (n.job === 'fugitif' && !n.menotte && !n.knockedOut && UTIL.dist(n, Game) < 8) {
