@@ -350,7 +350,7 @@ const Net = {
     }
     // Passager d'un autre joueur (taxi, covoiturage) : notre position suit celle
     // du chauffeur. S'il se déconnecte ou descend de son véhicule, on descend.
-    if (Game.ridingWith) {
+    if (Game.ridingWith && Game.ridingWith.id) {
       const driver = this.remotePlayers.get(Game.ridingWith.id);
       if (!driver || !driver.inVehicle) {
         const name = Game.ridingWith.name;

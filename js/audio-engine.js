@@ -350,6 +350,7 @@ const SOUND_FILES = {
   veh1_fermeture_porte: 'sounds/veh1_fermeture_porte.mp3',
   veh1_ouverture_porte: 'sounds/veh1_ouverture_porte.mp3',
   veh1_verrouillage: 'sounds/veh1_verrouillage.mp3',
+  sfx_porte_vehicule: 'sounds/sfx_porte_vehicule.wav', // signal des portières (choix de portière, balise de porte)
   // Sons annexes indépendants (pas encore intégrés à un système précis —
   // disponibles pour la suite : frein à main, ceinture, klaxon, essuie-glace,
   // clignotant, passage d'un véhicule/avion à l'extérieur).

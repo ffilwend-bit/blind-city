@@ -973,21 +973,24 @@ function setupInput() {
 ============================================================ */
 function gameLoop() {
   try {
+    // Passager assis dans un véhicule (sans chauffeur réel suivi) : on suit la
+    // position du véhicule — s'il n'existe plus, on descend.
+    if (Game.ridingWith && Game.ridingWith.vehicleId && !Game.ridingWith.id) {
+      const rv = City.vehicles.find(v => v.id === Game.ridingWith.vehicleId);
+      if (rv) { Game.x = rv.x; Game.y = rv.y; } else { Game.ridingWith = null; }
+    }
     // Déplacement/rotation continus tant qu'une touche reste enfoncée. Le premier
     // appui a déjà fait un pas (voir setupInput, qui ignore les répétitions
     // automatiques du système) ; ici on prend le relais à un rythme régulier et
     // maîtrisé, pour avancer/tourner en continu sans dépendre de la vitesse de
     // répétition (très variable) du clavier de l'utilisateur.
     const menuIsOpen = el('menuOverlay').style.display === 'flex';
-    if (!Game.inVehicle && !menuIsOpen && !(typeof QtyPicker !== 'undefined' && QtyPicker.active)) {
-      const now = Date.now();
-      if (now - (Game._lastContinuousMove || 0) > 220) {
-        if (Game.keys.has('arrowup')) { Game.moveForward(); Game._lastContinuousMove = now; }
-        else if (Game.keys.has('arrowdown')) { Game.moveBackward(); Game._lastContinuousMove = now; }
-        else if (Game.keys.has('arrowleft')) { Game.turn(-1); Game._lastContinuousMove = now; }
-        else if (Game.keys.has('arrowright')) { Game.turn(1); Game._lastContinuousMove = now; }
-      }
-    } else if (Game.inVehicle && Game.vehicle && !Game.vehicle.auto && !menuIsOpen) {
+    // À PIED : PLUS de répétition automatique au clavier. Une pression de flèche
+    // = un seul pas ou une seule rotation (géré dans setupInput au keydown, qui
+    // ignore déjà les répétitions système via e.repeat). Pour avancer plusieurs
+    // fois / "courir", on appuie plusieurs fois. Le geste tactile "glisser et
+    // garder" reste, lui, un déplacement continu voulu.
+    if (Game.inVehicle && Game.vehicle && !Game.vehicle.auto && !menuIsOpen) {
       // Conduite : accélération/freinage à chaque image pour une sensation fluide
       // et continue (contrairement au pas-à-pas piéton, volontairement cadencé).
       const fwd = Game.keys.has('arrowup');
@@ -1096,6 +1099,22 @@ function startGame(seed) {
     guard = 0;
     while (surrounded() && guard < 500) { fallback(); guard++; }
   } catch (e) { console.error('Placement initial du joueur en échec :', e); const s = City.spawnPoint || { x: 120, y: 120 }; Game.x = s.x; Game.y = s.y; }
+  // Vélo offert à TOUT joueur qui n'en possède pas encore : posé déverrouillé
+  // juste à côté, pour que personne ne soit sans moyen de transport (conduite
+  // automatique possible, aucun permis requis). Nouveaux joueurs comme anciens.
+  try {
+    const ownsBike = (Game.ownedVehicles || []).map(vid => City.vehicles.find(v => v.id === vid)).some(v => v && v.type === 'velo');
+    if (!ownsBike && typeof VEHICLE_CATALOG !== 'undefined' && VEHICLE_CATALOG.velo) {
+      const id = 'freebike_' + (Net.accountUsername || Net.id || 'solo');
+      const free = City.findFree(Game.x - 2, Game.y - 2, Game.x + 2, Game.y + 2) || { x: Game.x + 1, y: Game.y + 1 };
+      if (!City.vehicles.some(v => v.id === id)) {
+        City.vehicles.push({ id, type: 'velo', name: VEHICLE_CATALOG.velo.name, x: free.x, y: free.y, fuel: 1, hp: 100, locked: false, owner: 'player', inventory: [], auto: false, altitude: 0, speed: 0, heading: 0, autoDest: null, price: 0, trunk: VEHICLE_CATALOG.velo.trunk, passengers: [], openDoors: new Set() });
+      }
+      Game.ownedVehicles = Game.ownedVehicles || [];
+      if (!Game.ownedVehicles.includes(id)) Game.ownedVehicles.push(id);
+      setTimeout(() => announce('Un vélo vous est offert, déverrouillé, juste à côté de vous : aucun permis n\'est requis pour vous déplacer avec, y compris en conduite automatique.', 'polite'), 6000);
+    }
+  } catch (e) { console.error('Vélo offert : échec', e); }
   // Numéro de téléphone principal : généré une seule fois, à la toute
   // première partie (ou pour une ancienne sauvegarde qui n'en a pas encore).
   if (!Array.isArray(Game.phones) || !Game.phones.length) {

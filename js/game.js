@@ -368,43 +368,71 @@ const Game = {
       // Déjà passager : appuyer de nouveau fait descendre.
       this.leavePassengerSeat();
     } else {
-      // Un autre joueur est au volant juste à côté (par ex. le taxi qu'on a
-      // appelé) : on monte comme PASSAGER — aucun permis requis, on ne conduit
-      // pas, on suit simplement le trajet du chauffeur.
+      // Choix de la PORTIÈRE. On repère le véhicule le plus proche (possédé ou
+      // non — un taxi peut appartenir à son chauffeur) et un éventuel chauffeur
+      // réel au volant tout près.
       const driver = this.getNearbyRemoteDriver();
-      if (driver) { this.boardAsPassenger(driver); updateHud(); return; }
-      const nearby = City.vehicles.filter(v => UTIL.dist({ x: this.x, y: this.y }, v) < 4 && !v.owner);
-      const v = nearby.sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
-      if (!v) return announce('Aucun véhicule à proximité, et aucun chauffeur à côté pour monter comme passager.', 'assertive');
-      if (v.locked && !this.ownedVehicles.includes(v.id)) {
-        Audio.beep(0, 700);
-        AccessibleConfirm.open(`${v.name} est verrouillé`, 'Forcer la portière ? Cela déclenchera l\'alarme antivol et attirera l\'attention.', (force) => {
-          if (!force) return announce('Véhicule verrouillé.', 'assertive');
-          AudioLib.playOnce('sfx_alarme_antivol');
-          Game.reportCrimeToPolice('vol_vehicule', v.name);
-          this.wanted = Math.min(100, this.wanted + 15);
-          announce('Vous forcez la portière ! L\'alarme antivol retentit une fois : la police est alertée.', 'assertive');
-          setTimeout(() => {
-            v.locked = false;
-            announce('La portière a cédé, vous pouvez monter.', 'polite');
-          }, 12000);
-        });
-        return;
-      }
-      const cls = VEHICLE_CATALOG[v.type];
-      // Le permis est exigé pour conduire/piloter un vrai véhicule — mais pas
-      // pour un véhicule-école, qui sert justement à apprendre.
-      if (!v.examVehicle && !this.checkLicense(cls?.flies ? 'flying' : 'driving')) return;
-      if (cls && !cls.flies) {
-        AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 });
-        setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
-      }
-      this.vehicle = v; this.inVehicle = true; this.altitude = v.altitude || 0;
-      announce(`Vous montez dans ${v.name}. Flèches pour conduire, espace pour freiner, M pour conduite auto.`, 'assertive');
-      if (this.activeMission && this.activeMission.type === 'convoyage' && this.activeMission.vehicleId === v.id && !this.deliveryState) {
-        this.startVehicleDelivery(this.activeMission);
-      }
+      const v = City.vehicles.filter(vv => UTIL.dist(vv, this) < 4).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+      if (!v && !driver) { updateHud(); return announce('Aucun véhicule à proximité.', 'assertive'); }
+      this.openVehicleDoorMenu(v, driver);
     }
+    updateHud();
+  },
+  // Menu des portières : le joueur choisit par où monter. La portière CONDUCTEUR
+  // exige le permis ; les portières PASSAGER laissent monter sans permis (on ne
+  // conduit pas). Si un joueur réel conduit déjà, seules les portières passager
+  // sont proposées.
+  openVehicleDoorMenu(v, driver) {
+    const name = v ? v.name : (driver && driver.vehicleName ? driver.vehicleName : 'le véhicule');
+    AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
+    if (typeof ensureMenuOpen === 'function') ensureMenuOpen(); else el('menuOverlay').style.display = 'flex';
+    el('menuTitle').textContent = `Monter dans ${name}`;
+    const items = [];
+    if (!driver && v) items.push({ id: 'driver', title: '🚗 Portière conducteur', desc: 'Se mettre au volant et conduire. Nécessite le permis (ou un véhicule-école).' });
+    items.push({ id: 'front', title: '🧍 Portière passager avant', desc: 'Monter à l\'avant sans conduire. Aucun permis requis.' });
+    items.push({ id: 'rear', title: '🚪 Portière passager arrière', desc: 'Monter à l\'arrière sans conduire. Aucun permis requis.' });
+    renderMenu(items, (sel) => {
+      closeMenu();
+      if (sel.id === 'driver') this.enterAsDriver(v);
+      else this.enterAsPassengerSeat(v, driver);
+    });
+  },
+  enterAsDriver(v) {
+    if (!v) return announce('Aucun véhicule à conduire ici.', 'assertive');
+    if (v.locked && !this.ownedVehicles.includes(v.id)) {
+      Audio.beep(0, 700);
+      AccessibleConfirm.open(`${v.name} est verrouillé`, 'Forcer la portière ? Cela déclenchera l\'alarme antivol et attirera l\'attention.', (force) => {
+        if (!force) return announce('Véhicule verrouillé.', 'assertive');
+        AudioLib.playOnce('sfx_alarme_antivol');
+        Game.reportCrimeToPolice('vol_vehicule', v.name);
+        this.wanted = Math.min(100, this.wanted + 15);
+        announce('Vous forcez la portière ! L\'alarme antivol retentit une fois : la police est alertée.', 'assertive');
+        setTimeout(() => { v.locked = false; announce('La portière a cédé, vous pouvez monter.', 'polite'); }, 12000);
+      });
+      return;
+    }
+    const cls = VEHICLE_CATALOG[v.type];
+    // Le permis est exigé pour conduire — mais pas pour un véhicule-école.
+    if (!v.examVehicle && !this.checkLicense(cls?.flies ? 'flying' : 'driving')) return;
+    if (cls && !cls.flies) {
+      AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 });
+      setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
+    }
+    this.vehicle = v; this.inVehicle = true; this.altitude = v.altitude || 0;
+    announce(`Vous montez au volant de ${v.name}. Flèches pour conduire, espace pour freiner, M pour conduite auto.`, 'assertive');
+    if (this.activeMission && this.activeMission.type === 'convoyage' && this.activeMission.vehicleId === v.id && !this.deliveryState) this.startVehicleDelivery(this.activeMission);
+    updateHud();
+  },
+  enterAsPassengerSeat(v, driver) {
+    // Un chauffeur réel conduit : on le suit en direct (position du chauffeur).
+    if (driver) { this.boardAsPassenger(driver); updateHud(); return; }
+    if (!v) return announce('Aucun véhicule où s\'asseoir ici.', 'assertive');
+    AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 });
+    setTimeout(() => AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }), 350);
+    // On s'assied côté passager : on suit la position du véhicule (utile si un
+    // autre joueur prend le volant), sans permis et sans conduire.
+    this.ridingWith = { id: null, name: v.name, vehicleId: v.id };
+    announce(`Vous montez côté passager de ${v.name}. Vous ne conduisez pas ; il faut quelqu'un au volant pour rouler. Appuyez sur Interagir pour descendre.`, 'assertive');
     updateHud();
   },
 
