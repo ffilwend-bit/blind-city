@@ -145,7 +145,7 @@ const Net = {
           Game.money -= msg.price;
           if (!Game.ownedHouses.includes(msg.houseId)) Game.ownedHouses.push(msg.houseId);
           const h = City.houses.find(h => h.id === msg.houseId);
-          if (h) h.owner = 'player';
+          if (h) { h.owner = 'player'; Game.registerOwnedProperty('maison', h); }
           sendWorldEdit('house_owner', { id: msg.houseId, owner: 'player' });
           announce(`Vous achetez ${msg.houseName} pour ${UTIL.formatMoney(msg.price)}.`, 'assertive');
           updateHud();

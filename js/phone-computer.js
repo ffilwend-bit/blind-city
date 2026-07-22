@@ -232,8 +232,13 @@ const Phone = {
         const dist = Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE);
         const dir = UTIL.bearing(p.x - Game.x, p.y - Game.y);
         const li = document.createElement('li');
-        li.innerHTML = `<span>${p.name} (${dist} m, ${dir})</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers ${p.name}, ${dist} mètres, direction ${dir}">🚶</button><button class="phone-btn" data-del aria-label="Supprimer le lieu ${p.name}">🗑️</button>`;
+        li.innerHTML = `<span>${p.name} (${dist} m, ${dir})</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers ${p.name}, ${dist} mètres, direction ${dir}">🚶</button><button class="phone-btn" data-rename aria-label="Renommer le lieu ${p.name}">✏️</button><button class="phone-btn" data-del aria-label="Supprimer le lieu ${p.name}">🗑️</button>`;
         li.querySelector('[data-walk]').addEventListener('click', () => { Game.setGuidance(p); Phone.closePhone(); });
+        li.querySelector('[data-rename]').addEventListener('click', () => {
+          AccessibleTextPrompt.open('Renommer le lieu', `Nouveau nom pour « ${p.name} ».`, p.name, (n) => {
+            if (n) { Game.renameSavedPlace(i, n); Phone.renderApp('myplaces'); }
+          });
+        });
         li.querySelector('[data-del]').addEventListener('click', () => { Game.removeSavedPlace(i); Phone.renderApp('myplaces'); });
         ul.appendChild(li);
       });

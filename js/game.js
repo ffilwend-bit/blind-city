@@ -975,6 +975,73 @@ const Game = {
     this.savedPlaces.splice(index, 1);
     announce(`Lieu "${name}" supprimé.`, 'assertive');
   },
+  // Renommer un lieu enregistré (ex. « Ma maison 1 » -> « Chez moi »).
+  renameSavedPlace(index, newName) {
+    if (!this.savedPlaces || !this.savedPlaces[index]) return;
+    const clean = (newName || '').trim().slice(0, 40);
+    if (!clean) return announce('Il faut donner un nom au lieu.', 'assertive');
+    this.savedPlaces[index].name = clean;
+    announce(`Lieu renommé « ${clean} ».`, 'assertive');
+  },
+  // Enregistre automatiquement une propriété achetée (maison, entrepôt,
+  // boutique) dans « Mes lieux », avec un nom numéroté et renommable.
+  // On peut en posséder plusieurs : « Ma maison 1 », « Ma maison 2 »…
+  registerOwnedProperty(kind, obj) {
+    if (!obj) return;
+    this.savedPlaces = this.savedPlaces || [];
+    const base = kind === 'maison' ? 'Ma maison'
+      : kind === 'entrepôt' ? 'Mon entrepôt'
+      : kind === 'boutique' ? 'Ma boutique'
+      : 'Ma propriété';
+    const propId = 'prop_' + kind + '_' + (obj.id != null ? obj.id : (Math.round(obj.x) + '_' + Math.round(obj.y)));
+    // Déjà enregistrée ? (rachat/relance) -> on ne duplique pas.
+    if (this.savedPlaces.some(p => p.propId === propId)) return;
+    const n = this.savedPlaces.filter(p => p.name && p.name.indexOf(base) === 0).length + 1;
+    this.savedPlaces.push({
+      name: `${base} ${n}`,
+      x: obj.x, y: obj.y,
+      propId, kind,
+    });
+    announce(`Propriété ajoutée à Mes lieux : « ${base} ${n} ».`, 'polite');
+  },
+  // Balise sonore de porte : localise la porte accessible la plus proche
+  // (bâtiment ou véhicule) et la fait « sonner » avec spatialisation stéréo,
+  // puis annonce la direction et la distance en pas. Touche D.
+  pingNearestDoor() {
+    const candidates = [];
+    const R = 20; // rayon de recherche en tuiles
+    // Points d'intérêt (bâtiments) avec une porte.
+    (City.pois || []).forEach(poi => {
+      const d = UTIL.dist(poi, this);
+      if (d <= R) candidates.push({ x: poi.x, y: poi.y, name: poi.name || 'bâtiment', d });
+    });
+    // Véhicules à proximité (portières).
+    (City.vehicles || []).forEach(v => {
+      const d = UTIL.dist(v, this);
+      if (d <= R) candidates.push({ x: v.x, y: v.y, name: v.name || 'véhicule', d });
+    });
+    if (!candidates.length) {
+      return announce('Aucune porte à proximité. Rapprochez-vous d\'un bâtiment ou d\'un véhicule.', 'assertive');
+    }
+    candidates.sort((a, b) => a.d - b.d);
+    const t = candidates[0];
+    const pas = Math.max(1, Math.round(UTIL.dist(t, this) * CONFIG.METERS_PER_TILE / 0.3)); // 1 pas = 30 cm
+    // Direction relative au cap du joueur pour spatialiser + décrire.
+    const pan = this.panForPoint(t.x, t.y);         // -1 gauche … +1 droite
+    const rel = this.relativeAngle(t.x, t.y);        // 0 devant … PI derrière
+    let cote;
+    if (rel < 0.55) cote = 'droit devant';
+    else if (rel > Math.PI - 0.55) cote = 'derrière vous';
+    else cote = (pan < 0) ? 'à gauche' : 'à droite';
+    // Son de porte spatialisé (volume selon la distance).
+    const vol = Math.max(0.15, Math.min(0.9, 1 - t.d / (R + 4)));
+    if (window.AudioLib && AudioLib.playOnce) AudioLib.playOnce('sfx_porte_vehicule', { volume: vol });
+    // Bip directionnel panoramique en renfort (grave = loin, aigu = proche).
+    if (window.Audio && Audio.tone) {
+      Audio.tone({ freq: 480 + (1 - vol) * -160 + 220 * vol, type: 'triangle', duration: 0.18, gain: 0.14, pan });
+    }
+    announce(`Porte de ${t.name}, ${cote}, ${pas} pas.`, 'assertive');
+  },
 
   // Visite guidée vocale de la ville : structure générale, quartiers et leur
   // direction depuis la position actuelle. Relançable par une touche.
@@ -1765,6 +1832,7 @@ const Game = {
         if (!confirmed) return;
         if (this.money < house.price) return announce(`Prix : ${UTIL.formatMoney(house.price)}. Trop cher.`, 'assertive');
         this.money -= house.price; this.ownedHouses.push(house.id); house.owner = 'player';
+        this.registerOwnedProperty('maison', house);
         sendWorldEdit('house_owner', { id: house.id, owner: 'player' });
         announce(`Vous achetez ${house.name} pour ${UTIL.formatMoney(house.price)}.`, 'assertive'); Audio.cash();
         announce(`Vous êtes chez vous, ${house.name}. Capacité de stockage : ${house.capacity}.`, 'polite');
@@ -1818,7 +1886,7 @@ const Game = {
   openWarehouse(poi) {
     if (!this.ownedWarehouses.includes(poi.id)) {
       const price = 500000;
-      if (this.money >= price) { this.money -= price; this.ownedWarehouses.push(poi.id); poi.owner = 'player'; Audio.cash(); announce(`Entrepôt acheté pour ${UTIL.formatMoney(price)}.`, 'assertive'); }
+      if (this.money >= price) { this.money -= price; this.ownedWarehouses.push(poi.id); poi.owner = 'player'; this.registerOwnedProperty('entrepôt', poi); Audio.cash(); announce(`Entrepôt acheté pour ${UTIL.formatMoney(price)}.`, 'assertive'); }
       else return announce(`Prix entrepôt : ${UTIL.formatMoney(price)}.`, 'assertive');
     }
     poi.storage = poi.storage || [];

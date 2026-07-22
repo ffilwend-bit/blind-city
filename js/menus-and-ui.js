@@ -718,6 +718,7 @@ function setupInput() {
     else if (key === 'i') Game.announceLocation();
     else if (key === 'o') Game.openGarage();
     else if (key === 'f') Game.soundRadar();
+    else if (key === 'd') Game.pingNearestDoor(); // balise sonore de la porte la plus proche
     else if (key === 'h') Game.help();
     else if (key === 'c') Game.soundCompass();
     else if (key === 'u') { Game.toggleCuffs(); }
