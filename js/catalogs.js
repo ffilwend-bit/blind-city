@@ -1,5 +1,5 @@
 const VEHICLE_CATALOG = {
-  velo: { name: 'Vélo', label: 'vélo', type: '2 roues', baseFreq: 28, mult: 12, wave: 'sine', maxSpeed: 0.55, accel: 0.04, brake: 0.06, turn: 1.0, offroad: 0.3, flies: false, wheels: 2, price: 300000, trunk: 8, seats: 1, doors: 0 },
+  velo: { name: 'Vélo', label: 'vélo', type: '2 roues', baseFreq: 28, mult: 12, wave: 'sine', maxSpeed: 0.55, accel: 0.04, brake: 0.06, turn: 1.0, offroad: 0.3, flies: false, wheels: 2, price: 300000, trunk: 8, seats: 1, doors: 0, noLicense: true, human: true },
   tricycle: { name: 'Tricycle', label: 'tricycle 3 roues', type: '3 roues', baseFreq: 50, mult: 30, wave: 'sawtooth', maxSpeed: 0.75, accel: 0.05, brake: 0.07, turn: 0.9, offroad: 0.4, flies: false, wheels: 3, price: 600000, trunk: 14, seats: 1, doors: 0 },
   quad: { name: 'Quad', label: 'quad 4 roues', type: '4 roues', baseFreq: 60, mult: 38, wave: 'sawtooth', maxSpeed: 0.95, accel: 0.07, brake: 0.08, turn: 1.1, offroad: 0.95, flies: false, wheels: 4, price: 1000000, trunk: 18, seats: 1, doors: 0 },
   moto_125: { name: 'Moto 125cc', label: 'moto 125cc', type: 'moto', baseFreq: 70, mult: 50, wave: 'square', maxSpeed: 1.05, accel: 0.09, brake: 0.1, turn: 1.2, offroad: 0.55, flies: false, wheels: 2, price: 350000, trunk: 10, seats: 2, doors: 0 },
@@ -195,6 +195,18 @@ function generateShopCatalog() {
 }
 
 const SHOP_CATALOG = generateShopCatalog();
+
+// Stupéfiants vendus au marché noir : illégaux, revendables (voir la revente
+// aux passants) et consommables avec un effet passager. Détenir ou vendre
+// attire l'attention de la police.
+const DRUG_CATALOG = [
+  { id: 'herbe', name: 'Herbe', category: 'stupefiant', price: 15000, size: 0.5, legal: false, consumable: true, effect: 'calme', desc: 'Stupéfiant. Illégal. Se revend bien dans les quartiers animés.' },
+  { id: 'hashish', name: 'Haschich', category: 'stupefiant', price: 22000, size: 0.5, legal: false, consumable: true, effect: 'calme', desc: 'Stupéfiant. Illégal.' },
+  { id: 'ecstasy', name: 'Ecstasy', category: 'stupefiant', price: 28000, size: 0.3, legal: false, consumable: true, effect: 'euphorie', desc: 'Cachets. Stupéfiant illégal.' },
+  { id: 'amphetamine', name: 'Amphétamines', category: 'stupefiant', price: 42000, size: 0.4, legal: false, consumable: true, effect: 'energie', desc: 'Stupéfiant illégal, très recherché.' },
+  { id: 'cocaine', name: 'Cocaïne', category: 'stupefiant', price: 65000, size: 0.4, legal: false, consumable: true, effect: 'euphorie', desc: 'Stupéfiant illégal, cher et surveillé.' },
+  { id: 'heroine', name: 'Héroïne', category: 'stupefiant', price: 85000, size: 0.4, legal: false, consumable: true, effect: 'calme', desc: 'Stupéfiant illégal, très dangereux.' },
+];
 
 /* ============================================================
    VILLE / MAP — génération procédurale, districts, POI, routes

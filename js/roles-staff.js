@@ -361,16 +361,37 @@ Game.startDrivingExam = function() {
   const school = City.pois.find(p => p.type === 'auto_ecole');
   if (!school || UTIL.dist(school, this) > 4) return announce('Revenez à l\'auto-école pour passer l\'examen.', 'assertive');
   this.money -= price; Audio.cash();
-  // Circuit de 4 points formant une boucle autour de l'auto-école.
+  // Trouve une tuile praticable (de préférence une route) proche du joueur pour
+  // y garer le véhicule-école : il ne faut SURTOUT pas le créer sur la tuile de
+  // l'auto-école, qui est un bâtiment solide — le véhicule y serait coincé et
+  // introuvable. On le pose juste à côté du candidat.
+  const freeSpotNear = (cx, cy) => {
+    for (let rad = 1; rad <= 8; rad++) {
+      let best = null;
+      for (let ox = -rad; ox <= rad; ox++) for (let oy = -rad; oy <= rad; oy++) {
+        if (Math.max(Math.abs(ox), Math.abs(oy)) !== rad) continue;
+        const x = UTIL.clamp(cx + ox, 0, City.W - 1), y = UTIL.clamp(cy + oy, 0, City.H - 1);
+        if (City.isSolid(x, y) || City.getTile(x, y) === 'eau') continue;
+        if (City.isRoad(x, y)) return { x, y };   // route = idéal, on prend tout de suite
+        if (!best) best = { x, y };
+      }
+      if (best) return best;
+    }
+    return { x: UTIL.clamp(cx, 0, City.W - 1), y: UTIL.clamp(cy, 0, City.H - 1) };
+  };
+  const spot = freeSpotNear(Math.round(this.x), Math.round(this.y));
+  // Circuit de 4 points praticables formant une boucle autour de l'auto-école.
   const r = 12;
   const waypoints = [0, 1, 2, 3].map(k => {
     const angle = (Math.PI / 2) * k;
-    return { x: UTIL.clamp(Math.round(school.x + Math.cos(angle) * r), 0, City.W - 1), y: UTIL.clamp(Math.round(school.y + Math.sin(angle) * r), 0, City.H - 1) };
+    return freeSpotNear(Math.round(school.x + Math.cos(angle) * r), Math.round(school.y + Math.sin(angle) * r));
   });
   const vid = 'exam_vehicle_' + Date.now();
-  City.vehicles.push({ id: vid, type: 'berline', name: 'Véhicule-école', x: school.x, y: school.y, fuel: 1, hp: 100, locked: false, owner: null, inventory: [], auto: false, altitude: 0, speed: 0, heading: 0, autoDest: null, price: 0, trunk: VEHICLE_CATALOG.berline.trunk, examVehicle: true });
+  City.vehicles.push({ id: vid, type: 'berline', name: 'Véhicule-école', x: spot.x, y: spot.y, fuel: 1, hp: 100, locked: false, owner: null, inventory: [], auto: false, altitude: 0, speed: 0, heading: 0, autoDest: null, price: 0, trunk: VEHICLE_CATALOG.berline.trunk, examVehicle: true });
   this.drivingExamState = { waypoints, current: 0, collisions: 0, vehicleId: vid, startHp: 100 };
-  announce(`Examen commencé ! Montez dans le véhicule-école et suivez mes indications. 4 points à passer, 2 collisions maximum tolérées. Direction le premier point.`, 'assertive');
+  announce(`Examen commencé ! Un véhicule-école vous attend juste à côté : appuyez sur E pour monter côté conducteur, aucun permis n'est requis. Suivez ensuite le guidage vocal jusqu'aux 4 points du circuit. 2 collisions maximum tolérées.`, 'assertive');
+  // Repère sonore vers le véhicule-école, puis guidage vers le premier point.
+  if (window.AudioLib) AudioLib.playPositional && AudioLib.playPositional('sfx_porte_vehicule', UTIL.clamp((spot.x - this.x) / 6, -1, 1), 0.6);
   this.setGuidance({ name: 'Point 1 du circuit', x: waypoints[0].x, y: waypoints[0].y });
 };
 // Appelé en continu tant qu'un examen est en cours (voir gameLoop).

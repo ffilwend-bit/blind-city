@@ -327,6 +327,10 @@ const City = {
       const items = SHOP_CATALOG.filter(i => i.category === 'outil' || i.category === 'electronique');
       for (let i = 0; i < 10; i++) { const it = UTIL.pick(items); stock.push({ ...it, q: 1, price: Math.floor(it.price * 0.5) }); }
       stock.push({ id: 'grenade', name: 'Grenade', category: 'explosif', price: 180000, q: UTIL.randInt(1, 3), size: 1, legal: false });
+      // Stupéfiants : illégaux, revendables (voir la revente aux passants) et
+      // consommables (effet passager). À manier avec prudence : détenir ou
+      // vendre attire la police.
+      for (const drug of DRUG_CATALOG) stock.push({ ...drug, q: UTIL.randInt(2, 12), price: Math.floor(drug.price * UTIL.rand(0.8, 1.3)) });
     }
     if (kind === 'medical') {
       const items = SHOP_CATALOG.filter(i => i.category === 'medicament');

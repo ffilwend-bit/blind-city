@@ -380,6 +380,10 @@ const Game = {
       const driver = this.getNearbyRemoteDriver();
       const v = City.vehicles.filter(vv => UTIL.dist(vv, this) < 4).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
       if (!v && !driver) { updateHud(); return announce('Aucun véhicule à proximité.', 'assertive'); }
+      // Vélo / véhicule à une seule place sans portières : pas de menu de
+      // portières (une seule place). On monte directement pour l'utiliser.
+      const vcls = v ? VEHICLE_CATALOG[v.type] : null;
+      if (v && !driver && (vcls?.doors === 0 || vcls?.seats <= 1)) return this.enterAsDriver(v);
       this.openVehicleDoorMenu(v, driver);
     }
     updateHud();
@@ -418,15 +422,17 @@ const Game = {
       return;
     }
     const cls = VEHICLE_CATALOG[v.type];
-    // Le permis est exigé pour conduire — mais pas pour un véhicule-école.
-    if (!v.examVehicle && !this.checkLicense(cls?.flies ? 'flying' : 'driving')) return;
+    // Le permis est exigé pour conduire — mais pas pour un véhicule-école, ni
+    // pour un vélo ou tout véhicule à propulsion humaine (cls.noLicense).
+    if (!v.examVehicle && !cls?.noLicense && !this.checkLicense(cls?.flies ? 'flying' : 'driving')) return;
     if (cls && !cls.flies) {
       AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 });
       if (Net.connected) Net.emitSound('veh1_ouverture_porte', { vol: 0.5 }); // porte audible par les joueurs proches
       setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
     }
     this.vehicle = v; this.inVehicle = true; this.altitude = v.altitude || 0; this.floor = 0;
-    announce(`Vous montez au volant de ${v.name}. Flèches pour conduire, espace pour freiner, M pour conduite auto.`, 'assertive');
+    if (cls?.human || cls?.doors === 0) announce(`Vous enfourchez ${v.name}. Flèches pour pédaler et tourner, espace pour freiner.`, 'assertive');
+    else announce(`Vous montez au volant de ${v.name}. Flèches pour conduire, espace pour freiner, M pour conduite auto.`, 'assertive');
     if (this.activeMission && this.activeMission.type === 'convoyage' && this.activeMission.vehicleId === v.id && !this.deliveryState) this.startVehicleDelivery(this.activeMission);
     updateHud();
   },
@@ -520,6 +526,20 @@ const Game = {
   useItem(id) {
     const it = this.inventory.find(i => i.id === id);
     if (!it) return;
+    if (it.category === 'stupefiant') {
+      // Consommer un stupéfiant : effet passager (énergie/euphorie/calme) mais
+      // ça attire l'attention de la police et ce n'est jamais bon pour la santé.
+      if (it.effect === 'energie') { this.energy = Math.min(100, this.energy + 40); }
+      else if (it.effect === 'euphorie') { this.energy = Math.min(100, this.energy + 20); this.hunger = Math.max(0, this.hunger - 15); }
+      else { this.thirst = Math.max(0, this.thirst - 10); } // 'calme'
+      this.health = Math.max(1, this.health - 5);
+      this.policeAwareness = Math.min(100, (this.policeAwareness || 0) + 10);
+      it.q--; if (it.q <= 0) this.removeItem(id, 1);
+      Audio.click();
+      announce(`Vous consommez ${it.name}. Effet ${it.effect || 'passager'}. Attention, la police veille.`, 'assertive');
+      updateHud();
+      return;
+    }
     if (it.consumable) {
       if (it.category === 'boisson') AudioLib.playOnce('eau_boire', { volume: 0.6 });
       if (it.hunger) this.hunger = Math.max(0, this.hunger - it.hunger);
@@ -1477,12 +1497,14 @@ const Game = {
     // Check NPC
     const nearby = City.npcs.filter(n => !n.dead && UTIL.dist(n, this) < 3).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
     if (nearby) { this.describePerson(nearby); return this.talkTo(nearby); }
-    // Check POI
-    const poi = City.pois.find(p => UTIL.dist(p, this) < 3);
-    if (poi) return this.enterPOI(poi);
+    // Check POI. Les bâtiments sont des tuiles solides : on se tient forcément
+    // à côté, jamais dessus, donc le rayon doit être assez large (4) pour ne
+    // pas rater l'entrée quand le guidage nous dépose juste devant la porte.
+    const poi = City.pois.map(p => ({ p, d: UTIL.dist(p, this) })).filter(o => o.d < 4).sort((a, b) => a.d - b.d)[0];
+    if (poi) return this.enterPOI(poi.p);
     // Check house
-    const house = City.houses.find(h => UTIL.dist(h, this) < 3);
-    if (house) return this.enterHouse(house);
+    const house = City.houses.map(h => ({ h, d: UTIL.dist(h, this) })).filter(o => o.d < 4).sort((a, b) => a.d - b.d)[0];
+    if (house) return this.enterHouse(house.h);
     // Check vehicle
     const veh = City.vehicles.filter(v => !this.inVehicle && UTIL.dist(v, this) < 3).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
     if (veh) return this.interactVehicle();
@@ -1494,7 +1516,21 @@ const Game = {
     if (gang) return this.beginGangRaid(gang);
     // Check objets au sol (ramassage, voir pickUpItems)
     if ((City.groundItems || []).some(it => UTIL.dist(it, this) < 2)) return this.pickUpItems();
-    announce('Rien à proximité. Faites un scan.', 'polite');
+    // Rien juste à portée : plutôt que de rester muet, on repère le lieu utile
+    // le plus proche (bâtiment, maison ou véhicule) dans un rayon élargi et on
+    // indique dans quelle direction avancer pour pouvoir interagir.
+    const near = [];
+    City.pois.forEach(p => near.push({ name: p.name, x: p.x, y: p.y, d: UTIL.dist(p, this) }));
+    City.houses.forEach(h => near.push({ name: h.name || 'une maison', x: h.x, y: h.y, d: UTIL.dist(h, this) }));
+    City.vehicles.forEach(v => { if (!this.inVehicle) near.push({ name: v.name, x: v.x, y: v.y, d: UTIL.dist(v, this) }); });
+    const closest = near.filter(o => o.d < 10).sort((a, b) => a.d - b.d)[0];
+    if (closest) {
+      const m = Math.round(closest.d * CONFIG.METERS_PER_TILE);
+      const dir = UTIL.bearing(closest.x - this.x, closest.y - this.y);
+      Audio.tone({ freq: 500, type: 'sine', duration: 0.12, gain: 0.08, pan: this.panForPoint(closest.x, closest.y) });
+      return announce(`${closest.name} est à ${m} mètres, vers le ${dir}. Approchez-vous encore un peu, puis appuyez de nouveau pour interagir.`, 'assertive');
+    }
+    announce('Rien à proximité. Faites un scan avec F.', 'polite');
   },
   // Enregistrer un contact sous un nom personnalisé : c'est CE nom qui sera
   // annoncé à chaque fois qu'on croise cette personne par la suite — jamais
@@ -2204,20 +2240,22 @@ const Game = {
     if (typeof Phone !== 'undefined' && Phone.open) Phone.closePhone();
     el('menuOverlay').style.display = 'flex';
     el('menuTitle').textContent = 'Missions';
-    if (!active.length) { renderMenu([{ id: 'empty', title: 'Aucune mission disponible', desc: '' }], () => {}); return; }
+    if (!active.length && !this.activeMission) { renderMenu([{ id: 'empty', title: 'Aucune mission disponible', desc: '' }], () => {}); return; }
     const items = active.map((m, i) => ({ id: String(i), title: `${m.title} — ${UTIL.formatMoney(m.reward)}`, desc: `${m.desc} Danger : ${m.danger}/100.` }));
     this.missionContext = active;
-    renderMenu(items, (sel) => { closeMenu(); this.activateMission(parseInt(sel.id, 10) + 1); });
+    if (this.activeMission) items.unshift({ id: 'cancel', title: `❌ Annuler la mission en cours : ${this.activeMission.title}`, desc: 'Arrête la mission active. Aucune pénalité.' });
+    renderMenu(items, (sel) => { closeMenu(); if (sel.id === 'cancel') this.abandonMission(); else this.activateMission(parseInt(sel.id, 10) + 1); });
   },
   openExtremeMissions() {
     const active = City.missions.filter(m => (m.active || !m.completed) && m.extreme).slice(0, 12);
     if (typeof Phone !== 'undefined' && Phone.open) Phone.closePhone();
     el('menuOverlay').style.display = 'flex';
     el('menuTitle').textContent = 'Missions extrêmes';
-    if (!active.length) { renderMenu([{ id: 'empty', title: 'Aucune mission extrême disponible pour l\'instant', desc: '' }], () => {}); return; }
+    if (!active.length && !this.activeMission) { renderMenu([{ id: 'empty', title: 'Aucune mission extrême disponible pour l\'instant', desc: '' }], () => {}); return; }
     const items = active.map((m, i) => ({ id: String(i), title: `💀 ${m.title} — ${UTIL.formatMoney(m.reward)}`, desc: `${m.desc} Danger : ${m.danger}/100.` }));
     this.missionContext = active;
-    renderMenu(items, (sel) => { closeMenu(); this.activateMission(parseInt(sel.id, 10) + 1); });
+    if (this.activeMission) items.unshift({ id: 'cancel', title: `❌ Annuler la mission en cours : ${this.activeMission.title}`, desc: 'Arrête la mission active. Aucune pénalité.' });
+    renderMenu(items, (sel) => { closeMenu(); if (sel.id === 'cancel') this.abandonMission(); else this.activateMission(parseInt(sel.id, 10) + 1); });
   },
   activateMission(index) {
     const m = this.missionContext?.[index - 1]; if (!m) return;
@@ -2257,6 +2295,20 @@ const Game = {
     } else {
       announce(`Mission activée : ${m.title}. ${m.desc}. Un repérage sonore vous guidera une fois à proximité.`, 'assertive');
     }
+    updateHud();
+  },
+  // Abandonner la mission en cours à tout moment, sans pénalité (on ne touche
+  // pas la récompense puisqu'elle n'est versée qu'à la réussite).
+  abandonMission() {
+    if (!this.activeMission) return announce('Aucune mission en cours à annuler.', 'assertive');
+    const m = this.activeMission;
+    m.active = false; m.completed = false;
+    this.activeMission = null;
+    // Réinitialise tous les états d'étape éventuels pour repartir proprement.
+    this.deliveryState = null; this.taxiState = null; this.escorteState = null;
+    this.heistState = null; this.combatState = null; this.pursuitState = null;
+    if (this.guidanceTarget) this.stopGuidance();
+    announce(`Mission « ${m.title} » annulée. Vous pouvez en relancer une autre quand vous voulez.`, 'assertive');
     updateHud();
   },
   checkMission() {
