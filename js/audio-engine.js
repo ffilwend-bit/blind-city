@@ -131,6 +131,7 @@ const Audio = {
     const group = FOOTSTEP_GROUPS[surface] || FOOTSTEP_GROUPS.concrete;
     const key = UTIL.pick(group);
     AudioLib.playOnce(key, { volume: 0.5 });
+    return key; // permet de relayer le même pas aux autres joueurs (audio partagé)
   },
   screech(pan = 0) { this.noise({ duration: 0.25, gain: 0.22, pan, filterFreq: 2500, attack: 0.01, release: 0.2 }); },
   siren(vol = 1) {

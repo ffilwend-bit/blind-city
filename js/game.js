@@ -138,6 +138,7 @@ const Game = {
     }
     if (City.isSolid(nx, ny)) {
       Audio.impact(UTIL.clamp(dx, -1, 1) * 0.5);
+      if (Net.connected) Net.emitSound('synth:impact', { vol: 0.5 });
       announce('Obstacle, vous n\'avancez pas. ' + City.getTile(nx, ny), 'assertive');
       return;
     }
@@ -155,7 +156,11 @@ const Game = {
       if (this.underwater) { this.underwater = false; AudioLib.stopLoop('eau_nage_sous'); }
     }
     this._syncFloorOnMove();
-    if (!(surface === 'water' && this.underwater)) Audio.footstep(surface);
+    if (!(surface === 'water' && this.underwater)) {
+      const stepKey = Audio.footstep(surface);
+      // Pas audibles par les joueurs proches (spatialisés chez eux).
+      if (Net.connected && stepKey) Net.emitSound(stepKey, { vol: 0.35 });
+    }
     // En déplacement continu (touche maintenue), annoncer "vous avancez" à chaque
     // pas ferait annuler la synthèse vocale avant qu'elle n'ait eu le temps de
     // sortir un seul mot (nouvelle annonce = coupe la précédente). On espace donc
@@ -417,6 +422,7 @@ const Game = {
     if (!v.examVehicle && !this.checkLicense(cls?.flies ? 'flying' : 'driving')) return;
     if (cls && !cls.flies) {
       AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 });
+      if (Net.connected) Net.emitSound('veh1_ouverture_porte', { vol: 0.5 }); // porte audible par les joueurs proches
       setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
     }
     this.vehicle = v; this.inVehicle = true; this.altitude = v.altitude || 0; this.floor = 0;
@@ -613,6 +619,36 @@ const Game = {
     const len = Math.hypot(dx, dy) || 1;
     const dot = (hx * dx + hy * dy) / len;
     return Math.acos(Math.max(-1, Math.min(1, dot))); // 0 = pile devant, PI = derrière
+  },
+
+  // Joue un son émis par un autre joueur (reçu du serveur), spatialisé et
+  // atténué selon la distance et sa position relative à notre cap. Sons du
+  // monde partagés : moteurs, pas, tirs, klaxon, sirène, portes, collisions.
+  playRemoteSound(msg) {
+    if (!msg || typeof msg.x !== 'number' || !msg.key) return;
+    const R = 30; // rayon audible (doit correspondre au SOUND_RADIUS serveur)
+    const d = UTIL.dist(msg, this);
+    if (d > R) return;
+    const pan = this.panForPoint(msg.x, msg.y);
+    const atten = Math.max(0, 1 - d / R);
+    const vol = Math.max(0.03, (typeof msg.vol === 'number' ? msg.vol : 0.5) * atten);
+    // Clés « synth:… » : effets synthétisés rejoués localement (mêmes sons que
+    // ceux entendus par l'émetteur), spatialisés par le pan.
+    if (msg.key.slice(0, 6) === 'synth:') {
+      const fx = msg.key.slice(6);
+      if (!window.Audio) return;
+      if (fx === 'gunshot') Audio.gunshot('', pan);
+      else if (fx === 'impact') Audio.impact(pan);
+      else if (fx === 'siren') Audio.siren(vol);
+      else if (fx === 'screech') Audio.screech(pan);
+      else if (fx === 'engine') Audio.tone({ freq: 90, type: 'sawtooth', duration: 0.3, gain: vol * 0.25, pan });
+      return;
+    }
+    // Sinon : fichier audio joué de façon panoramique.
+    if (window.AudioLib) {
+      if (AudioLib.playPositional) AudioLib.playPositional(msg.key, pan, vol);
+      else if (AudioLib.playOnce) AudioLib.playOnce(msg.key, { volume: vol });
+    }
   },
 
   // Pan stéréo (-1 gauche, +1 droite) d'un point selon l'orientation du joueur.
@@ -1198,6 +1234,7 @@ const Game = {
     acc += heightBonus + floorBonus;
     this.ammo[w.ammoType]--;
     Audio.gunshot(w.name, 0);
+    if (Net.connected) Net.emitSound('synth:gunshot', { vol: 0.95 }); // audible par les joueurs proches
     setTimeout(() => Audio.shellDrop(0), 150);
     if (Date.now() - (this._lastGunfireReport || 0) > 8000) {
       this._lastGunfireReport = Date.now();

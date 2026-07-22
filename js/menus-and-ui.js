@@ -1020,6 +1020,21 @@ function gameLoop() {
       Audio.playEngine(VEHICLE_CATALOG[Game.vehicle.type], Math.abs(Game.vehicle.speed) / VEHICLE_CATALOG[Game.vehicle.type].maxSpeed);
     }
 
+    // Sons partagés en réseau : moteur (quand on roule) et sirène (si active),
+    // émis à intervalle régulier pour que les joueurs proches les entendent,
+    // spatialisés selon notre position (voir Game.playRemoteSound).
+    if (Net.connected && Game.inVehicle && Game.vehicle) {
+      const nowS = Date.now();
+      if (Math.abs(Game.vehicle.speed) > 0 && nowS - (Game._lastEngineEmit || 0) > 400) {
+        Net.emitSound('synth:engine', { vol: 0.5 });
+        Game._lastEngineEmit = nowS;
+      }
+      if (Game.vehicle.siren && nowS - (Game._lastSirenEmit || 0) > 850) {
+        Net.emitSound('synth:siren', { vol: 0.7 });
+        Game._lastSirenEmit = nowS;
+      }
+    }
+
     // Véhicule immobile en pleine route = circulation bloquée : au bout de
     // quelques secondes, des automobilistes impatients se manifestent.
     if (Game.inVehicle && Game.vehicle && Game.vehicle.speed === 0 && City.isRoad(Game.vehicle.x, Game.vehicle.y)) {

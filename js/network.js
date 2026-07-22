@@ -230,6 +230,8 @@ const Net = {
       const d = from ? Math.round(UTIL.dist(from, Game) * CONFIG.METERS_PER_TILE) : null;
       speak(`${msg.fromName}${d !== null ? ', ' + d + ' mètres' : ''} dit : ${msg.text}`, 'polite');
       log(`💬 ${msg.fromName} : ${msg.text}`, 'chat');
+    } else if (msg.type === 'world_sound') {
+      Game.playRemoteSound(msg);
     } else if (msg.type === 'talkie_message') {
       speak(`Sur ${Number(msg.frequency).toFixed(3)} mégahertz, ${msg.fromName} dit : ${msg.text}`, 'polite');
       log(`📻 ${msg.fromName} (${Number(msg.frequency).toFixed(3)} MHz) : ${msg.text}`, 'talkie');
@@ -367,6 +369,13 @@ const Net = {
       airplane: !!(typeof Phone !== 'undefined' && Phone.airplane),
       voiceOpen: !!Game.voiceOpen, handsUp: !!Game.handsUp, unconscious: !!Game.unconscious, isCuffed: !!Game.isCuffed,
     });
+  },
+  // Émet un son du monde (audible par les joueurs proches). Ponctuel et léger :
+  // key = son à jouer ; opts.tone = son de synthèse (freq/dur) plutôt qu'un
+  // fichier ; opts.vol = volume de base à la source (0..1).
+  emitSound(key, opts = {}) {
+    if (!this.connected) return;
+    this.send({ type: 'world_sound', key, vol: opts.vol });
   },
   chat(text) { this.send({ type: 'chat', text }); },
   talkiePTT(text) { this.send({ type: 'talkie_ptt', text, frequency: Game.talkie.frequency }); },

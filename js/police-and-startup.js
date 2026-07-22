@@ -1214,6 +1214,7 @@ Game.honk = function() {
   else if (cls && cls.type === 'air') return announce('Pas de klaxon en vol.', 'polite');
   else if (cls && cls.price >= 8000000) key = 'klaxon_luxe'; // véhicule haut de gamme : klaxon distinctif
   AudioLib.playOnce(key);
+  if (Net.connected) Net.emitSound(key, { vol: 0.8 }); // klaxon audible par les joueurs proches
 };
 Game.searchSelf = function() {
   if (!this.inventory.length) return announce('Vos poches sont vides.', 'polite');
