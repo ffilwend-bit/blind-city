@@ -240,7 +240,7 @@ const Game = {
     if (cls.flies) RealAirEngine.update(v, cls, speedRatio);
     else if (cls.electric) RealElectricEngine.update(v, speedRatio);
     else if (cls.sport) RealEngine.update(v, cls, speedRatio);
-    else RealEngine2.update(v, speedRatio);
+    else if (!cls.human) RealEngine2.update(v, speedRatio); // le vélo n'a PAS de moteur : ses propres sons (updateBikeAudio) suffisent
     if (!cls.flies) {
       if (Weather.state === 'pluie') { if (!AudioLib.isLoopPlaying('veh_essuie_glaces')) AudioLib.playLoop('veh_essuie_glaces', 0.25); }
       else AudioLib.stopLoop('veh_essuie_glaces');
@@ -1406,7 +1406,13 @@ const Game = {
   // Cri d'un PNJ touché (coup ou balle) — voix d'homme, choisi au hasard
   // parmi les 7 variantes disponibles.
   playNpcHitCry(npc) {
-    AudioLib.playOnce(UTIL.pick(['cri_png_1', 'cri_png_2', 'cri_png_3', 'cri_png_4', 'cri_png_5', 'cri_png_6', 'cri_png_7']), { volume: 0.6 });
+    // Un seul cri par personne dans un court laps de temps : frapper plusieurs
+    // fois de suite ne doit pas empiler des cris qui se chevauchent.
+    const now = Date.now();
+    if (npc && npc._lastCry && now - npc._lastCry < 700) return;
+    if (npc) npc._lastCry = now;
+    if (AudioLib.playVoice) AudioLib.playVoice(UTIL.pick(['cri_png_1', 'cri_png_2', 'cri_png_3', 'cri_png_4', 'cri_png_5', 'cri_png_6', 'cri_png_7']), { volume: 0.6 });
+    else AudioLib.playOnce(UTIL.pick(['cri_png_1', 'cri_png_2', 'cri_png_3', 'cri_png_4', 'cri_png_5', 'cri_png_6', 'cri_png_7']), { volume: 0.6 });
   },
 
   // Réactions vocales des PNJ selon la situation (témoins de violence, PNJ
@@ -1414,6 +1420,11 @@ const Game = {
   // (NPCVoiceGroups) à utiliser : "panique" par défaut, "enerve" pour les
   // PNJ hostiles, et d'autres groupes viendront s'ajouter à l'avenir.
   npcVoiceReaction(cx, cy, opts = {}) {
+    // Anti-empilement : on ne déclenche pas une nouvelle salve de voix si la
+    // précédente vient tout juste de partir (sinon les réactions se compilent).
+    const now = Date.now();
+    if (now - (this._lastNpcVoice || 0) < 800) return;
+    this._lastNpcVoice = now;
     const radius = opts.radius || 14;
     const count = opts.count || 1;
     const groupName = opts.group || 'panique';

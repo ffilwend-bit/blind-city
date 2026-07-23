@@ -1156,7 +1156,13 @@ function startGame(seed) {
       if (!Game.ownedVehicles.includes(id)) Game.ownedVehicles.push(id);
       setTimeout(() => announce('Un vélo vous est offert, déverrouillé, juste à côté de vous : aucun permis n\'est requis pour vous déplacer avec, y compris en conduite automatique.', 'polite'), 6000);
     }
-  } catch (e) { console.error('Vélo offert : échec', e); }
+    // Chien guide offert à TOUS les joueurs (existants et nouveaux) : s'ils n'en
+    // ont pas déjà un, on leur en attribue un gratuitement.
+    if (typeof GuideDog !== 'undefined' && !GuideDog.has()) {
+      GuideDog.acquire();
+      setTimeout(() => announce(`Un chien guide, ${Game.guideDog ? Game.guideDog.name : 'votre compagnon'}, vous est offert. Prenez la laisse avec Maj+Alt+0 et choisissez une destination : il vous mènera. Menu du chien : Maj+Alt+1.`, 'polite'), 9000);
+    }
+  } catch (e) { console.error('Vélo / chien offert : échec', e); }
   // Numéro de téléphone principal : généré une seule fois, à la toute
   // première partie (ou pour une ancienne sauvegarde qui n'en a pas encore).
   if (!Array.isArray(Game.phones) || !Game.phones.length) {

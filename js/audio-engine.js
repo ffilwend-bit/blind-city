@@ -757,52 +757,100 @@ const AudioLib = {
   // Sans ça, après une pause ou un changement d'onglet, le navigateur refuse
   // souvent de relancer play() — d'où des ambiances qui marchent une fois puis
   // plus. On force ici chaque élément de boucle à être "réveillé".
+  // Boucles jouées via Web Audio (AudioBufferSourceNode.loop) : le bouclage est
+  // alors sample-exact, SANS le micro-silence audible que laisse HTMLAudio.loop
+  // à chaque tour. Les fichiers fournis, coupés au plus juste, bouclent donc de
+  // façon parfaitement continue. loopElements[key] reste un objet exposant
+  // .volume / .playbackRate / .paused pour rester compatible avec les moteurs.
+  _loopBuffers: {},
+  _loopLoading: {},
+  _ensureLoopBuffer(key) {
+    if (this._loopBuffers[key]) return Promise.resolve(this._loopBuffers[key]);
+    if (this._loopLoading[key]) return this._loopLoading[key];
+    const src = SOUND_FILES[key];
+    if (!src || !Audio.ensure) { return Promise.resolve(null); }
+    // En local (file://), fetch est bloqué par la politique CORS : on bascule
+    // directement sur le repli HTMLAudio (voir playLoop). En production (https),
+    // le décodage Web Audio se fait normalement, pour un bouclage sans coupure.
+    if (typeof location !== 'undefined' && location.protocol === 'file:') return Promise.resolve(null);
+    const ctx = Audio.ensure();
+    const p = fetch(src).then(r => r.arrayBuffer()).then(ab => ctx.decodeAudioData(ab))
+      .then(buf => { this._loopBuffers[key] = buf; delete this._loopLoading[key]; return buf; })
+      .catch(() => { delete this._loopLoading[key]; return null; });
+    this._loopLoading[key] = p;
+    return p;
+  },
+  _startLoop(key) {
+    if (!this.loopShouldPlay[key] || this.isLoopPlaying(key)) return;
+    const buf = this._loopBuffers[key];
+    if (!buf || !Audio.ensure) return;
+    const ctx = Audio.ensure();
+    const source = ctx.createBufferSource();
+    source.buffer = buf; source.loop = true;
+    const gain = ctx.createGain();
+    gain.gain.value = this.loopVolumes[key] != null ? this.loopVolumes[key] : 1;
+    source.connect(gain).connect(Audio.master || ctx.destination);
+    try { source.start(); } catch (e) {}
+    this.loopElements[key] = {
+      _source: source, _gain: gain, playing: true,
+      get volume() { return this._gain.gain.value; },
+      set volume(v) { try { this._gain.gain.value = v; } catch (e) {} },
+      get playbackRate() { return this._source.playbackRate.value; },
+      set playbackRate(r) { try { this._source.playbackRate.value = r; } catch (e) {} },
+      get paused() { return !this.playing; },
+    };
+  },
   unlock() {
     this.unlocked = true;
     Object.keys(this.loopShouldPlay).forEach(k => {
-      if (this.loopShouldPlay[k]) {
-        const a = this.getLoopElement(k);
-        if (a && a.paused) a.play().catch(() => {});
-      }
+      if (this.loopShouldPlay[k] && !this.isLoopPlaying(k)) this.playLoop(k, this.loopVolumes[k] != null ? this.loopVolumes[k] : 1);
     });
   },
-  // Appelé en boucle : relance toute ambiance qui devrait jouer mais que le
-  // navigateur a mise en pause (autoplay, onglet inactif, coupure système...).
+  // Relance toute boucle qui devrait jouer mais ne joue pas (onglet inactif,
+  // décodage tardif, coupure système...). Recrée le nœud si nécessaire.
   tickLoops() {
+    if (!this.unlocked) return;
     Object.keys(this.loopShouldPlay).forEach(k => {
-      if (!this.loopShouldPlay[k]) return;
-      const a = this.loopElements[k];
-      if (a && a.paused && this.unlocked) { a.play().catch(() => {}); }
+      if (this.loopShouldPlay[k] && !this.isLoopPlaying(k)) this.playLoop(k, this.loopVolumes[k] != null ? this.loopVolumes[k] : 1);
     });
   },
-  getLoopElement(key) {
-    if (!this.loopElements[key]) {
-      const src = SOUND_FILES[key];
-      if (!src) { console.warn('Son de boucle introuvable dans SOUND_FILES :', key); return null; }
-      const a = new (window.Audio)(src);
-      a.preload = 'auto'; a.loop = true;
-      // Si le navigateur suspend cette boucle alors qu'elle devrait jouer, on la relance.
-      a.addEventListener('pause', () => {
-        if (this.loopShouldPlay[key] && this.unlocked) setTimeout(() => { if (a.paused && this.loopShouldPlay[key]) a.play().catch(() => {}); }, 200);
-      });
-      this.loopElements[key] = a;
-    }
-    return this.loopElements[key];
+  getLoopElement(key) { return this.loopElements[key] || null; },
+  // Repli HTMLAudio (bouclage avec un léger gap) quand Web Audio n'est pas
+  // disponible : garantit que la boucle joue quand même.
+  _startLoopFallback(key) {
+    if (!this.loopShouldPlay[key] || this.isLoopPlaying(key)) return;
+    const src = SOUND_FILES[key]; if (!src) return;
+    const a = new (window.Audio)(src); a.preload = 'auto'; a.loop = true;
+    a.volume = this.loopVolumes[key] != null ? this.loopVolumes[key] : 1;
+    a.addEventListener('pause', () => { if (this.loopShouldPlay[key] && this.unlocked) setTimeout(() => { if (a.paused && this.loopShouldPlay[key]) a.play().catch(() => {}); }, 200); });
+    this.loopElements[key] = {
+      _a: a, playing: true,
+      get volume() { return this._a.volume; },
+      set volume(v) { try { this._a.volume = Math.max(0, Math.min(1, v)); } catch (e) {} },
+      get playbackRate() { return this._a.playbackRate; },
+      set playbackRate(r) { try { this._a.playbackRate = r; } catch (e) {} },
+      get paused() { return this._a.paused; },
+    };
+    a.play().catch(() => {});
   },
   playLoop(key, volume = 1) {
-    const a = this.getLoopElement(key);
-    if (!a) return;
-    a.volume = volume;
     this.loopVolumes[key] = volume;
     this.loopShouldPlay[key] = true;
-    if (a.paused) a.play().catch((e) => { console.warn('Lecture boucle différée (' + key + ') :', e && e.name); });
+    const node = this.loopElements[key];
+    if (node && node.playing) { node.volume = volume; return; }
+    if (this._loopBuffers[key]) { this._startLoop(key); return; }
+    this._ensureLoopBuffer(key).then(buf => { if (buf) this._startLoop(key); else this._startLoopFallback(key); });
   },
   stopLoop(key) {
     this.loopShouldPlay[key] = false;
-    const a = this.loopElements[key];
-    if (a) { a.pause(); try { a.currentTime = 0; } catch (e) {} }
+    const node = this.loopElements[key];
+    if (node) {
+      if (node._source) { try { node._source.stop(); } catch (e) {} }
+      if (node._a) { try { node._a.pause(); node._a.currentTime = 0; } catch (e) {} }
+      node.playing = false; this.loopElements[key] = null;
+    }
   },
-  isLoopPlaying(key) { const a = this.loopElements[key]; return !!(a && !a.paused); },
+  isLoopPlaying(key) { const n = this.loopElements[key]; return !!(n && n.playing && !n.paused); },
   playOnce(key, opts = {}) {
     const src = SOUND_FILES[key];
     if (!src) return null;
@@ -820,6 +868,17 @@ const AudioLib = {
     a.addEventListener('error', cleanup, { once: true });
     if (opts.onEnded) a.addEventListener('ended', opts.onEnded, { once: true });
     a.play().catch(cleanup);
+    return a;
+  },
+  // Voix (cris, réactions parlées) : une seule à la fois. On coupe la voix
+  // précédente avant d'en jouer une nouvelle, pour qu'elles ne se compilent
+  // jamais quand elles s'enchaînent rapidement.
+  _currentVoice: null,
+  playVoice(key, opts = {}) {
+    if (this._currentVoice) { try { this._currentVoice.pause(); } catch (e) {} this.activeOneShots.delete(this._currentVoice); }
+    const a = this.playOnce(key, opts);
+    this._currentVoice = a;
+    if (a) a.addEventListener('ended', () => { if (this._currentVoice === a) this._currentVoice = null; }, { once: true });
     return a;
   },
   randomRingtone() { return UTIL.pick(this.RINGTONES); },
