@@ -1015,9 +1015,16 @@ function gameLoop() {
     // Auto-drive step
     if (Game.inVehicle && Game.vehicle?.auto) Game.autoDriveStep();
 
-    // Engine sound if vehicle moving
-    if (Game.inVehicle && Game.vehicle && Math.abs(Game.vehicle.speed) > 0) {
-      Audio.playEngine(VEHICLE_CATALOG[Game.vehicle.type], Math.abs(Game.vehicle.speed) / VEHICLE_CATALOG[Game.vehicle.type].maxSpeed);
+    // Son de conduite : le vélo a son propre système de boucles (pédalage /
+    // roue libre), les autres véhicules gardent le moteur de synthèse.
+    const _cls = (Game.inVehicle && Game.vehicle) ? VEHICLE_CATALOG[Game.vehicle.type] : null;
+    if (_cls && _cls.human) {
+      Game.updateBikeAudio();
+    } else {
+      Game.stopBikeAudio(); // au cas où on vient de descendre du vélo
+      if (Game.inVehicle && Game.vehicle && Math.abs(Game.vehicle.speed) > 0) {
+        Audio.playEngine(_cls, Math.abs(Game.vehicle.speed) / _cls.maxSpeed);
+      }
     }
 
     // Sons partagés en réseau : moteur (quand on roule) et sirène (si active),

@@ -263,8 +263,47 @@ const Game = {
     // sport ; les autres moteurs (véhicule2, électrique, aérien) se
     // contentent d'un ralentissement de régime, déjà audible au prochain pas.
     if (speedRatioBefore > 0.2 && cls.sport) RealEngine.brake(speedRatioBefore);
+    // Vélo : vrai son de frein (une variante au hasard), throttlé pour ne pas
+    // se répéter en boucle si l'on maintient le frein.
+    if (cls.human && speedRatioBefore > 0.05 && Date.now() - (this._lastBikeBrake || 0) > 500) {
+      this._lastBikeBrake = Date.now();
+      AudioLib.playOnce(UTIL.pick(['velo_frein_1', 'velo_frein_2', 'velo_frein_3']), { volume: 0.5 });
+    }
     if (Math.abs(v.speed) < 0.05) v.speed = 0;
     updateHud();
+  },
+
+  // Système sonore du vrai vélo : tant qu'on PÉDALE (touche avancer, ou
+  // pédalage automatique), le son de pédalage tourne en boucle ; dès qu'on
+  // arrête de pédaler mais que le vélo roule encore (roue libre), le son de
+  // « point mort » prend le relais en ralentissant ; à l'arrêt, tout se coupe.
+  // Le volume suit la vitesse. Frein et clochette sont des sons ponctuels.
+  updateBikeAudio() {
+    if (!window.AudioLib) return;
+    const v = this.vehicle;
+    if (!this.inVehicle || !v) { AudioLib.stopLoop('velo_pedale'); AudioLib.stopLoop('velo_point_mort'); return; }
+    const cls = VEHICLE_CATALOG[v.type];
+    const speed = Math.abs(v.speed || 0);
+    const maxS = (cls && cls.maxSpeed) || 1;
+    if (speed < 0.02) { AudioLib.stopLoop('velo_pedale'); AudioLib.stopLoop('velo_point_mort'); return; }
+    // Pédale-t-on ? En conduite manuelle : la flèche avancer est enfoncée.
+    // En pédalage automatique : oui tant que le vélo avance.
+    const pedaling = v.auto ? true : this.keys.has('arrowup');
+    const vol = 0.3 + 0.45 * Math.min(1, speed / maxS);
+    if (pedaling) {
+      AudioLib.playLoop('velo_pedale', vol);
+      AudioLib.stopLoop('velo_point_mort');
+    } else {
+      // Roue libre : le son de point mort prend le relais, un peu plus doux.
+      AudioLib.playLoop('velo_point_mort', vol * 0.85);
+      AudioLib.stopLoop('velo_pedale');
+    }
+  },
+  // Coupe tous les sons du vélo (descente, changement de véhicule).
+  stopBikeAudio() {
+    if (!window.AudioLib) return;
+    AudioLib.stopLoop('velo_pedale');
+    AudioLib.stopLoop('velo_point_mort');
   },
 
   // Auto-drive (accessible menu + realistic route following)

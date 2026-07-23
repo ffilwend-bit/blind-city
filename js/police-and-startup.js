@@ -1213,12 +1213,13 @@ Game.honk = function() {
   if (!this.inVehicle || !this.vehicle) return announce('Montez dans un véhicule pour klaxonner.', 'assertive');
   const cls = VEHICLE_CATALOG[this.vehicle.type];
   let key = 'klaxon_voiture';
-  if (cls && cls.type === '2 roues') key = 'klaxon_moto';
+  if (cls && cls.human) key = 'velo_clochette'; // vélo : sonnette d'avertissement
+  else if (cls && cls.type === '2 roues') key = 'klaxon_moto';
   else if (cls && cls.type === 'poids lourd') key = 'klaxon_camion';
   else if (cls && cls.type === 'air') return announce('Pas de klaxon en vol.', 'polite');
   else if (cls && cls.price >= 8000000) key = 'klaxon_luxe'; // véhicule haut de gamme : klaxon distinctif
   AudioLib.playOnce(key);
-  if (Net.connected) Net.emitSound(key, { vol: 0.8 }); // klaxon audible par les joueurs proches
+  if (Net.connected) Net.emitSound(key, { vol: 0.8 }); // klaxon / sonnette audible par les joueurs proches
 };
 Game.searchSelf = function() {
   if (!this.inventory.length) return announce('Vos poches sont vides.', 'polite');

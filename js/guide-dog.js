@@ -336,8 +336,14 @@ const GuideDog = {
 
   /* ---------- Boucle : suivi, guidage, besoins ---------- */
   tick() {
-    if (!this.has()) return;
+    if (!this.has()) { if (window.AudioLib) AudioLib.stopLoop('chien_laisse'); return; }
     const d = this.data, now = Date.now();
+    // Bruit de la laisse tendue : en boucle tant qu'on tient la laisse (et que
+    // le chien est actif) ; s'arrête dès qu'on la relâche.
+    if (window.AudioLib) {
+      if (d.leashed && d.active) AudioLib.playLoop('chien_laisse', 0.4);
+      else AudioLib.stopLoop('chien_laisse');
+    }
 
     // Fin de repos.
     if (d.resting) {
@@ -448,6 +454,7 @@ const GuideDog = {
   die(cause) {
     if (!this.data) return;
     const name = this.data.name;
+    if (window.AudioLib) AudioLib.stopLoop('chien_laisse');
     this.whine();
     this.data.alive = false;
     Game.guideDog = null;
