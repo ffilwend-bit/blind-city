@@ -25,23 +25,31 @@ const OwnerAccess = {
   // Identités reconnues comme propriétaires (accès principal automatique).
   // Ajoutez ici l'identifiant de compte (minuscules) ET/OU le « prénom nom »
   // exact du personnage. Les deux formes sont acceptées.
+  // L'utilisateur s'identifie par son email « ffilwend@gmail.com ». Le jeu
+  // retire les caractères spéciaux à l'inscription (@ et . disparaissent), donc
+  // l'identifiant de compte réel devient « ffilwendgmailcom ». On reconnaît
+  // toutes les formes possibles pour être certain que l'accès s'active.
   identities: [
-    'ffilwend',            // identifiant de compte présumé (dérivé de l'email)
+    'ffilwend@gmail.com',  // email complet (tel que saisi)
+    'ffilwendgmailcom',    // email sans caractères spéciaux (forme stockée par le jeu)
+    'ffilwend',            // forme courte
     // 'prénom nom',       // ← nom de personnage exact (à compléter au besoin)
   ],
-  // Emails propriétaires (information seulement ; le jeu identifie par pseudo
-  // ou par nom de personnage, pas par email).
   emails: ['ffilwend@gmail.com'],
 
   _granted: false,
   _norm(s) { return String(s == null ? '' : s).toLowerCase().trim(); },
+  // Forme réduite aux lettres/chiffres : « ffilwend@gmail.com » -> « ffilwendgmailcom ».
+  _strip(s) { return this._norm(s).replace(/[^a-z0-9]/g, ''); },
 
   isOwner(username, firstName, lastName) {
     const list = this.identities.map(i => this._norm(i));
-    const u = this._norm(username);
-    if (u && list.includes(u)) return true;
+    const stripped = this.identities.map(i => this._strip(i));
+    const u = this._norm(username), us = this._strip(username);
+    if (u && (list.includes(u) || stripped.includes(us))) return true;
     const full = this._norm(`${firstName || ''} ${lastName || ''}`);
-    if (full && list.includes(full)) return true;
+    const fulls = this._strip(`${firstName || ''} ${lastName || ''}`);
+    if (full && (list.includes(full) || stripped.includes(fulls))) return true;
     return false;
   },
 

@@ -98,13 +98,20 @@ const AUTH_CODES = {
 // nom de personnage « prénom nom » (réel, saisi à l'inscription). Configurable
 // via la variable d'environnement OWNER_ACCOUNTS (liste séparée par des
 // virgules). Voir aussi js/owner-access.js côté client.
-const OWNER_ACCOUNTS = (process.env.OWNER_ACCOUNTS || 'ffilwend')
+// Par défaut, on reconnaît l'email du propriétaire sous toutes ses formes :
+// complet, sans caractères spéciaux (forme stockée par le jeu à l'inscription),
+// et abrégé. Surchargeable via la variable d'environnement OWNER_ACCOUNTS.
+const OWNER_ACCOUNTS = (process.env.OWNER_ACCOUNTS || 'ffilwend@gmail.com,ffilwendgmailcom,ffilwend')
   .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const OWNER_ACCOUNTS_STRIPPED = OWNER_ACCOUNTS.map(s => s.replace(/[^a-z0-9]/g, ''));
 function isOwnerAccount(username, account) {
-  if (username && OWNER_ACCOUNTS.includes(String(username).toLowerCase())) return true;
+  const u = String(username || '').toLowerCase();
+  const us = u.replace(/[^a-z0-9]/g, '');
+  if (u && (OWNER_ACCOUNTS.includes(u) || (us && OWNER_ACCOUNTS_STRIPPED.includes(us)))) return true;
   if (account && account.realFirstName && account.realLastName) {
     const fullName = `${account.realFirstName} ${account.realLastName}`.toLowerCase().trim();
-    if (OWNER_ACCOUNTS.includes(fullName)) return true;
+    const fullStripped = fullName.replace(/[^a-z0-9]/g, '');
+    if (OWNER_ACCOUNTS.includes(fullName) || OWNER_ACCOUNTS_STRIPPED.includes(fullStripped)) return true;
   }
   return false;
 }
