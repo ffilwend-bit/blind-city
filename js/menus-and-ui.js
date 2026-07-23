@@ -1023,6 +1023,9 @@ function gameLoop() {
     if (Game.inVehicle && Game.vehicle) {
       Game.x = Game.vehicle.x; Game.y = Game.vehicle.y; Game.heading = Game.vehicle.heading;
       if (Game.guidanceTarget) Game.updateGuidance();
+      // Retour de progression (tic de roulement, quartiers, routes, vitesse) :
+      // c'est ce qui fait « sentir » qu'on avance, en manuel comme en auto.
+      Game.updateVehicleProgress();
     }
 
     // Son de conduite : le vélo a son propre système de boucles (pédalage /

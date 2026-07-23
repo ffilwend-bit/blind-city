@@ -342,6 +342,101 @@ const Game = {
     const remaining = Math.round(dist * CONFIG.METERS_PER_TILE);
     if (Math.random() < 0.04) announce(`${remaining} mètres, cap ${bearing}, vers ${dest.name}.`, 'polite');
   },
+
+  // Conduite automatique vers un point précis {name,x,y}.
+  setAutoDriveTo(dest) {
+    if (!this.inVehicle || !this.vehicle) return announce('Montez d\'abord dans un véhicule.', 'assertive');
+    if (!dest) return announce('Destination inconnue.', 'assertive');
+    const cls = VEHICLE_CATALOG[this.vehicle.type];
+    this.vehicle.auto = true; this.vehicle.autoDest = { x: Math.round(dest.x), y: Math.round(dest.y), name: dest.name || 'la destination' };
+    this.vehicle.speed = Math.max(this.vehicle.speed || 0, cls.maxSpeed * 0.3);
+    if (this.guidanceTarget) this.stopGuidance();
+    announce(`Conduite automatique vers ${this.vehicle.autoDest.name}. Je vous annonce les quartiers et les routes au fur et à mesure. Espace pour reprendre le volant à tout moment.`, 'assertive');
+  },
+
+  // Menu proposé DÈS qu'on prend le volant : automatique, manuel guidé, ou
+  // libre. C'est le point d'entrée du guidage « les yeux » pour non-voyants.
+  openDriveModeMenu(v) {
+    if (!this.inVehicle || !this.vehicle) return;
+    v = v || this.vehicle;
+    if (typeof ensureMenuOpen === 'function') ensureMenuOpen();
+    el('menuTitle').textContent = `Conduite : ${v.name}`;
+    const items = [
+      { id: 'auto', title: '🧭 Conduite automatique', desc: 'Choisissez une destination : le véhicule vous y conduit tout seul, avec les annonces de quartiers et de routes.' },
+      { id: 'manuel', title: '🕹️ Conduite manuelle guidée', desc: 'Choisissez une destination : vous conduisez, une voix vous guide en continu (tournez, tout droit, distance).' },
+      { id: 'libre', title: '🚗 Conduite libre', desc: 'Conduire sans destination ni guidage.' },
+    ];
+    renderMenu(items, (sel) => {
+      if (sel.id === 'libre') { closeMenu(); announce('Conduite libre. Flèches pour conduire, espace pour freiner.', 'assertive'); return; }
+      this.openVehicleDestinationMenu(sel.id);
+    });
+    el('menuOverlay').style.display = 'flex';
+    announce(`Vous êtes au volant de ${v.name}. Choisissez : conduite automatique, conduite manuelle guidée, ou conduite libre.`, 'assertive');
+  },
+  // Choix de la destination pour le véhicule (mode 'auto' ou 'manuel').
+  openVehicleDestinationMenu(mode) {
+    if (typeof ensureMenuOpen === 'function') ensureMenuOpen();
+    el('menuTitle').textContent = mode === 'auto' ? 'Où aller ? (automatique)' : 'Où aller ? (guidage)';
+    const items = [];
+    (this.savedPlaces || []).forEach((p, i) => {
+      items.push({ id: 'saved_' + i, poi: p, title: `📌 ${p.name}`, desc: `Lieu enregistré, ${Math.round(UTIL.dist(p, this) * CONFIG.METERS_PER_TILE)} m.` });
+    });
+    City.pois.map(p => ({ p, d: UTIL.dist(p, this) })).filter(o => o.d < 200).sort((a, b) => a.d - b.d).slice(0, 14)
+      .forEach(o => items.push({ id: 'poi_' + (o.p.id || o.p.name), poi: o.p, title: `🏢 ${o.p.name}`, desc: `${Math.round(o.d * CONFIG.METERS_PER_TILE)} m, vers le ${UTIL.bearing(o.p.x - this.x, o.p.y - this.y)}.` }));
+    City.districts.forEach(d => {
+      const cx = Math.round((d.x1 + d.x2) / 2), cy = Math.round((d.y1 + d.y2) / 2);
+      items.push({ id: 'dist_' + d.name, poi: { name: d.name, x: cx, y: cy }, title: `🗺️ Quartier ${d.name}`, desc: `${Math.round(UTIL.dist({ x: cx, y: cy }, this) * CONFIG.METERS_PER_TILE)} m.` });
+    });
+    if (!items.length) items.push({ id: 'none', title: 'Aucune destination', desc: 'Approchez-vous d\'un lieu ou enregistrez-en un.' });
+    renderMenu(items, (sel) => {
+      if (!sel.poi) return;
+      closeMenu();
+      if (mode === 'auto') this.setAutoDriveTo(sel.poi);
+      else {
+        this.vehicle.auto = false;
+        this.setGuidance({ name: sel.poi.name, x: sel.poi.x, y: sel.poi.y });
+        announce(`Conduisez vers ${sel.poi.name}. Je vous guide en continu : suivez mes indications de direction.`, 'assertive');
+      }
+    });
+    el('menuOverlay').style.display = 'flex';
+    announce('Choisissez votre destination.', 'polite');
+  },
+
+  // Retour de progression en véhicule : c'est ce qui fait « sentir » qu'on
+  // avance (un non-voyant n'a que le son). Émet un tic de roulement à chaque
+  // case franchie et annonce les changements de quartier et de type de route,
+  // plus un rappel périodique de cap et de vitesse. Vaut en manuel ET en auto.
+  updateVehicleProgress() {
+    if (!this.inVehicle || !this.vehicle) { this._vehProg = null; return; }
+    const v = this.vehicle;
+    const tx = Math.round(v.x), ty = Math.round(v.y);
+    const moving = Math.abs(v.speed) > 0.02;
+    if (!this._vehProg) this._vehProg = { x: tx, y: ty, district: City.getDistrictAt(tx, ty).name, road: City.isRoad(tx, ty), lastTic: 0, lastMsg: 0 };
+    const p = this._vehProg;
+    const now = Date.now();
+    if ((tx !== p.x || ty !== p.y)) {
+      p.x = tx; p.y = ty;
+      // Tic de roulement (feedback « je bouge »), throttlé pour ne pas saturer
+      // à haute vitesse. Aigu = vite, grave = lentement.
+      if (moving && now - p.lastTic > 130) {
+        p.lastTic = now;
+        const ratio = Math.min(1, Math.abs(v.speed) / (VEHICLE_CATALOG[v.type].maxSpeed || 1));
+        Audio.tone({ freq: 90 + ratio * 120, type: 'sine', duration: 0.05, gain: 0.05, pan: 0 });
+      }
+      // Changement de quartier.
+      const dName = City.getDistrictAt(tx, ty).name;
+      if (dName !== p.district) { p.district = dName; announce(`Vous entrez dans ${dName}.`, 'polite'); }
+      // Passage route / hors-route.
+      const onRoad = City.isRoad(tx, ty);
+      if (onRoad !== p.road) { p.road = onRoad; announce(onRoad ? 'Vous êtes sur la route.' : 'Attention, vous quittez la route.', 'polite'); }
+    }
+    // Rappel périodique de cap et de vitesse (sensation de progression continue).
+    if (moving && now - p.lastMsg > 7000) {
+      p.lastMsg = now;
+      const kmh = Math.round(Math.abs(v.speed) * 60);
+      announce(`Vous roulez vers le ${UTIL.cardinals[v.heading]}, environ ${kmh} kilomètres heure, dans ${p.district}.`, 'polite');
+    }
+  },
   // Signale un crime (vol de véhicule, braquage...) à TOUS les policiers connectés,
   // où qu'ils soient dans la ville. Chacun reçoit une alerte avec la position exacte
   // et peut se laisser guider vocalement ou activer la conduite automatique vers la scène.
@@ -473,7 +568,13 @@ const Game = {
     if (cls?.human || cls?.doors === 0) announce(`Vous enfourchez ${v.name}. Flèches pour pédaler et tourner, espace pour freiner.`, 'assertive');
     else announce(`Vous montez au volant de ${v.name}. Flèches pour conduire, espace pour freiner, M pour conduite auto.`, 'assertive');
     if (this.activeMission && this.activeMission.type === 'convoyage' && this.activeMission.vehicleId === v.id && !this.deliveryState) this.startVehicleDelivery(this.activeMission);
+    this._vehProg = null; // réinitialise le suivi de progression
     updateHud();
+    // Menu de conduite (automatique / manuel guidé / libre) — sauf en pleine
+    // mission de convoyage, qui a déjà son propre déroulé de livraison.
+    if (!(this.activeMission && this.activeMission.type === 'convoyage')) {
+      setTimeout(() => { if (this.inVehicle && this.vehicle === v) this.openDriveModeMenu(v); }, 500);
+    }
   },
   enterAsPassengerSeat(v, driver) {
     // Un chauffeur réel conduit : on le suit en direct (position du chauffeur).
