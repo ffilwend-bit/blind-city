@@ -42,12 +42,21 @@ function setupExtraInput() {
     else if (ctrl && alt && key === 't') { e.preventDefault(); Game.requisitionTank(); }
     else if (ctrl && key === 't') { e.preventDefault(); openTalkieMenu(); }
     else if (ctrl && key === 'y') { e.preventDefault(); Game.rpTalk(); }
+    else if (ctrl && alt && key === 'e') { e.preventDefault(); Game.toggleIndoor(); } // entrer / sortir d'un lieu
     else if (ctrl && key === 'e') { e.preventDefault(); Game.throwGrenade(); }
     else if (shift && key === 'e') { e.preventDefault(); Game.changeFloor(1); }   // monter d'un étage
     else if (alt && key === 'e') { e.preventDefault(); Game.changeFloor(-1); }     // descendre d'un étage
     // Chien guide : Maj+Alt+chiffre (0-9) et Maj+Alt+F7 (repos). On lit e.code
     // (Digit0..Digit9) pour rester fiable sur clavier AZERTY.
-    else if (shift && alt && e.code && /^(Digit|Numpad)[0-9]$/.test(e.code)) { e.preventDefault(); if (typeof GuideDog !== 'undefined') GuideDog.handleDigit(parseInt(e.code.replace(/\D/g, ''), 10)); }
+    else if (shift && alt && ((e.code && /^(Digit|Numpad)[0-9]$/.test(e.code)) || /^[0-9]$/.test(e.key))) {
+      // Chien guide : Maj+Alt+chiffre. On accepte à la fois les chiffres de la
+      // rangée du haut ET le pavé numérique (Verr Num activé), via e.code
+      // (Digit/Numpad) OU e.key (le chiffre lui-même) — le premier qui donne un
+      // chiffre gagne. Ça marche quel que soit Verr Maj / Verr Num.
+      e.preventDefault();
+      const digit = (e.code && /^(Digit|Numpad)[0-9]$/.test(e.code)) ? parseInt(e.code.replace(/\D/g, ''), 10) : parseInt(e.key, 10);
+      if (typeof GuideDog !== 'undefined' && !isNaN(digit)) GuideDog.handleDigit(digit);
+    }
     else if (shift && alt && (key === 'f7' || e.code === 'F7')) { e.preventDefault(); if (typeof GuideDog !== 'undefined') GuideDog.rest(); }
     else if (ctrl && (['1','2','3','4','5','6','7','8','9'].includes(key))) { e.preventDefault(); Game.target(parseInt(key, 10)); }
     else if (alt && key === 'f') { e.preventDefault(); Game.searchSelf(); }

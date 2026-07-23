@@ -1636,21 +1636,43 @@ const Game = {
     } else if (th < 55) this._lastThirstAlert = 0;
   },
 
-  // Franchissement d'une porte : son de porte + voile sonore « intérieur »
-  // (l'ambiance de la ville s'assourdit) et annonce claire, pour qu'on sache
-  // qu'on est bien passé DEDANS et qu'on n'a pas surgi à ciel ouvert.
+  // État « à l'intérieur d'un lieu » : tant qu'il est actif, l'ambiance de la
+  // ville reste assourdie (voir updateRoadAmbience) et l'on reste dedans jusqu'à
+  // ressortir volontairement (Ctrl+Alt+E). On ne commente PAS le bruit.
+  indoors: null,
+  // Franchissement d'une porte : son de porte + on marque qu'on est à
+  // l'intérieur du lieu (l'ambiance s'assourdit d'elle-même, sans l'annoncer).
   announceEnterBuilding(name, zone) {
     if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
-    if (window.Audio && Audio.tone) Audio.tone({ freq: 170, type: 'sine', duration: 0.45, gain: 0.06, pan: 0 });
-    this._indoorsUntil = Date.now() + 4000; // atténue brièvement l'ambiance ville
+    if (window.Audio && Audio.tone) Audio.tone({ freq: 170, type: 'sine', duration: 0.4, gain: 0.06, pan: 0 });
     const lieu = zone === 'cour' ? `la cour de ${name}` : name;
-    announce(`Vous franchissez la porte et entrez dans ${lieu}. Les bruits de la ville s'atténuent.`, 'assertive');
+    this.indoors = { name: lieu };
+    announce(`Vous entrez dans ${lieu}. Touche E pour interagir avec ce qui s'y trouve, Ctrl+Alt+E pour ressortir.`, 'assertive');
   },
   // Entrer dans un bâtiment via sa porte (annonce + son), puis ouvrir le lieu.
   enterBuilding(poi) {
     const noDoor = ['station_essence', 'mine', 'aeroport', 'heliport', 'port'];
     if (!noDoor.includes(poi.type)) this.announceEnterBuilding(poi.name, 'porte');
     this.enterPOI(poi);
+  },
+  // Ctrl+Alt+E : entrer dans le lieu le plus proche, ou en ressortir si on y est
+  // déjà. Une fois dedans, on peut interagir librement avec E sans ressortir, et
+  // continuer à se déplacer ; on ne ressort que par un nouveau Ctrl+Alt+E.
+  toggleIndoor() {
+    if (this.inVehicle) return announce('Descendez du véhicule pour entrer dans un lieu.', 'assertive');
+    if (this.indoors) {
+      const name = this.indoors.name;
+      this.indoors = null;
+      if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
+      announce(`Vous sortez de ${name}. Vous êtes de nouveau dehors.`, 'assertive');
+      return;
+    }
+    // Chercher un lieu (bâtiment ou maison) à portée pour y entrer.
+    const poi = City.pois.map(p => ({ p, d: UTIL.dist(p, this) })).filter(o => o.d < 4).sort((a, b) => a.d - b.d)[0];
+    const house = City.houses.map(h => ({ h, d: UTIL.dist(h, this) })).filter(o => o.d < 4).sort((a, b) => a.d - b.d)[0];
+    if (poi && (!house || poi.d <= house.d)) { this.announceEnterBuilding(poi.p.name, 'porte'); this.enterPOI(poi.p); }
+    else if (house) { this.announceEnterBuilding(house.h.name || 'la maison', 'cour'); this.enterHouse(house.h); }
+    else announce('Aucun lieu où entrer ici. Approchez-vous d\'une porte, puis refaites Ctrl+Alt+E.', 'assertive');
   },
 
   // Interactions

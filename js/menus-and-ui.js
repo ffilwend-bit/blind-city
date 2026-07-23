@@ -707,10 +707,20 @@ function setupInput() {
     if (e.repeat) return;
     Game.keys.add(e.key.toLowerCase());
     const key = e.key.toLowerCase();
-    if (key === 'arrowup') Game.moveForward();
-    else if (key === 'arrowdown') Game.moveBackward();
-    else if (key === 'arrowleft') Game.turn(-1);
-    else if (key === 'arrowright') Game.turn(1);
+    // Les combinaisons avec Ctrl / Alt / Cmd sont TOUTES gérées par l'autre
+    // gestionnaire (raccourcis de police-and-startup). Ici on ne traite que les
+    // touches simples : on sort dès qu'un de ces modificateurs est présent, pour
+    // ne jamais déclencher deux actions en même temps (ce qui « mangeait » ou
+    // parasitait certains raccourcis Ctrl/Alt).
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    // Déplacement : uniquement sans modificateur. Sinon, le pavé numérique sans
+    // Verr Num (qui envoie Arrow…) déclenchait un déplacement en même temps
+    // qu'un raccourci Maj+Alt+chiffre — d'où les comportements « bizarres ».
+    const noMod = !e.shiftKey && !e.altKey && !e.ctrlKey;
+    if (key === 'arrowup' && noMod) Game.moveForward();
+    else if (key === 'arrowdown' && noMod) Game.moveBackward();
+    else if (key === 'arrowleft' && noMod) Game.turn(-1);
+    else if (key === 'arrowright' && noMod) Game.turn(1);
     else if (key === ' ') { e.preventDefault(); Game.inVehicle ? Game.brakeVehicle() : Game.move(0, 1); }
     else if (key === 'e' && !e.ctrlKey && !e.shiftKey && !e.altKey) Game.interact();
     else if (key === 'm') openMainMenu();

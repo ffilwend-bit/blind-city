@@ -353,9 +353,11 @@ const GuideDog = {
     // Besoins qui montent doucement.
     if (now - d._lastNeed > 4000) {
       d._lastNeed = now;
-      d.hunger = Math.min(100, d.hunger + 0.6);
-      d.thirst = Math.min(100, d.thirst + 0.9);
-      if (d.leashed && d.target) d.fatigue = Math.min(100, d.fatigue + 0.8);
+      // Épuisement bien plus lent (environ 4× plus long à s'user) : le chien
+      // tient beaucoup plus longtemps avant d'avoir faim, soif ou d'être fatigué.
+      d.hunger = Math.min(100, d.hunger + 0.15);
+      d.thirst = Math.min(100, d.thirst + 0.22);
+      if (d.leashed && d.target) d.fatigue = Math.min(100, d.fatigue + 0.2);
       // Halètement si soif ou fatigue élevées.
       if ((d.thirst > 70 || d.fatigue > 70) && now - d._lastPant > 6000) { d._lastPant = now; this.pant(); }
       // Trop faim/soif : santé qui baisse, gémissement.

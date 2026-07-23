@@ -119,8 +119,10 @@ const Audio = {
       }
       // À l'intérieur d'un bâtiment / d'une cour (peu après avoir franchi une
       // porte), les bruits de la ville sont nettement assourdis.
-      const indoors = (typeof Game !== 'undefined' && Game._indoorsUntil && Date.now() < Game._indoorsUntil);
-      const vol = Math.max(0, 1 - nearest / 30) * bestDensity * 0.35 * (indoors ? 0.35 : 1);
+      // Tant qu'on est à l'intérieur d'un lieu, l'ambiance de la ville reste
+      // nettement assourdie (sans qu'on l'annonce), jusqu'à ressortir.
+      const indoors = (typeof Game !== 'undefined' && !!Game.indoors && !Game.inVehicle);
+      const vol = Math.max(0, 1 - nearest / 30) * bestDensity * 0.35 * (indoors ? 0.3 : 1);
       const t = c.currentTime;
       this.road.gain.gain.setTargetAtTime(vol, t, 0.2);
       this.road.filter.frequency.setTargetAtTime(300 + vol * 2000, t, 0.2);
