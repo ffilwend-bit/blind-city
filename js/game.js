@@ -841,7 +841,18 @@ const Game = {
     }
     const dist = UTIL.dist(t, this);
     if (dist < 2) {
-      announce(this.guidanceFollowId ? `Vous avez rejoint ${t.name}.` : `Vous êtes arrivé à ${t.name}.`, 'interrupt');
+      // Arrivée : on invite explicitement à l'action à faire sur place (petit
+      // tutoriel contextuel), pour ne pas laisser le joueur planté sans savoir
+      // quoi faire. Un bâtiment/véhicule proche ? On dit d'appuyer sur E.
+      let hint = '';
+      if (!this.guidanceFollowId) {
+        const canInteract = City.pois.some(p => UTIL.dist(p, this) < 4)
+          || City.houses.some(h => UTIL.dist(h, this) < 4)
+          || City.vehicles.some(v => UTIL.dist(v, this) < 3)
+          || City.npcs.some(n => !n.dead && UTIL.dist(n, this) < 3);
+        if (canInteract) hint = ' Appuyez sur E pour entrer ou interagir.';
+      }
+      announce((this.guidanceFollowId ? `Vous avez rejoint ${t.name}.` : `Vous êtes arrivé à ${t.name}.`) + hint, 'interrupt');
       Audio.cash();
       this.guidanceTarget = null; this.guidanceAxis = null; this.guidancePath = null; this._pathGoal = null; this.guidanceFollowId = null; return;
     }
@@ -1478,6 +1489,52 @@ const Game = {
   survivalTick() {
     if (this.hunger > 90 || this.thirst > 90) this.takeDamage(0.05);
     if (this.health < 100 && this.hunger < 50 && this.thirst < 50) this.heal(0.02);
+    if (!this.unconscious) this._survivalAlerts();
+  },
+  // Alertes vocales de survie : préviennent le joueur quand sa santé baisse
+  // (paliers 75, 50, 25, 10 %) et l'invitent à manger / boire quand la faim ou
+  // la soif montent. Chaque palier n'est annoncé qu'une fois (réarmé quand la
+  // valeur revient à la normale), pour ne pas répéter en boucle.
+  _survivalAlerts() {
+    const hp = Math.round(this.health);
+    const hpLevel = hp <= 10 ? 10 : hp <= 25 ? 25 : hp <= 50 ? 50 : hp <= 75 ? 75 : 0;
+    if (hpLevel && hpLevel !== this._lastHealthAlert) {
+      this._lastHealthAlert = hpLevel;
+      if (hp <= 10) announce(`Danger vital : santé ${hp} pour cent. Mangez, buvez ou allez vite à l'hôpital, sinon vous allez perdre connaissance.`, 'assertive');
+      else if (hp <= 25) announce(`Santé critique : ${hp} pour cent. Mangez et buvez sans tarder, ou passez à l'hôpital.`, 'assertive');
+      else announce(`Attention, votre santé baisse : ${hp} pour cent. Pensez à manger et à boire.`, 'assertive');
+    } else if (hp > 78) this._lastHealthAlert = 0;
+
+    const hg = Math.round(this.hunger);
+    const hungerLevel = hg >= 95 ? 95 : hg >= 80 ? 80 : hg >= 60 ? 60 : 0;
+    if (hungerLevel && hungerLevel !== this._lastHungerAlert) {
+      this._lastHungerAlert = hungerLevel;
+      announce(hungerLevel >= 95 ? 'Vous êtes affamé : vous perdez de la vie. Mangez tout de suite (achetez à manger dans un magasin ou un restaurant).' : hungerLevel >= 80 ? 'Vous avez très faim. Mangez quelque chose.' : 'Vous commencez à avoir faim.', 'assertive');
+    } else if (hg < 55) this._lastHungerAlert = 0;
+
+    const th = Math.round(this.thirst);
+    const thirstLevel = th >= 95 ? 95 : th >= 80 ? 80 : th >= 60 ? 60 : 0;
+    if (thirstLevel && thirstLevel !== this._lastThirstAlert) {
+      this._lastThirstAlert = thirstLevel;
+      announce(thirstLevel >= 95 ? 'Vous êtes déshydraté : vous perdez de la vie. Buvez tout de suite.' : thirstLevel >= 80 ? 'Vous avez très soif. Buvez quelque chose.' : 'Vous commencez à avoir soif.', 'polite');
+    } else if (th < 55) this._lastThirstAlert = 0;
+  },
+
+  // Franchissement d'une porte : son de porte + voile sonore « intérieur »
+  // (l'ambiance de la ville s'assourdit) et annonce claire, pour qu'on sache
+  // qu'on est bien passé DEDANS et qu'on n'a pas surgi à ciel ouvert.
+  announceEnterBuilding(name, zone) {
+    if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
+    if (window.Audio && Audio.tone) Audio.tone({ freq: 170, type: 'sine', duration: 0.45, gain: 0.06, pan: 0 });
+    this._indoorsUntil = Date.now() + 4000; // atténue brièvement l'ambiance ville
+    const lieu = zone === 'cour' ? `la cour de ${name}` : name;
+    announce(`Vous franchissez la porte et entrez dans ${lieu}. Les bruits de la ville s'atténuent.`, 'assertive');
+  },
+  // Entrer dans un bâtiment via sa porte (annonce + son), puis ouvrir le lieu.
+  enterBuilding(poi) {
+    const noDoor = ['station_essence', 'mine', 'aeroport', 'heliport', 'port'];
+    if (!noDoor.includes(poi.type)) this.announceEnterBuilding(poi.name, 'porte');
+    this.enterPOI(poi);
   },
 
   // Interactions
@@ -1527,34 +1584,50 @@ const Game = {
       if (client && UTIL.dist(client, myPos) < 3) return this.openEscorteBoardMenu(client, this.activeMission);
     }
     if (this.inVehicle) return this.interactVehicle();
-    // Check real connected players first (joueurs réels avant les PNJ)
-    const nearbyPlayer = Array.from(Net.remotePlayers.values()).map(p => ({
-      id: p.id, name: `${p.firstName} ${p.lastName}`, gender: p.gender, outfit: p.outfit, isPlayer: true, x: p.x, y: p.y,
-      role: p.role, policeRank: p.policeRank, accountUsername: p.accountUsername || null,
-    })).filter(p => UTIL.dist(p, this) < 3).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
-    if (nearbyPlayer) { this.describePerson(nearbyPlayer); return this.greetPlayer(nearbyPlayer); }
-    // Check NPC
-    const nearby = City.npcs.filter(n => !n.dead && UTIL.dist(n, this) < 3).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
-    if (nearby) { this.describePerson(nearby); return this.talkTo(nearby); }
-    // Check POI. Les bâtiments sont des tuiles solides : on se tient forcément
-    // à côté, jamais dessus, donc le rayon doit être assez large (4) pour ne
-    // pas rater l'entrée quand le guidage nous dépose juste devant la porte.
-    const poi = City.pois.map(p => ({ p, d: UTIL.dist(p, this) })).filter(o => o.d < 4).sort((a, b) => a.d - b.d)[0];
-    if (poi) return this.enterPOI(poi.p);
-    // Check house
-    const house = City.houses.map(h => ({ h, d: UTIL.dist(h, this) })).filter(o => o.d < 4).sort((a, b) => a.d - b.d)[0];
-    if (house) return this.enterHouse(house.h);
-    // Check vehicle
-    const veh = City.vehicles.filter(v => !this.inVehicle && UTIL.dist(v, this) < 3).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
-    if (veh) return this.interactVehicle();
-    // Check mining site
-    const mine = City.miningSites.find(m => UTIL.dist(m, this) < 4);
-    if (mine) return this.mine(mine);
-    // Check gang hideout (raid de gang, voir beginGangRaid)
-    const gang = City.gangs.find(g => UTIL.dist(g, this) < 4);
-    if (gang) return this.beginGangRaid(gang);
-    // Check objets au sol (ramassage, voir pickUpItems)
-    if ((City.groundItems || []).some(it => UTIL.dist(it, this) < 2)) return this.pickUpItems();
+    // On rassemble TOUT ce avec quoi on peut interagir à portée (joueurs, PNJ,
+    // bâtiments, maisons, véhicules, mine, gang, objets au sol). S'il n'y a
+    // qu'une seule chose, on interagit directement ; s'il y en a plusieurs, on
+    // demande au joueur avec laquelle il veut interagir (menu de choix).
+    const targets = [];
+    Array.from(Net.remotePlayers.values()).forEach(p => {
+      const d = UTIL.dist(p, this);
+      if (d >= 3) return;
+      const np = { id: p.id, name: `${p.firstName} ${p.lastName}`, gender: p.gender, outfit: p.outfit, isPlayer: true, x: p.x, y: p.y, role: p.role, policeRank: p.policeRank, accountUsername: p.accountUsername || null };
+      targets.push({ d, label: `🧍 ${np.name} (joueur)`, act: () => { this.describePerson(np); this.greetPlayer(np); } });
+    });
+    City.npcs.filter(n => !n.dead && UTIL.dist(n, this) < 3).forEach(n => {
+      targets.push({ d: UTIL.dist(n, this), label: `🧍 ${n.name}`, act: () => { this.describePerson(n); this.talkTo(n); } });
+    });
+    // Bâtiments : rayon 4 (ce sont des tuiles solides, on se tient à côté).
+    City.pois.filter(p => UTIL.dist(p, this) < 4).forEach(p => {
+      targets.push({ d: UTIL.dist(p, this), label: `🏢 ${p.name}`, act: () => this.enterBuilding(p) });
+    });
+    City.houses.filter(h => UTIL.dist(h, this) < 4).forEach(h => {
+      targets.push({ d: UTIL.dist(h, this), label: `🏠 ${h.name || 'une maison'}`, act: () => { this.announceEnterBuilding(h.name || 'la maison', 'cour'); this.enterHouse(h); } });
+    });
+    City.vehicles.filter(v => !this.inVehicle && UTIL.dist(v, this) < 3).forEach(v => {
+      targets.push({ d: UTIL.dist(v, this), label: `🚗 ${v.name} (véhicule)`, act: () => this.interactVehicle() });
+    });
+    City.miningSites.filter(m => UTIL.dist(m, this) < 4).forEach(m => {
+      targets.push({ d: UTIL.dist(m, this), label: '⛏️ Site minier', act: () => this.mine(m) });
+    });
+    City.gangs.filter(g => UTIL.dist(g, this) < 4).forEach(g => {
+      targets.push({ d: UTIL.dist(g, this), label: '💀 Repaire de gang', act: () => this.beginGangRaid(g) });
+    });
+    if ((City.groundItems || []).some(it => UTIL.dist(it, this) < 2)) {
+      targets.push({ d: 0, label: '📦 Objets au sol', act: () => this.pickUpItems() });
+    }
+    if (targets.length === 1) return targets[0].act();
+    if (targets.length >= 2) {
+      targets.sort((a, b) => a.d - b.d);
+      if (typeof ensureMenuOpen === 'function') ensureMenuOpen();
+      el('menuTitle').textContent = 'Avec quoi interagir ?';
+      const items = targets.map((t, i) => ({ id: String(i), title: t.label, desc: `À ${Math.round(t.d * CONFIG.METERS_PER_TILE)} mètres.` }));
+      renderMenu(items, (sel) => { closeMenu(); const t = targets[parseInt(sel.id, 10)]; if (t) t.act(); });
+      el('menuOverlay').style.display = 'flex';
+      announce('Plusieurs choses à proximité. Choisissez avec quoi interagir.', 'assertive');
+      return;
+    }
     // Rien juste à portée : plutôt que de rester muet, on repère le lieu utile
     // le plus proche (bâtiment, maison ou véhicule) dans un rayon élargi et on
     // indique dans quelle direction avancer pour pouvoir interagir.
@@ -3795,6 +3868,7 @@ const Game = {
       phones: this.phones, activePhoneIndex: this.activePhoneIndex, lastParkedVehicle: this.lastParkedVehicle, theoryPassed: this.theoryPassed, flightTheoryPassed: this.flightTheoryPassed, myContacts: this.myContacts,
       hasHelmet: this.hasHelmet, hasVest: this.hasVest, pendingBills: this.pendingBills,
       guideDog: this.guideDog, // chien guide (position, état, équipement) — coûteux, doit persister
+      unconscious: this.unconscious, unconsciousSince: this.unconsciousSince, // pour reprendre le décompte de réveil au bon endroit
     };
     localStorage.setItem('blind_city_v18', JSON.stringify(payload));
     // Si un compte joueur est connecté, pousse aussi la sauvegarde côté
@@ -3816,6 +3890,14 @@ const Game = {
       // n'est pas un nouveau venu, on garde sa position enregistrée plutôt que
       // de le faire réapparaître à l'aéroport.
       this._loadedFromSave = true;
+      // Anti-blocage : un joueur inconscient chargé depuis une sauvegarde ne
+      // doit jamais rester coincé. Si le décompte est déjà écoulé ou invalide,
+      // on le réveille tout de suite ; sinon tickUnconscious finira le décompte.
+      if (this.unconscious) {
+        if (typeof this.unconsciousSince !== 'number' || !isFinite(this.unconsciousSince) || (Date.now() - this.unconsciousSince) >= (this.UNCONSCIOUS_MS || 300000)) {
+          this.unconscious = false; this.unconsciousSince = null;
+        }
+      }
       if (!this.player) this.player = { firstName: 'Joueur', lastName: 'Anonyme', gender: 'homme', registered: false };
       if (!this.outfit) this.outfit = { haut: null, bas: null, chaussures: null, couleurHaut: null, couleurBas: null, couleurChaussures: null, coiffure: null, lunettes: null, accessoires: [] };
       else for (const k of ['couleurHaut', 'couleurBas', 'couleurChaussures', 'coiffure', 'lunettes']) if (!(k in this.outfit)) this.outfit[k] = null;

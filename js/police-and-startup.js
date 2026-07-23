@@ -557,9 +557,17 @@ Game.wakeAtHospital = function(assistedBy) {
   updateHud();
 };
 // Vérifie régulièrement si les 5 minutes se sont écoulées (voir gameLoop).
+Game.UNCONSCIOUS_MS = 5 * 60 * 1000;
 Game.tickUnconscious = function() {
   if (!this.unconscious) return;
-  if (Date.now() - this.unconsciousSince > 5 * 60 * 1000) this.wakeAtHospital();
+  // Filet de sécurité : si l'horodatage est absent, invalide (NaN) ou situé
+  // dans le futur — cas d'une ancienne sauvegarde, d'un rechargement, ou d'une
+  // reconnexion — on ne reste JAMAIS coincé inconscient. On le répare pour
+  // provoquer un réveil au prochain contrôle plutôt que d'attendre à l'infini.
+  if (typeof this.unconsciousSince !== 'number' || !isFinite(this.unconsciousSince) || this.unconsciousSince > Date.now()) {
+    this.unconsciousSince = Date.now() - this.UNCONSCIOUS_MS;
+  }
+  if (Date.now() - this.unconsciousSince >= this.UNCONSCIOUS_MS) this.wakeAtHospital();
 };
 // Mort définitive : tir à la tête sans casque, explosion fatale, ou
 // hémorragie massive après beaucoup trop d'impacts. Le compte est supprimé et

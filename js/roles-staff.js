@@ -314,6 +314,8 @@ Game.openDrivingSchool = function() {
     { id: 'theorie', title: this.theoryPassed ? '✅ Théorie déjà validée' : '📖 Examen théorique (code de la route)', desc: this.theoryPassed ? 'Vous pouvez passer à la pratique.' : 'Obligatoire avant l\'examen pratique : quelques questions sur les règles de conduite.' },
     { id: 'exam', title: this.theoryPassed ? '📋 Passer l\'examen pratique (20 000 FCFA)' : '🔒 Examen pratique (verrouillé)', desc: this.theoryPassed ? 'Un vrai circuit à parcourir, avec un nombre de collisions maximum toléré.' : 'Réussissez d\'abord la théorie.' },
   ];
+  el('menuOverlay').style.display = 'flex';
+  announce('Auto-école. Choisissez : tutoriel vocal, examen théorique, ou examen pratique. Commencez par le tutoriel puis la théorie.', 'polite');
   renderMenu(items, (sel) => {
     closeMenu();
     if (sel.id === 'tuto') this.drivingTutorial();
@@ -345,9 +347,13 @@ Game.startTheoryExam = function() {
       return;
     }
     const q = questions[index];
-    el('menuTitle').textContent = `Question ${index + 1} sur ${questions.length}`;
+    el('menuTitle').textContent = `Question ${index + 1} : ${q.q}`;
     const items = q.options.map((opt, i) => ({ id: String(i), title: opt, desc: '' }));
     el('menuOverlay').style.display = 'flex';
+    // La question elle-même doit être lue à voix haute — le focus des cartes ne
+    // lit que les réponses. On l'annonce juste après le rendu (léger délai pour
+    // ne pas être coupée par le focus), avec l'énoncé des réponses possibles.
+    setTimeout(() => announce(`Question ${index + 1} sur ${questions.length}. ${q.q} Réponses possibles : ${q.options.map((o, i) => `${i + 1}, ${o}`).join(' ; ')}. Choisissez.`, 'assertive'), 260);
     renderMenu(items, (sel) => {
       if (parseInt(sel.id, 10) === q.correct) score++;
       index++;
@@ -471,9 +477,13 @@ Game.startFlightTheoryExam = function() {
       return;
     }
     const q = questions[index];
-    el('menuTitle').textContent = `Question ${index + 1} sur ${questions.length}`;
+    el('menuTitle').textContent = `Question ${index + 1} : ${q.q}`;
     const items = q.options.map((opt, i) => ({ id: String(i), title: opt, desc: '' }));
     el('menuOverlay').style.display = 'flex';
+    // La question elle-même doit être lue à voix haute — le focus des cartes ne
+    // lit que les réponses. On l'annonce juste après le rendu (léger délai pour
+    // ne pas être coupée par le focus), avec l'énoncé des réponses possibles.
+    setTimeout(() => announce(`Question ${index + 1} sur ${questions.length}. ${q.q} Réponses possibles : ${q.options.map((o, i) => `${i + 1}, ${o}`).join(' ; ')}. Choisissez.`, 'assertive'), 260);
     renderMenu(items, (sel) => {
       if (parseInt(sel.id, 10) === q.correct) score++;
       index++;
