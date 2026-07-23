@@ -1015,6 +1015,16 @@ function gameLoop() {
     // Auto-drive step
     if (Game.inVehicle && Game.vehicle?.auto) Game.autoDriveStep();
 
+    // En véhicule, la POSITION et le CAP du joueur suivent le véhicule. Sans
+    // ça, la position du joueur restait figée à l'endroit où il était monté :
+    // le guidage vocal, la détection d'arrivée des missions (et donc le
+    // versement de la récompense) et la proximité des lieux ne marchaient pas
+    // du tout en conduisant. On rafraîchit aussi le guidage à ce moment.
+    if (Game.inVehicle && Game.vehicle) {
+      Game.x = Game.vehicle.x; Game.y = Game.vehicle.y; Game.heading = Game.vehicle.heading;
+      if (Game.guidanceTarget) Game.updateGuidance();
+    }
+
     // Son de conduite : le vélo a son propre système de boucles (pédalage /
     // roue libre), les autres véhicules gardent le moteur de synthèse.
     const _cls = (Game.inVehicle && Game.vehicle) ? VEHICLE_CATALOG[Game.vehicle.type] : null;

@@ -892,7 +892,13 @@ wss.on('connection', (ws, req) => {
     // --- Mode staff : authentification, changement des codes, bannissement ---
     else if (msg.type === 'staff_auth') {
       const code = typeof msg.code === 'string' ? msg.code : '';
-      if (code && code === staffData.codes.principal) {
+      // Propriétaire : accès principal accordé sans vérifier le code — il n'a
+      // jamais besoin de saisir de code, même pour réactiver après un Ctrl+A.
+      if (isOwnerAccount(player.accountUsername, accountsData.accounts[player.accountUsername])) {
+        player.staffRole = 'principal';
+        send(ws, { type: 'staff_auth_result', ok: true, staffRole: 'principal', auto: true });
+        broadcastStaffLog(`${player.firstName} ${player.lastName} (propriétaire) a activé le mode administrateur principal.`);
+      } else if (code && code === staffData.codes.principal) {
         player.staffRole = 'principal';
         send(ws, { type: 'staff_auth_result', ok: true, staffRole: 'principal' });
         broadcastStaffLog(`${player.firstName} ${player.lastName} a activé le mode staff (administrateur principal).`);

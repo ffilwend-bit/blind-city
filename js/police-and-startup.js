@@ -32,7 +32,13 @@ function setupExtraInput() {
     else if (ctrl && key === 'p') { e.preventDefault(); Game.payTickets(); }
     else if (ctrl && key === 'm') { e.preventDefault(); Game.buyMiningMachine(); }
     else if (ctrl && key === 'o') { e.preventDefault(); Game.describeOutfit(); }
-    else if (ctrl && key === 'a') { e.preventDefault(); if (StaffMode.active) StaffMode.toggle(); else { AccessibleTextPrompt.open('Code administrateur', 'Saisissez le code du mode staff.', '', (code) => { if (code) StaffMode.toggle(code); }); } }
+    else if (ctrl && key === 'a') {
+      e.preventDefault();
+      const isOwner = (typeof OwnerAccess !== 'undefined') && OwnerAccess.isOwner((typeof Net !== 'undefined' && Net.accountUsername) || null, Game.player && Game.player.firstName, Game.player && Game.player.lastName);
+      if (StaffMode.active) { StaffMode.toggle(); }             // ouvre/ferme le panneau (désactive)
+      else if (isOwner) { StaffMode.reactivateOwner(); }        // propriétaire : réactivation SANS code
+      else { AccessibleTextPrompt.open('Code administrateur', 'Saisissez le code du mode staff.', '', (code) => { if (code) StaffMode.toggle(code); }); }
+    }
     else if (ctrl && alt && key === 't') { e.preventDefault(); Game.requisitionTank(); }
     else if (ctrl && key === 't') { e.preventDefault(); openTalkieMenu(); }
     else if (ctrl && key === 'y') { e.preventDefault(); Game.rpTalk(); }

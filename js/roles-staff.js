@@ -151,6 +151,20 @@ const StaffMode = {
     Net.send({ type: 'staff_auth', code: inputCode });
     announce('Vérification du code...', 'polite');
   },
+  // Réactivation de l'accès administrateur pour le PROPRIÉTAIRE, sans code.
+  // Appelée par Ctrl+A quand le mode staff est fermé et que le joueur est
+  // reconnu comme propriétaire — il ne doit jamais avoir à saisir de code.
+  reactivateOwner() {
+    if (this.active) { openAdminMenu(); return; }
+    if (typeof Net !== 'undefined' && Net.connected) {
+      // Le serveur reconnaît le propriétaire et accorde l'accès sans vérifier
+      // le code (voir isOwnerAccount côté serveur).
+      Net.send({ type: 'staff_auth', code: '' });
+      announce('Réactivation de votre accès administrateur...', 'polite');
+    } else if (typeof OwnerAccess !== 'undefined') {
+      OwnerAccess.grantLocalPrincipal();
+    }
+  },
   onAuthResult(ok, role, auto) {
     if (ok) {
       this.active = true; this.role = role;

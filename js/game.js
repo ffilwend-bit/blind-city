@@ -3535,6 +3535,7 @@ const Game = {
         const timeLimit = Math.round(totalDist / 10) * 1000 + 30000;
         this.gofastState = { missionId: m.id, dropIdx: 0, deadline: Date.now() + timeLimit };
         announce(`Cargaison récupérée. ${m.drops.length} points de dépose, environ ${Math.round(timeLimit / 1000)} secondes au total. Évitez les contrôles.`, 'assertive');
+        this.setGuidance({ name: m.drops[0].name || 'la première dépose', x: m.drops[0].x, y: m.drops[0].y });
       }
       return;
     }
@@ -3562,11 +3563,13 @@ const Game = {
         this.dirtyMoney += amount; Audio.cash();
         m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
         this.gofastState = null;
+        if (this.guidanceTarget) this.stopGuidance();
         RPJournal.log('Mission', `Go-fast terminé : ${UTIL.formatMoney(amount)}.`, 'alert');
         announce(`Toutes les livraisons faites ! Vous touchez ${UTIL.formatMoney(amount)}.`, 'assertive');
         updateHud();
       } else {
         announce(`Livraison ${gs.dropIdx} sur ${m.drops.length} faite. Direction ${m.drops[gs.dropIdx].name}.`, 'assertive');
+        this.setGuidance({ name: m.drops[gs.dropIdx].name || 'la dépose suivante', x: m.drops[gs.dropIdx].x, y: m.drops[gs.dropIdx].y });
       }
     }
   },
@@ -3756,6 +3759,8 @@ const Game = {
       const timeLimit = Math.round(distMeters / (risky ? 14 : 9)) * 1000 + 15000;
       this.deliveryState = { missionId: m.id, vehicleId: m.vehicleId, risky, deadline: Date.now() + timeLimit, ambushDone: false };
       announce(`Livraison lancée, ${risky ? 'route rapide' : 'route détournée'}. Environ ${Math.round(timeLimit / 1000)} secondes pour livrer le véhicule à ${m.dropName}, à ${Math.round(distMeters)} mètres. Le véhicule doit arriver en bon état pour la prime complète.`, 'assertive');
+      // Guidage vocal jusqu'au point de livraison (fonctionne en conduisant).
+      this.setGuidance({ name: m.dropName || 'le point de livraison', x: m.dropX, y: m.dropY });
     });
   },
   // Appelé en continu depuis gameLoop tant qu'une livraison est en cours.
@@ -3813,6 +3818,7 @@ const Game = {
     this.dirtyMoney += amount;
     m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
     this.deliveryState = null;
+    if (this.guidanceTarget) this.stopGuidance();
     this.interactVehicle(); // descend automatiquement, la livraison est remise sur place
     City.vehicles = City.vehicles.filter(v => v.id !== vId);
     RPJournal.log('Mission', `Convoyage livré à ${conditionPct}% d'état : ${UTIL.formatMoney(amount)}.`, 'alert');
