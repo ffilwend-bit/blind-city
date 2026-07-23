@@ -539,6 +539,11 @@ Game.inherit = function(deceased, heir) {
 // l'aide avant, ou peut être réveillé plus vite par un autre joueur réel qui
 // vient l'assister sur place.
 Game.die = function() {
+  // Déjà inconscient : ne PAS redéclencher. Sinon, tant que la santé reste à 0
+  // (faim/soif au maximum), die() serait rappelé en boucle — il ré-annoncerait
+  // « Vous perdez connaissance » sans fin ET remettrait le compteur de réveil à
+  // zéro à chaque fois, empêchant tout réveil. C'était la voix en boucle.
+  if (this.unconscious) return;
   this.unconscious = true; this.unconsciousSince = Date.now();
   AudioLib.playOnce('bruit_chute', { volume: 0.6 });
   if (Net.connected) Net.send({ type: 'state', unconscious: true });

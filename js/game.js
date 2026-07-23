@@ -1487,9 +1487,13 @@ const Game = {
     this.health = Math.min(this.maxHealth, this.health + amount); updateHud();
   },
   survivalTick() {
+    // Inconscient : on ne touche plus à la santé (ni dégâts de faim, ni soin) —
+    // le réveil est géré par tickUnconscious. Éviter d'infliger des dégâts ici
+    // empêche de rappeler die() en boucle tant que la santé est à zéro.
+    if (this.unconscious) return;
     if (this.hunger > 90 || this.thirst > 90) this.takeDamage(0.05);
     if (this.health < 100 && this.hunger < 50 && this.thirst < 50) this.heal(0.02);
-    if (!this.unconscious) this._survivalAlerts();
+    this._survivalAlerts();
   },
   // Alertes vocales de survie : préviennent le joueur quand sa santé baisse
   // (paliers 75, 50, 25, 10 %) et l'invitent à manger / boire quand la faim ou
@@ -3890,13 +3894,16 @@ const Game = {
       // n'est pas un nouveau venu, on garde sa position enregistrée plutôt que
       // de le faire réapparaître à l'aéroport.
       this._loadedFromSave = true;
-      // Anti-blocage : un joueur inconscient chargé depuis une sauvegarde ne
-      // doit jamais rester coincé. Si le décompte est déjà écoulé ou invalide,
-      // on le réveille tout de suite ; sinon tickUnconscious finira le décompte.
+      // Anti-blocage : à l'ouverture d'un compte / au chargement d'une
+      // sauvegarde, on ne reste JAMAIS inconscient. On repart conscient (santé
+      // minimale s'il le fallait) — ça débloque immédiatement tout joueur resté
+      // coincé, et supprime toute annonce « vous perdez connaissance » en boucle.
       if (this.unconscious) {
-        if (typeof this.unconsciousSince !== 'number' || !isFinite(this.unconsciousSince) || (Date.now() - this.unconsciousSince) >= (this.UNCONSCIOUS_MS || 300000)) {
-          this.unconscious = false; this.unconsciousSince = null;
-        }
+        this.unconscious = false; this.unconsciousSince = null;
+        if (!(this.health > 0)) this.health = 30;
+        // On laisse une marge pour aller manger/boire sans retomber aussitôt.
+        this.hunger = Math.min(this.hunger || 0, 70);
+        this.thirst = Math.min(this.thirst || 0, 70);
       }
       if (!this.player) this.player = { firstName: 'Joueur', lastName: 'Anonyme', gender: 'homme', registered: false };
       if (!this.outfit) this.outfit = { haut: null, bas: null, chaussures: null, couleurHaut: null, couleurBas: null, couleurChaussures: null, coiffure: null, lunettes: null, accessoires: [] };
