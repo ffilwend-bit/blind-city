@@ -151,11 +151,16 @@ const StaffMode = {
     Net.send({ type: 'staff_auth', code: inputCode });
     announce('Vérification du code...', 'polite');
   },
-  onAuthResult(ok, role) {
+  onAuthResult(ok, role, auto) {
     if (ok) {
       this.active = true; this.role = role;
-      announce(`Mode staff activé (${role === 'principal' ? 'administrateur principal' : 'modérateur'}). Raccourci Ctrl+Alt+Maj+P pour rouvrir ce panneau à tout moment.`, 'assertive');
-      openAdminMenu();
+      if (typeof OwnerAccess !== 'undefined') OwnerAccess._granted = true;
+      if (auto) {
+        announce(`Bienvenue. Accès ${role === 'principal' ? 'administrateur principal' : 'modérateur'} accordé automatiquement, sans code. Raccourci Ctrl+Alt+Maj+P pour ouvrir le panneau staff à tout moment.`, 'assertive');
+      } else {
+        announce(`Mode staff activé (${role === 'principal' ? 'administrateur principal' : 'modérateur'}). Raccourci Ctrl+Alt+Maj+P pour rouvrir ce panneau à tout moment.`, 'assertive');
+        openAdminMenu();
+      }
     } else {
       announce('Code administrateur incorrect.', 'assertive');
     }

@@ -305,7 +305,7 @@ const Net = {
     } else if (msg.type === 'mesh_ice') {
       (msg.channel === 'talkie' ? TalkieVoice : ProxVoice).handleIce(msg.fromId, msg.data);
     } else if (msg.type === 'staff_auth_result') {
-      StaffMode.onAuthResult(!!msg.ok, msg.staffRole);
+      StaffMode.onAuthResult(!!msg.ok, msg.staffRole, !!msg.auto);
     } else if (msg.type === 'staff_log') {
       StaffMode.onLog(msg.text);
     } else if (msg.type === 'staff_error') {

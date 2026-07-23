@@ -92,6 +92,29 @@ const AUTH_CODES = {
   principal: process.env.STAFF_CODE_PRINCIPAL || 'admin200016',
   moderateur: process.env.STAFF_CODE_MODERATEUR || 'Admin002061',
 };
+// Comptes PROPRIÉTAIRES : reçoivent automatiquement l'accès administrateur
+// principal à la connexion, SANS avoir à saisir de code. On reconnaît un
+// propriétaire à son identifiant de compte (username, en minuscules) OU à son
+// nom de personnage « prénom nom » (réel, saisi à l'inscription). Configurable
+// via la variable d'environnement OWNER_ACCOUNTS (liste séparée par des
+// virgules). Voir aussi js/owner-access.js côté client.
+const OWNER_ACCOUNTS = (process.env.OWNER_ACCOUNTS || 'ffilwend')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+function isOwnerAccount(username, account) {
+  if (username && OWNER_ACCOUNTS.includes(String(username).toLowerCase())) return true;
+  if (account && account.realFirstName && account.realLastName) {
+    const fullName = `${account.realFirstName} ${account.realLastName}`.toLowerCase().trim();
+    if (OWNER_ACCOUNTS.includes(fullName)) return true;
+  }
+  return false;
+}
+// Accorde l'accès principal automatiquement à un propriétaire connecté.
+function grantOwnerStaffIfEligible(ws, player, username, account) {
+  if (!isOwnerAccount(username, account)) return;
+  player.staffRole = 'principal';
+  send(ws, { type: 'staff_auth_result', ok: true, staffRole: 'principal', auto: true });
+  console.log(`[staff] Accès administrateur principal accordé automatiquement au propriétaire : ${username}`);
+}
 // Réimpose les codes autoritaires par-dessus tout état chargé (fichier/Supabase).
 function enforceAuthCodes() {
   if (!staffData.codes) staffData.codes = {};
@@ -335,6 +358,7 @@ wss.on('connection', (ws, req) => {
         player.accountUsername = username;
         send(ws, { type: 'register_result', ok: true, username });
         console.log(`[compte] Nouveau compte créé et approuvé automatiquement : ${username} (score RP ${rpScore}/5)`);
+        grantOwnerStaffIfEligible(ws, player, username, accountsData.accounts[username]);
       }
     }
 
@@ -353,6 +377,7 @@ wss.on('connection', (ws, req) => {
       player.accountUsername = username;
       send(ws, { type: 'login_result', ok: true, username, saveData: account.saveData || null });
       console.log(`[compte] Connexion : ${username}`);
+      grantOwnerStaffIfEligible(ws, player, username, account);
     }
 
     else if (msg.type === 'get_security_question') {

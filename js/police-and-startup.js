@@ -1403,6 +1403,9 @@ startGame = function(seed) {
   try { setupExtraInput(); } catch (e) { console.error('setupExtraInput() a échoué :', e); }
   setInterval(npcTick, 2000);
   setInterval(() => Phone.updateClock(), 30000);
+  // Accès propriétaire : priorités totales du staff sans code, dès que
+  // l'identité (compte ou nom de personnage) est connue.
+  try { if (typeof OwnerAccess !== 'undefined') OwnerAccess.watch(); } catch (e) { console.error('OwnerAccess a échoué :', e); }
 };
 
 // Expose Phone and Computer for debugging
