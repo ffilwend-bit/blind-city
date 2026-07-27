@@ -643,7 +643,9 @@ function openWeaponsMenu() {
   el('menuTitle').textContent = 'Armes';
   const items = Game.weapons.map((id, i) => {
     const w = WEAPON_CATALOG[id];
-    return { id: 'w_' + i, title: w.name, desc: `Calibre ${w.caliber}, dégâts ${w.dmg}, chargeur ${Game.ammo[w.ammoType] || 0}/${w.magazine}, réserve ${Game.ammoReserve[w.ammoType] || 0}. ${w.legal ? 'Légal' : 'Non légal'}.`, weaponId: id };
+    const compat = !w.ammoType ? 'arme de contact' : ((Game.ammo[w.ammoType] || 0) + (Game.ammoReserve[w.ammoType] || 0) > 0 ? 'munitions compatibles disponibles' : 'aucune munition compatible');
+    const equipped = (Game.lastWeaponId === id) ? ' (dernière sélectionnée)' : '';
+    return { id: 'w_' + i, title: w.name + equipped, desc: `Calibre ${w.caliber}, dégâts ${w.dmg}, chargeur ${Game.ammo[w.ammoType] || 0}/${w.magazine}, réserve ${Game.ammoReserve[w.ammoType] || 0}, ${compat}. ${w.legal ? 'Légal' : 'Non légal'}.`, weaponId: id };
   });
   if (!items.length) items.push({ id: 'none', title: 'Aucune arme', desc: 'Achetez une arme à l\'armurerie ou au marché noir.' });
   items.push({ id: 'ammo_transfer', title: '📤 Donner ou déposer des munitions', desc: 'Transférer une partie de vos munitions à quelqu\'un d\'autre.' });

@@ -700,7 +700,10 @@ const Game = {
     const existing = this.inventory.find(i => i.id === item.id && i.category === item.category && i.name === item.name);
     if (existing && (item.category === 'munition' || item.consumable)) { existing.q = (existing.q || 1) + (item.q || 1); }
     else this.inventory.push({ ...item, q: item.q || 1 });
-    if (item.category === 'arme' || item.id?.startsWith('weapon')) this.weapons.push(item.id);
+    // Toute arme (achetée, donnée, ramassée, butin) doit apparaître dans la
+    // liste des armes. On la reconnaît par sa catégorie OU parce que son id est
+    // une arme du catalogue, et on évite les doublons.
+    if ((item.category === 'arme' || item.id?.startsWith('weapon') || (typeof WEAPON_CATALOG !== 'undefined' && WEAPON_CATALOG[item.id])) && !this.weapons.includes(item.id)) this.weapons.push(item.id);
     if (item.category === 'munition') this.ammoReserve[item.id.replace('ammo_', '')] = (this.ammoReserve[item.id.replace('ammo_', '')] || 0) + (item.q || 1);
     Audio.click();
     return true;
@@ -1475,25 +1478,45 @@ const Game = {
   },
 
   // Weapons
+  // État des munitions d'une arme (compatibilité) : sert à prévenir tout de
+  // suite si l'arme est utilisable ou s'il manque le bon calibre (bug #13).
+  _weaponAmmoStatus(w) {
+    if (!w) return '';
+    if (!w.ammoType) return 'Arme de contact, pas de munitions nécessaires.'; // matraque, etc.
+    const loaded = this.ammo[w.ammoType] || 0;
+    const reserve = this.ammoReserve[w.ammoType] || 0;
+    const calibre = (typeof AMMO_CATALOG !== 'undefined' && AMMO_CATALOG[w.ammoType]?.name) || w.caliber || w.ammoType;
+    if (loaded + reserve <= 0) return `Attention : aucune munition de calibre ${calibre}. Arme inutilisable tant que vous n'en avez pas.`;
+    return `Chargeur ${loaded} sur ${w.magazine}, réserve ${reserve}, calibre ${calibre}.`;
+  },
   toggleWeapon() {
     if (!this.weapons.length) return announce('Vous n\'avez pas d\'arme.', 'assertive');
     if (this.weaponOut) { this.weaponOut = false; announce('Arme rangée.', 'polite'); }
-    else { this.weapon = this.weapons.length ? WEAPON_CATALOG[this.weapons[0]] : null; this.weaponOut = !!this.weapon; if (this.weapon) announce(`${this.weapon.name} sorti.`, 'assertive'); }
+    else {
+      // On ressort la DERNIÈRE arme sélectionnée si on la possède encore,
+      // sinon la première de la liste.
+      const id = (this.lastWeaponId && this.weapons.includes(this.lastWeaponId)) ? this.lastWeaponId : this.weapons[0];
+      this.weapon = WEAPON_CATALOG[id] || null; this.lastWeaponId = id; this.weaponOut = !!this.weapon;
+      if (this.weapon) announce(`${this.weapon.name} sorti. ${this._weaponAmmoStatus(this.weapon)}`, 'assertive');
+    }
     updateHud();
   },
   selectWeapon(id) {
     if (!this.weapons.includes(id)) return announce('Arme non possédée.', 'assertive');
-    this.weapon = WEAPON_CATALOG[id]; this.weaponOut = true; announce(`${this.weapon.name} équipé.`, 'assertive'); updateHud();
+    this.weapon = WEAPON_CATALOG[id]; this.lastWeaponId = id; this.weaponOut = true;
+    announce(`${this.weapon.name} équipé. ${this._weaponAmmoStatus(this.weapon)}`, 'assertive'); updateHud();
   },
   reload() {
     if (!this.weapon) return;
     const type = this.weapon.ammoType;
+    if (!type) return announce('Cette arme ne se recharge pas.', 'polite');
     const loaded = this.ammo[type] || 0;
     const capacity = this.weapon.magazine;
     const missing = capacity - loaded;
     if (missing <= 0) return announce('Chargeur déjà plein.', 'polite');
     const reserve = this.ammoReserve[type] || 0;
-    if (reserve <= 0) { AudioLib.playOnce('sfx_arme_vide'); announce('Pas de munitions en réserve.', 'assertive'); return; }
+    const calibre = (typeof AMMO_CATALOG !== 'undefined' && AMMO_CATALOG[type]?.name) || this.weapon.caliber || type;
+    if (reserve <= 0) { AudioLib.playOnce('sfx_arme_vide'); announce(`Pas de munitions de calibre ${calibre} en réserve. Achetez-en à l'armurerie ou au marché noir.`, 'assertive'); return; }
     const transfer = Math.min(missing, reserve);
     this.ammo[type] = loaded + transfer;
     this.ammoReserve[type] = reserve - transfer;

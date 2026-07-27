@@ -317,11 +317,11 @@ const City = {
       for (let i = 0; i < count; i++) { const it = UTIL.pick(items); stock.push({ ...it, q: UTIL.randInt(1, 8), price: Math.floor(it.price * UTIL.rand(0.6, 1.2)) }); }
     }
     if (kind === 'legal_weapons') {
-      for (const [k, w] of Object.entries(WEAPON_CATALOG)) if (w.legal) stock.push({ ...w, id: k, q: UTIL.randInt(1, 3), price: w.price });
+      for (const [k, w] of Object.entries(WEAPON_CATALOG)) if (w.legal) stock.push({ ...w, id: k, category: 'arme', q: UTIL.randInt(1, 3), price: w.price });
       for (const [k, a] of Object.entries(AMMO_CATALOG)) if (a.legal) stock.push({ ...a, id: 'ammo_' + k, q: UTIL.randInt(10, 100), price: a.price, category: 'munition' });
     }
     if (kind === 'illegal_weapons') {
-      for (const [k, w] of Object.entries(WEAPON_CATALOG)) if (!w.legal) stock.push({ ...w, id: k, q: UTIL.randInt(1, 2), price: Math.floor(w.price * 1.4) });
+      for (const [k, w] of Object.entries(WEAPON_CATALOG)) if (!w.legal) stock.push({ ...w, id: k, category: 'arme', q: UTIL.randInt(1, 2), price: Math.floor(w.price * 1.4) });
       for (const [k, a] of Object.entries(AMMO_CATALOG)) if (!a.legal) stock.push({ ...a, id: 'ammo_' + k, q: UTIL.randInt(5, 80), price: Math.floor(a.price * 1.5), category: 'munition' });
       // black market goods
       const items = SHOP_CATALOG.filter(i => i.category === 'outil' || i.category === 'electronique');

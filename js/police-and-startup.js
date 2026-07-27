@@ -18,7 +18,8 @@ function setupExtraInput() {
     else if (key === 'l' && !ctrl && !alt) { e.preventDefault(); Game.announceLocation(); }
     else if (ctrl && key === 'l') { e.preventDefault(); Game.toggleVehicleLock(); }
     else if (ctrl && key === 'i') { e.preventDefault(); Game.announceMyId(); }
-    else if (key === 'a' && !ctrl && !alt) { e.preventDefault(); Game.toggleWeapon(); }
+    else if (key === 'a' && !ctrl && !alt && !shift) { e.preventDefault(); Game.toggleWeapon(); } // sortir/ranger la dernière arme
+    else if (shift && key === 'a') { e.preventDefault(); openWeaponsMenu(); } // menu de sélection d'arme
     else if (key === 'x' && !ctrl && !alt) { e.preventDefault(); Game.punch(); }
     else if (key === 'y' && !ctrl && !alt) { e.preventDefault(); Game.carryPlayer(); }
     else if (shift && key === 'z') { e.preventDefault(); Game.putInVehicle(); }
