@@ -2399,12 +2399,15 @@ const Game = {
   // Gounghin (forte) > Cissin (moyenne) > Koulouba (faible) > Aéroport (très
   // faible). Renvoie un multiplicateur de prix et une fourchette de budget.
   npcDemandFactor(districtName) {
+    // Marge de REVENTE : les passants paient PLUS que le prix magasin (mult > 1) —
+    // c'est de la revente informelle, on la fait pour le bénéfice, jamais à perte.
+    // Plus le quartier est commerçant/animé, plus la marge et le budget sont élevés.
     const name = districtName || '';
-    if (/Gounghin/i.test(name)) return { mult: 1.3, budgetMin: 20000, budgetMax: 50000, label: 'forte' };
-    if (/Cissin/i.test(name)) return { mult: 1.0, budgetMin: 12000, budgetMax: 30000, label: 'moyenne' };
-    if (/Koulouba/i.test(name)) return { mult: 0.7, budgetMin: 8000, budgetMax: 18000, label: 'faible' };
-    if (/A[ée]roport/i.test(name)) return { mult: 0.4, budgetMin: 5000, budgetMax: 12000, label: 'très faible' };
-    return { mult: 0.85, budgetMin: 8000, budgetMax: 25000, label: 'ordinaire' };
+    if (/Gounghin/i.test(name)) return { mult: 1.6, budgetMin: 25000, budgetMax: 70000, label: 'forte' };
+    if (/Cissin/i.test(name)) return { mult: 1.4, budgetMin: 15000, budgetMax: 42000, label: 'moyenne' };
+    if (/Koulouba/i.test(name)) return { mult: 1.25, budgetMin: 10000, budgetMax: 26000, label: 'faible' };
+    if (/A[ée]roport/i.test(name)) return { mult: 1.15, budgetMin: 8000, budgetMax: 18000, label: 'très faible' };
+    return { mult: 1.35, budgetMin: 10000, budgetMax: 34000, label: 'ordinaire' };
   },
   // Vendre un objet de l'inventaire à un passant. On cherche un civil proche,
   // non hostile ; s'il a le budget (selon le quartier), il se dirige vers le
@@ -2446,11 +2449,12 @@ const Game = {
     if (!it || (it.q || 1) < deal.qty) {
       return announce(`${n.name} est venu acheter ${deal.name}, mais vous ne l'avez plus.`, 'polite');
     }
+    const profit = deal.price - Math.floor((it.price || 1000) * deal.qty);
     this.money += deal.price;
     n.money = Math.max(0, (n.money || 0) - deal.price);
     this.removeItem(deal.itemId, deal.qty);
     Audio.cash();
-    announce(`Vente conclue : ${deal.qty} ${deal.name} à ${n.name} pour ${UTIL.formatMoney(deal.price)}.`, 'assertive');
+    announce(`Vente conclue : ${deal.qty} ${deal.name} à ${n.name} pour ${UTIL.formatMoney(deal.price)}${profit > 0 ? `, bénéfice de ${UTIL.formatMoney(profit)}` : ''}.`, 'assertive');
     if (this.vendorMode && this.vendorMode.itemId === deal.itemId) { this.vendorMode.sales++; this.vendorMode.revenue += deal.price; }
     updateHud();
   },
