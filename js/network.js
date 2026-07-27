@@ -366,6 +366,7 @@ const Net = {
       type: 'state', x: Game.x, y: Game.y, heading: Game.heading, health: Game.health, hunger: Game.hunger, thirst: Game.thirst,
       role: Roles.current, policeRank: Game.policeRank, outfit: Game.outfit, inVehicle: Game.inVehicle, vehicleName: Game.vehicle?.name || null,
       talkieOn: Game.talkie.on, talkieFrequency: Game.talkie.frequency,
+      convoy: (typeof Convoy !== 'undefined' ? Convoy.code : null),
       airplane: !!(typeof Phone !== 'undefined' && Phone.airplane),
       voiceOpen: !!Game.voiceOpen, handsUp: !!Game.handsUp, unconscious: !!Game.unconscious, isCuffed: !!Game.isCuffed,
     });

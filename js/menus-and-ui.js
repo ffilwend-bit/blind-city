@@ -1,3 +1,79 @@
+// ============================================================
+//  MODE CONVOI — plusieurs VRAIS joueurs roulent en groupe et se repèrent
+//  mutuellement à l'oreille (distance + cap de chaque membre), avec alerte
+//  quand quelqu'un se sépare trop. Un convoi est identifié par un code
+//  partagé (comme une fréquence talkie) : tous ceux qui affichent le même
+//  code sont membres. Le repérage est 100 % côté client, à partir des
+//  positions réseau réelles (Net.remotePlayers) — cohérent avec le fait
+//  que les autres joueurs sont de VRAIS joueurs, pas des PNJ.
+// ============================================================
+const Convoy = {
+  code: null,
+  SEP_DIST: 40, // séparation (cases) au-delà de laquelle on alerte
+  _lastSepWarn: {},
+  inConvoy() { return !!this.code; },
+  members() {
+    if (!this.code || typeof Net === 'undefined' || !Net.connected) return [];
+    return Array.from(Net.remotePlayers.values()).filter(p => p && p.convoy === this.code && !p.unconscious);
+  },
+  create() {
+    this.code = String(UTIL.randInt(1000, 9999));
+    announce(`Convoi créé. Code du convoi : ${this.code.split('').join(' ')}. Communiquez-le à votre groupe pour qu'il vous rejoigne.`, 'assertive');
+  },
+  join(code) {
+    const c = String(code || '').replace(/\D/g, '').slice(0, 6);
+    if (!c) return announce('Code de convoi invalide.', 'assertive');
+    this.code = c; this._lastSepWarn = {};
+    announce(`Vous rejoignez le convoi ${c.split('').join(' ')}.`, 'assertive');
+    setTimeout(() => this.locate(), 500);
+  },
+  leave() {
+    if (!this.code) return announce('Vous n\'êtes dans aucun convoi.', 'polite');
+    this.code = null; this._lastSepWarn = {};
+    announce('Vous avez quitté le convoi.', 'assertive');
+  },
+  locate() {
+    if (!this.code) return announce('Vous n\'êtes dans aucun convoi. Créez-en un ou rejoignez-en un.', 'assertive');
+    if (typeof Net === 'undefined' || !Net.connected) return announce('Le convoi nécessite une connexion au serveur.', 'assertive');
+    const mem = this.members();
+    if (!mem.length) return announce(`Convoi ${this.code.split('').join(' ')} : aucun autre membre repéré pour le moment.`, 'assertive');
+    const parts = mem.map(p => `${p.firstName || 'Membre'}, ${Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE)} mètres vers le ${UTIL.bearing(p.x - Game.x, p.y - Game.y)}`);
+    announce(`Convoi, ${mem.length} membre${mem.length > 1 ? 's' : ''} : ${parts.join(' ; ')}.`, 'assertive');
+  },
+  // Alerte de séparation périodique : prévient quand un membre s'éloigne trop.
+  tick() {
+    if (!this.code || typeof Net === 'undefined' || !Net.connected) return;
+    const now = Date.now();
+    this.members().forEach(p => {
+      if (UTIL.dist(p, Game) > this.SEP_DIST) {
+        if (now - (this._lastSepWarn[p.id] || 0) > 12000) {
+          this._lastSepWarn[p.id] = now;
+          announce(`${p.firstName || 'Un membre'} du convoi s'éloigne : ${Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE)} mètres vers le ${UTIL.bearing(p.x - Game.x, p.y - Game.y)}.`, 'polite');
+        }
+      } else { delete this._lastSepWarn[p.id]; }
+    });
+  },
+};
+window.Convoy = Convoy;
+
+function openConvoyMenu() {
+  el('menuTitle').textContent = '🚗 Convoi';
+  const items = [];
+  if (Convoy.inConvoy()) {
+    items.push({ id: 'locate', title: '📍 Repérer mon convoi', desc: `Distance et direction de chaque membre. Code : ${Convoy.code}.` });
+    items.push({ id: 'leave', title: '🚪 Quitter le convoi', desc: 'Vous ne serez plus repéré par le groupe.' });
+  } else {
+    items.push({ id: 'create', title: '➕ Créer un convoi', desc: 'Génère un code à partager avec votre groupe.' });
+    items.push({ id: 'join', title: '🔢 Rejoindre un convoi', desc: 'Saisissez le code communiqué par le groupe.' });
+  }
+  renderMenu(items, (it) => {
+    if (it.id === 'locate') { closeMenu(); Convoy.locate(); }
+    else if (it.id === 'leave') { Convoy.leave(); closeMenu(); }
+    else if (it.id === 'create') { Convoy.create(); closeMenu(); }
+    else if (it.id === 'join') { closeMenu(); AccessibleTextPrompt.open('Rejoindre un convoi', 'Saisissez le code du convoi communiqué par votre groupe.', '', (code) => Convoy.join(code)); }
+  });
+  el('menuOverlay').style.display = 'flex';
+}
 function openTalkieMenu() {
   el('menuTitle').textContent = '📻 Talkie-walkie';
   const t = Game.talkie;
@@ -1281,6 +1357,7 @@ function startGame(seed) {
     setInterval(() => Game.updateGangCombat(), 1500);
     setInterval(() => Game.updateWantedResponseCombat(), 1500);
     setInterval(() => Game.updateWantedChase(), 800);
+    setInterval(() => Convoy.tick(), 2500);
     setInterval(() => Game.tickUnconscious(), 5000);
     setInterval(() => Game.tickDrivingExam(), 1000);
     setInterval(() => Game.tickFlightExam(), 1000);

@@ -251,6 +251,7 @@ function publicState(p) {
     x: p.x, y: p.y, heading: p.heading, health: p.health, hunger: p.hunger, thirst: p.thirst, role: p.role, policeRank: p.policeRank,
     outfit: p.outfit, inVehicle: p.inVehicle, vehicleName: p.vehicleName,
     talkieOn: p.talkieOn, talkieFrequency: p.talkieFrequency, voiceOpen: p.voiceOpen, handsUp: p.handsUp,
+    convoy: p.convoy || null,
     unconscious: !!p.unconscious, isCuffed: !!p.isCuffed, accountUsername: p.accountUsername || null,
   };
 }
@@ -698,6 +699,7 @@ wss.on('connection', (ws, req) => {
       if (typeof msg.unconscious === 'boolean') player.unconscious = msg.unconscious;
       if (typeof msg.isCuffed === 'boolean') player.isCuffed = msg.isCuffed;
       if (typeof msg.policeRank === 'string' || msg.policeRank === null) player.policeRank = msg.policeRank;
+      if (typeof msg.convoy === 'string' || msg.convoy === null) player.convoy = msg.convoy ? String(msg.convoy).slice(0, 6) : null;
     }
 
     else if (msg.type === 'chat') {

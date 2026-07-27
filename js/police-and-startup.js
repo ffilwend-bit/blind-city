@@ -29,6 +29,7 @@ function setupExtraInput() {
     else if (ctrl && key === 's') { e.preventDefault(); Game.toggleSiren(); }
     else if (ctrl && key === 'h') { e.preventDefault(); Game.honk(); }
     else if (ctrl && key === 'd') { e.preventDefault(); Game.toggleDriveAssist(); } // assistant de conduite (alerte obstacles)
+    else if (ctrl && key === 'k') { e.preventDefault(); openConvoyMenu(); } // gérer le convoi (créer / rejoindre / quitter)
     else if (ctrl && key === 'x') { e.preventDefault(); Game.callTaxi(); }
     else if (ctrl && key === 'p') { e.preventDefault(); Game.payTickets(); }
     else if (ctrl && key === 'm') { e.preventDefault(); Game.buyMiningMachine(); }
@@ -62,6 +63,7 @@ function setupExtraInput() {
     else if (ctrl && (['1','2','3','4','5','6','7','8','9'].includes(key))) { e.preventDefault(); Game.target(parseInt(key, 10)); }
     else if (alt && key === 'f') { e.preventDefault(); Game.searchSelf(); }
     else if (alt && key === 'v') { e.preventDefault(); Game.openVehicleInfo(Game.vehicle || City.vehicles.find(v => UTIL.dist(v, Game) < 4)); }
+    else if (alt && key === 'k') { e.preventDefault(); Convoy.locate(); } // repérage audio rapide du convoi
     else if (alt && key === 'm') { e.preventDefault(); AccessibleTextPrompt.open('Enregistrer un lieu', 'Nom du lieu à enregistrer ici.', '', (n) => { if (n) Game.savePlaceHere(n); }); }
     else if (shift && key === 's') { e.preventDefault(); Game.announceLocation(); }
     else if (shift && key === 'f') { e.preventDefault(); Game.findMyCar(); }
