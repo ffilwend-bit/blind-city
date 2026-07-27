@@ -1024,7 +1024,10 @@ const Game = {
           || City.houses.some(h => UTIL.dist(h, this) < 4)
           || City.vehicles.some(v => UTIL.dist(v, this) < 3)
           || City.npcs.some(n => !n.dead && UTIL.dist(n, this) < 3);
-        if (canInteract) hint = ' Appuyez sur E pour entrer ou interagir.';
+        if (canInteract) {
+          const nearBuilding = City.pois.some(p => UTIL.dist(p, this) < 4) || City.houses.some(h => UTIL.dist(h, this) < 4);
+          hint = ' Appuyez sur E pour interagir' + (nearBuilding ? ', ou Ctrl+Alt+E pour entrer' : '') + '.';
+        }
       }
       announce((this.guidanceFollowId ? `Vous avez rejoint ${t.name}.` : `Vous êtes arrivé à ${t.name}.`) + hint, 'interrupt');
       Audio.cash();
@@ -1818,16 +1821,12 @@ const Game = {
   // Interactions
   interact() {
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
-    // Déjà à l'intérieur d'un lieu : E rouvre le CONTENU de ce lieu (rayons du
-    // magasin, services…), jamais les lieux de l'extérieur. On ressort par
-    // Ctrl+Alt+E, ou automatiquement si l'on s'est éloigné du lieu.
-    if (this.indoors && this.indoors.ref) {
-      if (UTIL.dist(this.indoors.ref, this) <= 4) {
-        if (this.indoors.kind === 'house') return this.enterHouse(this.indoors.ref);
-        return this.enterPOI(this.indoors.ref);
-      }
-      this.indoors = null; // éloigné du lieu : on est ressorti
-    }
+    // On considère qu'on est ressorti si l'on s'est éloigné du lieu où l'on
+    // était entré (Ctrl+Alt+E). E n'est PLUS détourné pour rouvrir toujours le
+    // même lieu : il propose normalement TOUT ce qu'il y a autour (le lieu
+    // lui-même quand on est dedans, mais aussi un véhicule, une personne…), pour
+    // ne plus rester bloqué (ex. l'auto-école après le test).
+    if (this.indoors && this.indoors.ref && UTIL.dist(this.indoors.ref, this) > 4) this.indoors = null;
     // Un vrai joueur inconscient à proximité : assistance immédiate, ou
     // portage physique réel (pour l'emmener où on veut — otage, escorte...).
     if (Net.connected) {
@@ -1886,12 +1885,25 @@ const Game = {
     City.npcs.filter(n => !n.dead && UTIL.dist(n, this) < 3).forEach(n => {
       targets.push({ d: UTIL.dist(n, this), label: `🧍 ${n.name}`, act: () => { this.describePerson(n); this.talkTo(n); } });
     });
-    // Bâtiments : rayon 4 (ce sont des tuiles solides, on se tient à côté).
+    // Bâtiments : E N'ENTRE PLUS (l'entrée est réservée à Ctrl+Alt+E). Les lieux
+    // « sans porte » (station-service, aéroport…) restent des services qu'on
+    // utilise directement ; un lieu où l'on est DÉJÀ entré : E rouvre son contenu.
+    const noDoorEnter = ['station_essence', 'mine', 'aeroport', 'heliport', 'port'];
     City.pois.filter(p => UTIL.dist(p, this) < 4).forEach(p => {
-      targets.push({ d: UTIL.dist(p, this), label: `🏢 ${p.name}`, act: () => this.enterBuilding(p) });
+      const inside = this.indoors && this.indoors.ref === p;
+      if (noDoorEnter.includes(p.type) || inside) {
+        targets.push({ d: UTIL.dist(p, this), label: `🏢 ${p.name}${inside ? ' (intérieur)' : ''}`, act: () => this.enterPOI(p) });
+      } else {
+        targets.push({ d: UTIL.dist(p, this), label: `🚪 ${p.name} — Ctrl+Alt+E pour entrer`, act: () => announce(`Vous êtes devant ${p.name}. Faites Ctrl+Alt+E pour entrer.`, 'assertive') });
+      }
     });
     City.houses.filter(h => UTIL.dist(h, this) < 4).forEach(h => {
-      targets.push({ d: UTIL.dist(h, this), label: `🏠 ${h.name || 'une maison'}`, act: () => { this.announceEnterBuilding(h.name || 'la maison', 'cour', h); this.enterHouse(h); } });
+      const inside = this.indoors && this.indoors.ref === h;
+      if (inside) {
+        targets.push({ d: UTIL.dist(h, this), label: `🏠 ${h.name || 'une maison'} (intérieur)`, act: () => this.enterHouse(h) });
+      } else {
+        targets.push({ d: UTIL.dist(h, this), label: `🏠 ${h.name || 'une maison'} — Ctrl+Alt+E pour entrer`, act: () => announce(`Vous êtes devant ${h.name || 'cette maison'}. Faites Ctrl+Alt+E pour entrer.`, 'assertive') });
+      }
     });
     City.vehicles.filter(v => !this.inVehicle && UTIL.dist(v, this) < 3).forEach(v => {
       targets.push({ d: UTIL.dist(v, this), label: `🚗 ${v.name} (véhicule)`, act: () => this.interactVehicle() });

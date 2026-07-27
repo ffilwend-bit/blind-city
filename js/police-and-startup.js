@@ -45,7 +45,7 @@ function setupExtraInput() {
     else if (ctrl && alt && key === 't') { e.preventDefault(); Game.requisitionTank(); }
     else if (ctrl && key === 't') { e.preventDefault(); openTalkieMenu(); }
     else if (ctrl && key === 'y') { e.preventDefault(); Game.rpTalk(); }
-    else if (ctrl && alt && key === 'e') { e.preventDefault(); Game.toggleIndoor(); } // entrer / sortir d'un lieu
+    else if (ctrl && alt && (key === 'e' || e.code === 'KeyE')) { e.preventDefault(); Game.toggleIndoor(); } // entrer / sortir d'un lieu (e.code : sur AZERTY, AltGr+E donne « € », pas « e »)
     else if (ctrl && key === 'e') { e.preventDefault(); Game.throwGrenade(); }
     else if (shift && key === 'e') { e.preventDefault(); Game.changeFloor(1); }   // monter d'un étage
     else if (alt && key === 'e') { e.preventDefault(); Game.changeFloor(-1); }     // descendre d'un étage
