@@ -138,8 +138,10 @@ const SpeechFix = {
     try { AudioLib.unlock(); } catch (e) { /* ignore */ }
     if (!this.keepAliveTimer) {
       this.keepAliveTimer = setInterval(() => {
-        if ('speechSynthesis' in window && window.speechSynthesis.speaking) {
-          window.speechSynthesis.pause();
+        // Ne PAS faire pause()/resume() pendant que la voix parle : sur
+        // iOS/Android, ça tronque l'annonce en cours. On se contente de
+        // débloquer le moteur s'il s'est réellement mis en pause tout seul.
+        if ('speechSynthesis' in window && window.speechSynthesis.paused) {
           window.speechSynthesis.resume();
         }
         if (Audio.ctx && Audio.ctx.state === 'suspended') Audio.ctx.resume();

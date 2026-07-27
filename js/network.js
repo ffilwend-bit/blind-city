@@ -447,6 +447,37 @@ function announceTouchLabels() {
   });
 }
 
+// Découpe un texte long en morceaux d'au plus `max` caractères, en coupant sur
+// les fins de phrase — sur mobile, une seule longue utterance est souvent
+// tronquée par le moteur vocal. Les morceaux sont ensuite enchaînés.
+function _splitSpeech(text, max) {
+  text = String(text == null ? '' : text);
+  if (text.length <= max) return [text];
+  const parts = text.match(/[^.!?…]+[.!?…]*\s*/g) || [text];
+  const chunks = []; let cur = '';
+  for (const p of parts) {
+    if (cur && (cur + p).length > max) { chunks.push(cur.trim()); cur = p; }
+    else cur += p;
+  }
+  if (cur.trim()) chunks.push(cur.trim());
+  return chunks.length ? chunks : [text];
+}
+// Lit une suite de morceaux : le suivant ne part qu'à la fin (onend) du
+// précédent, pour une parole continue et fiable, sans troncature.
+function _speakChunks(chunks) {
+  if (!('speechSynthesis' in window)) return;
+  const synth = window.speechSynthesis;
+  let i = 0;
+  const next = () => {
+    if (i >= chunks.length) return;
+    const u = new SpeechSynthesisUtterance(chunks[i]);
+    u.lang = 'fr-FR'; u.rate = CONFIG.SPEECH_RATE; u.pitch = CONFIG.SPEECH_PITCH;
+    u.onend = () => { i++; next(); };
+    u.onerror = () => { i++; next(); };
+    synth.speak(u);
+  };
+  next();
+}
 function speak(text, priority = 'polite') {
   if ('speechSynthesis' in window) {
     const synth = window.speechSynthesis;
@@ -463,17 +494,17 @@ function speak(text, priority = 'polite') {
       const a = el('announcerPolite'); a.textContent = ''; a.textContent = text;
       return;
     }
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'fr-FR'; u.rate = CONFIG.SPEECH_RATE; u.pitch = CONFIG.SPEECH_PITCH;
+    // Textes longs découpés en phrases enchaînées (fiabilité mobile).
+    const chunks = _splitSpeech(text, 180);
     if (priority === 'interrupt') {
       // Instantané, sans setTimeout : indispensable pour une navigation fluide.
       try { synth.cancel(); } catch (e) { /* ignore */ }
-      synth.speak(u);
+      _speakChunks(chunks);
     } else if (busy) {
       synth.cancel();
-      setTimeout(() => synth.speak(u), 30);
+      setTimeout(() => _speakChunks(chunks), 30);
     } else {
-      synth.speak(u);
+      _speakChunks(chunks);
     }
   }
   const a = priority === 'polite' ? el('announcerPolite') : el('announcer');
