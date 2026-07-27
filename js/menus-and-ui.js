@@ -718,6 +718,7 @@ const Rotor = {
         { label: 'klaxon', run: () => Game.honk() },
         { label: 'sirène', run: () => Game.toggleSiren() },
         { label: 'boussole sonore', run: () => Game.soundCompass() },
+        { label: 'assistant de conduite', run: () => Game.toggleDriveAssist() },
       ];
     }
     if (typeof Game.getLiveTarget === 'function' && Game.getLiveTarget()) {
@@ -1096,6 +1097,8 @@ function gameLoop() {
       // Retour de progression (tic de roulement, quartiers, routes, vitesse) :
       // c'est ce qui fait « sentir » qu'on avance, en manuel comme en auto.
       Game.updateVehicleProgress();
+      // Assistant de conduite : prévenir des obstacles devant avant l'impact.
+      Game.warnVehicleHazard();
     }
 
     // Son de conduite : le vélo a son propre système de boucles (pédalage /

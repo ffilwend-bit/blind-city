@@ -28,6 +28,7 @@ function setupExtraInput() {
     else if (ctrl && key === 'u') { e.preventDefault(); Game.openPoliceMenu(); }
     else if (ctrl && key === 's') { e.preventDefault(); Game.toggleSiren(); }
     else if (ctrl && key === 'h') { e.preventDefault(); Game.honk(); }
+    else if (ctrl && key === 'd') { e.preventDefault(); Game.toggleDriveAssist(); } // assistant de conduite (alerte obstacles)
     else if (ctrl && key === 'x') { e.preventDefault(); Game.callTaxi(); }
     else if (ctrl && key === 'p') { e.preventDefault(); Game.payTickets(); }
     else if (ctrl && key === 'm') { e.preventDefault(); Game.buyMiningMachine(); }

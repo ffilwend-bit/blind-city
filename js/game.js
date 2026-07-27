@@ -1,7 +1,7 @@
 const Game = {
   x: 120, y: 120, altitude: 0, floor: 0, heading: 0, health: 100, maxHealth: 100,
   money: 100000, bank: 0, dirtyMoney: 0, handsUp: false, hunger: 50, thirst: 50, energy: 100,
-  inVehicle: false, vehicle: null, ownedVehicles: [],
+  inVehicle: false, vehicle: null, ownedVehicles: [], driveAssist: true,
   inventory: [], backpack: false, belt: false, holster: null,
   weapons: [], weapon: null, weaponOut: false, ammo: {}, ammoReserve: {},
   lockedTarget: null, scannedTargets: [], aimPart: 'torse',
@@ -450,6 +450,40 @@ const Game = {
       p.lastMsg = now;
       const kmh = Math.round(Math.abs(v.speed) * 60);
       announce(`Vous roulez vers le ${UTIL.cardinals[v.heading]}, environ ${kmh} kilomètres heure, dans ${p.district}.`, 'polite');
+    }
+  },
+  // Assistant de conduite (aide à la conduite manuelle sans la vue) : bascule
+  // activé par défaut. Prévient des obstacles DROIT DEVANT le véhicule avant la
+  // collision, avec une distance d'anticipation proportionnelle à la vitesse.
+  toggleDriveAssist() {
+    this.driveAssist = !this.driveAssist;
+    announce(this.driveAssist ? 'Assistant de conduite activé. Vous serez prévenu des obstacles devant.' : 'Assistant de conduite désactivé.', 'assertive');
+  },
+  warnVehicleHazard() {
+    if (!this.driveAssist || !this.inVehicle || !this.vehicle) return;
+    const v = this.vehicle; const cls = VEHICLE_CATALOG[v.type];
+    // Un aéronef EN VOL survole les obstacles : pas d'alerte au sol.
+    if (cls && cls.flies && v.altitude > 0) return;
+    const spd = Math.abs(v.speed);
+    if (spd < 0.05) { this._hazardClear = true; return; } // à l'arrêt : rien à signaler
+    const { dx, dy } = this.headingToDelta(v.heading);
+    if (dx === 0 && dy === 0) return;
+    // Distance de balayage : de 2 cases (lent) à 6 cases (rapide) — on anticipe
+    // d'autant plus loin qu'on roule vite.
+    const look = Math.min(6, Math.max(2, Math.round(spd / (cls.maxSpeed || 1) * 6) + 1));
+    let hitAt = 0;
+    for (let i = 1; i <= look; i++) {
+      if (City.isSolid(Math.round(v.x + dx * i), Math.round(v.y + dy * i))) { hitAt = i; break; }
+    }
+    const now = Date.now();
+    if (hitAt) {
+      if (now - (this._lastHazardWarn || 0) > 1200) {
+        this._lastHazardWarn = now; this._hazardClear = false;
+        announce(hitAt <= 2 ? 'Freinez, obstacle juste devant !' : `Obstacle à ${hitAt * CONFIG.METERS_PER_TILE} mètres, ralentissez.`, 'assertive');
+      }
+    } else if (this._hazardClear === false) {
+      this._hazardClear = true;
+      announce('Voie dégagée.', 'polite');
     }
   },
   // Signale un crime (vol de véhicule, braquage...) à TOUS les policiers connectés,
