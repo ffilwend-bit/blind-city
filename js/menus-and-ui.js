@@ -116,6 +116,7 @@ function openItemActionMenu(itemId) {
     { id: 'use', title: '🖐️ Utiliser / Porter', desc: 'Utiliser, porter ou consommer cet objet.' },
     { id: 'give', title: '🤝 Donner', desc: qty > 1 ? `Choisir la quantité à donner (jusqu'à ${qty}) à la cible verrouillée.` : 'Donner l\'objet à la cible verrouillée.' },
     { id: 'sellnpc', title: '💰 Vendre à un passant', desc: 'Proposer l\'objet à un passant proche ; s\'il a le budget, il vient l\'acheter. Le prix dépend du quartier.' },
+    { id: 'vendor', title: (Game.vendorMode ? '🛑 Arrêter la vente automatique' : '🛒 Vente automatique (activer)'), desc: Game.vendorMode ? 'Vous vendez déjà en continu. Arrêter et faire le bilan.' : 'Installer votre étal : les passants viendront acheter cet objet tout seuls, tant que vous restez sur place.' },
     { id: 'drop', title: '⬇️ Déposer au sol', desc: qty > 1 ? `Choisir la quantité à déposer (jusqu'à ${qty}).` : 'Déposer l\'objet au sol.' },
     { id: 'back', title: '↩️ Retour à l\'inventaire', desc: 'Revenir à la liste des objets.' },
   ];
@@ -132,6 +133,7 @@ function openItemActionMenu(itemId) {
       else Game.sellToNPC(itemId, 1);
       closeMenu(); return;
     }
+    if (a.id === 'vendor') { Game.toggleVendorMode(itemId); closeMenu(); return; }
     if (a.id === 'drop') {
       if (qty > 1) QtyPicker.open(`Déposer ${it.name}`, qty, (n) => { Game.dropItem(itemId, n); });
       else Game.dropItem(itemId, 1);
@@ -1358,6 +1360,7 @@ function startGame(seed) {
     setInterval(() => Game.updateWantedResponseCombat(), 1500);
     setInterval(() => Game.updateWantedChase(), 800);
     setInterval(() => Convoy.tick(), 2500);
+    setInterval(() => Game.vendorTick(), 2000);
     setInterval(() => Game.tickUnconscious(), 5000);
     setInterval(() => Game.tickDrivingExam(), 1000);
     setInterval(() => Game.tickFlightExam(), 1000);

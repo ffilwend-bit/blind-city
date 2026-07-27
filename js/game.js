@@ -2409,16 +2409,20 @@ const Game = {
   // Vendre un objet de l'inventaire à un passant. On cherche un civil proche,
   // non hostile ; s'il a le budget (selon le quartier), il se dirige vers le
   // vendeur et la vente se conclut à son arrivée (voir npcTick).
+  // Passant susceptible d'acheter : civil non hostile, vivant, disponible, proche.
+  _findBuyerNear(radius = 14) {
+    return (City.npcs || [])
+      .filter(n => !n.dead && !n.hostile && !n.menotte && !n.knockedOut && !n.wantsToBuyItem
+        && (n.job === 'civil' || n.job === 'commercant' || n.job === 'vendeur' || n.job === 'etudiant' || n.job === 'employe' || n.job === 'retraite')
+        && UTIL.dist(n, this) < radius)
+      .sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+  },
   sellToNPC(itemId, qty = 1) {
     const it = this.inventory.find(i => i.id === itemId) || this.inventory[0];
     if (!it) return announce('Rien à vendre.', 'assertive');
     qty = Math.min(Math.max(1, Math.floor(qty) || 1), it.q || 1);
     // Acheteur : un passant civil, non hostile, vivant, non déjà occupé, proche.
-    const buyer = (City.npcs || [])
-      .filter(n => !n.dead && !n.hostile && !n.menotte && !n.knockedOut && !n.wantsToBuyItem
-        && (n.job === 'civil' || n.job === 'commercant' || n.job === 'vendeur' || n.job === 'etudiant' || n.job === 'employe' || n.job === 'retraite')
-        && UTIL.dist(n, this) < 14)
-      .sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+    const buyer = this._findBuyerNear(14);
     if (!buyer) return announce('Aucun passant intéressé à proximité. Rapprochez-vous d\'une zone animée.', 'assertive');
     const demand = this.npcDemandFactor(City.getDistrictAt(this.x, this.y).name);
     const price = Math.max(1, Math.floor((it.price || 1000) * demand.mult * qty));
@@ -2447,7 +2451,57 @@ const Game = {
     this.removeItem(deal.itemId, deal.qty);
     Audio.cash();
     announce(`Vente conclue : ${deal.qty} ${deal.name} à ${n.name} pour ${UTIL.formatMoney(deal.price)}.`, 'assertive');
+    if (this.vendorMode && this.vendorMode.itemId === deal.itemId) { this.vendorMode.sales++; this.vendorMode.revenue += deal.price; }
     updateHud();
+  },
+  /* ==========================================================
+     MODE VENDEUR ACTIVABLE — on « installe son étal » : une fois activé,
+     les passants du quartier viennent acheter l'article proposé au fil du
+     temps, tout seuls (selon la demande locale), sans avoir à relancer la
+     vente à chaque passant. Réutilise la demande par quartier et la
+     conclusion de vente existantes. Se coupe en le réactivant, ou tout
+     seul quand le stock est épuisé.
+     ========================================================== */
+  vendorMode: null,
+  toggleVendorMode(itemId) {
+    if (this.vendorMode) {
+      const vm = this.vendorMode; this.vendorMode = null;
+      announce(`Vente automatique arrêtée.${vm.sales ? ` Bilan : ${vm.sales} vente${vm.sales > 1 ? 's' : ''} pour ${UTIL.formatMoney(vm.revenue)}.` : ''}`, 'assertive');
+      return;
+    }
+    const it = itemId ? this.inventory.find(i => i.id === itemId) : this.inventory[0];
+    if (!it) return announce('Vous n\'avez rien à vendre.', 'assertive');
+    this.vendorMode = { itemId: it.id, lastAttempt: 0, sales: 0, revenue: 0 };
+    const demand = this.npcDemandFactor(City.getDistrictAt(this.x, this.y).name);
+    announce(`Vente automatique activée : vous proposez ${it.name}. Demande ${demand.label} dans ce quartier. Restez sur place, les passants viendront. Réactivez pour arrêter.`, 'assertive');
+  },
+  // Attire un acheteur pour un article donné, sans bavardage en cas d'échec
+  // (utilisé par le mode vendeur automatique).
+  _attractBuyer(it, qty = 1) {
+    const buyer = this._findBuyerNear(16);
+    if (!buyer) return false;
+    const demand = this.npcDemandFactor(City.getDistrictAt(this.x, this.y).name);
+    const price = Math.max(1, Math.floor((it.price || 1000) * demand.mult * qty));
+    const budget = UTIL.randInt(demand.budgetMin, demand.budgetMax);
+    if (budget < price) return false;
+    buyer.money = budget;
+    buyer.wantsToBuyItem = { itemId: it.id, qty, price, name: it.name, expires: Date.now() + 30000 };
+    if (window.Audio && Audio.tone) Audio.tone({ freq: 620, type: 'sine', duration: 0.12, gain: 0.1, pan: this.panForPoint(buyer.x, buyer.y) });
+    announce(`${buyer.name} s'intéresse à ${it.name} pour ${UTIL.formatMoney(price)} et vient vous voir.`, 'polite');
+    return true;
+  },
+  // Boucle du mode vendeur : périodiquement, une chance d'attirer un passant.
+  vendorTick() {
+    const vm = this.vendorMode; if (!vm) return;
+    if (this.unconscious || this.inVehicle) return; // pas d'étal en voiture ni inconscient
+    const now = Date.now();
+    if (now - vm.lastAttempt < 4000) return; // cadence des tentatives
+    vm.lastAttempt = now;
+    const it = this.inventory.find(i => i.id === vm.itemId);
+    if (!it) { this.vendorMode = null; announce(`Vente automatique terminée : plus de stock.${vm.sales ? ` Bilan : ${vm.sales} vente${vm.sales > 1 ? 's' : ''} pour ${UTIL.formatMoney(vm.revenue)}.` : ''}`, 'assertive'); return; }
+    const demand = this.npcDemandFactor(City.getDistrictAt(this.x, this.y).name);
+    if (!UTIL.chance(Math.min(0.6, 0.3 * demand.mult))) return; // parfois personne ne mord
+    this._attractBuyer(it, 1);
   },
   openVehicleShop(poi) {
     const available = Object.entries(VEHICLE_CATALOG).map(([k, v]) => ({ id: k, ...v }));
