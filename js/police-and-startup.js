@@ -125,6 +125,9 @@ const Police = {
     // même sans joueur humain policier connecté.
     if (Game.wanted < 50) { Game._wantedHighSince = null; return; }
     if (Game.wantedResponseState) return;
+    // La police, ce sont de VRAIS joueurs : s'il y en a de connectés à proximité,
+    // on ne déclenche PAS d'intervention PNJ automatique — ils gèrent eux-mêmes.
+    if (Game._nearbyRealPolice && Game._nearbyRealPolice(60).length) { Game._wantedHighSince = null; return; }
     const now = Date.now();
     if (!Game._wantedHighSince) { Game._wantedHighSince = now; return; }
     const delay = Math.max(20000, 90000 - Game.wanted * 700);

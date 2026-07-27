@@ -3913,14 +3913,35 @@ const Game = {
   },
 
   /* ==========================================================
-     COURSE-POURSUITE (option « Tenter de fuir » de l'intervention).
-     Des unités de police vous suivent réellement : on entend la sirène
-     (plus forte quand elles se rapprochent), la distance est annoncée,
-     et on s'échappe en creusant l'écart — facile en véhicule rapide,
-     difficile à pied. Rattrapé au contact : ça bascule en combat, en
-     réutilisant l'équipe déjà existante (updateWantedResponseCombat).
+     COURSE-POURSUITE. Dans ce jeu, la police est composée de VRAIS
+     JOUEURS humains : une poursuite se joue donc d'abord contre eux.
+     Côté fuyard, on fournit le retour audio (sirène plus forte quand
+     ils se rapprochent, distance et cap annoncés) à partir de la
+     position réelle des policiers connectés ; on s'échappe en creusant
+     l'écart, et on est interpellé quand un policier réel vous menotte
+     (mécanique existante). Les PNJ ne servent QUE de filet en solo,
+     quand aucun policier humain n'est connecté à proximité.
      ========================================================== */
+  // Policiers RÉELS (joueurs humains) connectés à portée.
+  _nearbyRealPolice(radius = 60) {
+    if (!Net.connected) return [];
+    return Array.from(Net.remotePlayers.values()).filter(p => p && p.role === 'police' && !p.unconscious && UTIL.dist(p, this) < radius);
+  },
   startPoliceChase() {
+    this._chaseSirenOn = true;
+    const cops = this._nearbyRealPolice(60);
+    if (cops.length) {
+      // Poursuite entre joueurs réels : on prévient la police (mécanique de
+      // signalement existante) et on laisse le retour audio suivre leurs
+      // positions réelles. Aucun PNJ n'est créé.
+      this.wantedResponseState = { stage: 'chase', real: true, farTicks: 0, lastDistMsg: 0 };
+      AudioLib.playLoop('sirene_vehicule_police', 0.4);
+      this.reportCrimeToPolice('fuite', 'Refus d\'obtempérer : le suspect prend la fuite');
+      announce(`Vous prenez la fuite ! ${cops.length} policier${cops.length > 1 ? 's réels sont' : ' réel est'} à vos trousses. Semez-${cops.length > 1 ? 'les' : 'le'} en creusant l'écart.`, 'assertive');
+      return;
+    }
+    // FILET SOLO — aucun policier humain à proximité : une patrouille automatique
+    // prend le relais pour que « être recherché » ait un effet même hors ligne.
     const count = UTIL.randInt(2, 3);
     const npcIds = [];
     for (let i = 0; i < count; i++) {
@@ -3938,13 +3959,12 @@ const Game = {
       };
       City.npcs.push(npc); npcIds.push(npc.id);
     }
-    this.wantedResponseState = { stage: 'chase', npcIds, farTicks: 0, lastDistMsg: 0 };
-    this._chaseSirenOn = true;
+    this.wantedResponseState = { stage: 'chase', real: false, npcIds, farTicks: 0, lastDistMsg: 0 };
     AudioLib.playLoop('sirene_vehicule_police', 0.5);
-    announce(`La police vous prend en chasse ! Semez-les en creusant l'écart ${this.inVehicle ? 'au volant' : 'à pied'}.`, 'assertive');
+    announce(`Aucun policier réel dans les parages : une patrouille automatique vous prend en chasse. Semez-la en creusant l'écart ${this.inVehicle ? 'au volant' : 'à pied'}.`, 'assertive');
   },
-  // Fait avancer un poursuivant de `speed` cases vers le joueur, en contournant
-  // sommairement les obstacles.
+  // Fait avancer un poursuivant PNJ de `speed` cases vers le joueur, en
+  // contournant sommairement les obstacles (filet solo uniquement).
   _stepChaserToward(n, speed) {
     for (let s = 0; s < speed; s++) {
       const dx = this.x - n.x, dy = this.y - n.y;
@@ -3962,24 +3982,51 @@ const Game = {
   updateWantedChase() {
     const ws = this.wantedResponseState; if (!ws || ws.stage !== 'chase') return;
     if (this.health <= 0) { this.endPoliceChase(false); return; }
-    const squad = ws.npcIds.map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
-    if (!squad.length) { this.wanted = Math.max(0, this.wanted - 30); this.endPoliceChase(true, 'Vous avez neutralisé vos poursuivants. Niveau de recherche réduit.'); return; }
-    const speed = (this.inVehicle && this.vehicle) ? 2 : 1;
-    squad.forEach(n => this._stepChaserToward(n, speed));
-    let nearest = Infinity, closest = squad[0];
-    squad.forEach(n => { const d = UTIL.dist(n, this); if (d < nearest) { nearest = d; closest = n; } });
-    // Sirène plus forte quand ils sont proches.
-    AudioLib.playLoop('sirene_vehicule_police', UTIL.clamp(0.72 - nearest * 0.035, 0.12, 0.72));
-    if (nearest <= 1.6) { announce('Ils vous rattrapent et vous bloquent la route !', 'assertive'); this.endPoliceChase(false, null, true); return; }
-    if (nearest > 14) {
-      ws.farTicks = (ws.farTicks || 0) + 1;
-      if (ws.farTicks >= 3) { this.wanted = Math.max(0, this.wanted - 25); this.endPoliceChase(true, 'Vous les avez semés ! Niveau de recherche réduit.'); return; }
+    if (ws.real) return this._updateRealChase(ws);
+    return this._updatePnjChase(ws);
+  },
+  // Poursuite contre de VRAIS policiers : on suit leurs positions réseau, sans
+  // les déplacer nous-mêmes. L'interpellation se fait quand un policier réel
+  // vous menotte (isCuffed) — on ne « capture » jamais de force côté fuyard.
+  _updateRealChase(ws) {
+    if (this.isCuffed) { this.endPoliceChase(false, 'La police vous a interpellé.'); return; }
+    const cops = this._nearbyRealPolice(80);
+    if (!cops.length) { // plus aucun policier réel à portée : on les a semés / ils ont abandonné
+      if ((ws.farTicks = (ws.farTicks || 0) + 1) >= 3) { this.wanted = Math.max(0, this.wanted - 20); this.endPoliceChase(true, 'Vous avez semé la police. Niveau de recherche réduit.'); }
+      return;
+    }
+    let nearest = Infinity, closest = cops[0];
+    cops.forEach(p => { const d = UTIL.dist(p, this); if (d < nearest) { nearest = d; closest = p; } });
+    AudioLib.playLoop('sirene_vehicule_police', UTIL.clamp(0.72 - nearest * 0.02, 0.1, 0.72));
+    if (nearest > 24) {
+      if ((ws.farTicks = (ws.farTicks || 0) + 1) >= 3) { this.wanted = Math.max(0, this.wanted - 20); this.endPoliceChase(true, 'Vous avez semé la police. Niveau de recherche réduit.'); return; }
     } else ws.farTicks = 0;
     const now = Date.now();
     if (now - (ws.lastDistMsg || 0) > 3000) {
       ws.lastDistMsg = now;
       const m = Math.round(nearest * CONFIG.METERS_PER_TILE);
-      announce(nearest > 10 ? `Vous creusez l'écart : police à ${m} mètres.` : `La police est à ${m} mètres, vers le ${UTIL.bearing(closest.x - this.x, closest.y - this.y)}.`, nearest <= 5 ? 'assertive' : 'polite');
+      announce(nearest > 12 ? `Vous creusez l'écart : police à ${m} mètres.` : `La police est à ${m} mètres, vers le ${UTIL.bearing(closest.x - this.x, closest.y - this.y)}.`, nearest <= 6 ? 'assertive' : 'polite');
+    }
+  },
+  // Filet SOLO : poursuivants PNJ qui se déplacent vraiment vers vous.
+  _updatePnjChase(ws) {
+    const squad = ws.npcIds.map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
+    if (!squad.length) { this.wanted = Math.max(0, this.wanted - 30); this.endPoliceChase(true, 'Vous avez neutralisé la patrouille. Niveau de recherche réduit.'); return; }
+    const speed = (this.inVehicle && this.vehicle) ? 2 : 1;
+    squad.forEach(n => this._stepChaserToward(n, speed));
+    let nearest = Infinity, closest = squad[0];
+    squad.forEach(n => { const d = UTIL.dist(n, this); if (d < nearest) { nearest = d; closest = n; } });
+    AudioLib.playLoop('sirene_vehicule_police', UTIL.clamp(0.72 - nearest * 0.035, 0.12, 0.72));
+    if (nearest <= 1.6) { announce('La patrouille vous rattrape et vous bloque la route !', 'assertive'); this.endPoliceChase(false, null, true); return; }
+    if (nearest > 14) {
+      ws.farTicks = (ws.farTicks || 0) + 1;
+      if (ws.farTicks >= 3) { this.wanted = Math.max(0, this.wanted - 25); this.endPoliceChase(true, 'Vous l\'avez semée ! Niveau de recherche réduit.'); return; }
+    } else ws.farTicks = 0;
+    const now = Date.now();
+    if (now - (ws.lastDistMsg || 0) > 3000) {
+      ws.lastDistMsg = now;
+      const m = Math.round(nearest * CONFIG.METERS_PER_TILE);
+      announce(nearest > 10 ? `Vous creusez l'écart : patrouille à ${m} mètres.` : `La patrouille est à ${m} mètres, vers le ${UTIL.bearing(closest.x - this.x, closest.y - this.y)}.`, nearest <= 5 ? 'assertive' : 'polite');
     }
   },
   endPoliceChase(escaped, msg, toCombat) {
