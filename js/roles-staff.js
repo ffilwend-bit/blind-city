@@ -267,8 +267,12 @@ const AccessibleTextPrompt = {
     const input = el('textPromptInput'); input.value = defaultValue || '';
     input._speakableWired = false; // reforcer la narration même si le champ a déjà servi
     el('textPromptOverlay').style.display = 'flex';
-    announce(`${title}. ${desc || ''}`, 'assertive');
-    setTimeout(() => focusTextInput(input, title), 30);
+    // Clavier tactile intégré : affiché toujours (utile aussi à la souris) ;
+    // sur mobile il remplace le clavier natif.
+    if (typeof TouchKeyboard !== 'undefined') TouchKeyboard.open();
+    const onMobile = (typeof Platform !== 'undefined' && Platform.isMobile);
+    announce(`${title}. ${desc || ''} ${onMobile ? 'Clavier tactile : glissez le doigt pour entendre les lettres, levez le doigt pour écrire.' : ''}`, 'assertive');
+    if (!onMobile) setTimeout(() => focusTextInput(input, title), 30);
   },
   confirm() {
     const input = el('textPromptInput');
@@ -277,9 +281,105 @@ const AccessibleTextPrompt = {
     if (cb) cb(val);
   },
   cancel() { this.close(); announce('Saisie annulée.', 'polite'); },
-  close() { this.active = false; this.onConfirm = null; el('textPromptOverlay').style.display = 'none'; document.activeElement?.blur(); },
+  close() { this.active = false; this.onConfirm = null; if (typeof TouchKeyboard !== 'undefined') TouchKeyboard.close(); el('textPromptOverlay').style.display = 'none'; document.activeElement?.blur(); },
 };
 window.AccessibleTextPrompt = AccessibleTextPrompt;
+
+// Clavier tactile intégré (Touch Typing, standard VoiceOver) : on glisse le
+// doigt sur les touches (chaque touche survolée est LUE, rien n'est écrit), et
+// la lettre est écrite quand on LÈVE le doigt. Permet d'écrire un nom, un
+// message ou une fréquence sans lecteur d'écran natif. Écrit dans le même champ
+// textPromptInput, donc AccessibleTextPrompt.confirm() récupère la valeur
+// normalement. Le clavier physique (ordinateur) continue de fonctionner.
+const TouchKeyboard = {
+  active: false, shift: false, lastRead: null, wired: false,
+  ROWS: [
+    ['a','b','c','d','e','f','g','h'],
+    ['i','j','k','l','m','n','o','p'],
+    ['q','r','s','t','u','v','w','x'],
+    ['y','z','0','1','2','3','4','5'],
+    ['6','7','8','9','@','.','-','_'],
+    [{k:'shift',l:'Majuscules'},{k:'space',l:'Espace'},{k:'back',l:'Effacer'}],
+  ],
+  _labelFor(k) {
+    if (k === 'space') return 'Espace';
+    if (k === 'back') return 'Effacer';
+    if (k === 'shift') return this.shift ? 'Majuscules activées' : 'Majuscules';
+    if (k === '.') return 'point'; if (k === '-') return 'tiret'; if (k === '_') return 'trait bas'; if (k === '@') return 'arobase';
+    if (/[a-z]/.test(k)) return (this.shift ? 'majuscule ' : '') + k.toUpperCase();
+    return k;
+  },
+  build() {
+    const box = el('touchKeyboard'); if (!box) return;
+    box.innerHTML = '';
+    this.ROWS.forEach(row => {
+      const r = document.createElement('div');
+      r.style.cssText = 'display:flex; gap:5px; justify-content:center; margin-bottom:5px;';
+      row.forEach(cell => {
+        const k = typeof cell === 'string' ? cell : cell.k;
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'kb-key'; btn.dataset.key = k;
+        btn.textContent = typeof cell === 'string' ? cell : cell.l;
+        btn.setAttribute('aria-label', this._labelFor(k));
+        btn.dataset.voiceLabel = this._labelFor(k);
+        const wide = (k === 'space') ? 'flex:2;' : (k === 'shift' || k === 'back') ? 'flex:1.4;' : 'flex:1;';
+        btn.style.cssText = `${wide} min-width:34px; min-height:44px; font-size:1rem; background:#11161e; color:#fff; border:1px solid var(--border); border-radius:8px;`;
+        r.appendChild(btn);
+      });
+      box.appendChild(r);
+    });
+  },
+  _read(k) {
+    if (k == null) return;
+    this.lastRead = k;
+    speak(this._labelFor(k), 'interrupt');
+  },
+  _commit(k) {
+    const input = el('textPromptInput'); if (!input) return;
+    if (k === 'shift') { this.shift = !this.shift; this._refreshLabels(); speak(this.shift ? 'Majuscules activées' : 'Majuscules désactivées', 'interrupt'); return; }
+    if (typeof Audio !== 'undefined' && Audio.click) Audio.click(0);
+    if (k === 'space') { input.value += ' '; speak('espace', 'assertive'); return; }
+    if (k === 'back') { input.value = input.value.slice(0, -1); speak('effacé. ' + (input.value || 'champ vide'), 'assertive'); return; }
+    const ch = /[a-z]/.test(k) && this.shift ? k.toUpperCase() : k;
+    input.value += ch;
+    speak(this._labelFor(k) + '. ' + input.value, 'assertive');
+  },
+  _refreshLabels() {
+    const box = el('touchKeyboard'); if (!box) return;
+    box.querySelectorAll('.kb-key').forEach(btn => { const lbl = this._labelFor(btn.dataset.key); btn.setAttribute('aria-label', lbl); btn.dataset.voiceLabel = lbl; });
+  },
+  _keyAt(x, y) {
+    const el2 = document.elementFromPoint(x, y);
+    const btn = el2 && el2.closest && el2.closest('.kb-key');
+    const box = el('touchKeyboard');
+    return (btn && box && box.contains(btn)) ? btn.dataset.key : null;
+  },
+  open() {
+    const box = el('touchKeyboard'); if (!box) return;
+    this.build();
+    box.style.display = 'block'; box.setAttribute('aria-hidden', 'false');
+    this.active = true; this.shift = false; this.lastRead = null;
+    // Sur mobile, on bloque le clavier natif du téléphone (le jeu est son propre
+    // lecteur d'écran) ; sur ordinateur, le champ reste éditable au clavier.
+    const input = el('textPromptInput');
+    if (typeof Platform !== 'undefined' && Platform.isMobile && input) { input.readOnly = true; input.inputMode = 'none'; try { input.blur(); } catch (e) {} }
+    if (!this.wired) {
+      this.wired = true;
+      box.addEventListener('touchmove', (e) => { e.preventDefault(); const t = e.changedTouches[0]; const k = this._keyAt(t.clientX, t.clientY); if (k && k !== this.lastRead) this._read(k); }, { passive: false });
+      box.addEventListener('touchstart', (e) => { e.preventDefault(); const t = e.changedTouches[0]; const k = this._keyAt(t.clientX, t.clientY); this.lastRead = null; if (k) this._read(k); }, { passive: false });
+      box.addEventListener('touchend', (e) => { e.preventDefault(); const t = e.changedTouches[0]; const k = this._keyAt(t.clientX, t.clientY); if (k) this._commit(k); }, { passive: false });
+      // Souris/clic (ordinateur) : un clic écrit directement la touche.
+      box.addEventListener('click', (e) => { const btn = e.target.closest('.kb-key'); if (btn) this._commit(btn.dataset.key); });
+    }
+  },
+  close() {
+    const box = el('touchKeyboard'); if (box) { box.style.display = 'none'; box.setAttribute('aria-hidden', 'true'); }
+    const input = el('textPromptInput'); if (input) { input.readOnly = false; input.inputMode = 'text'; }
+    this.active = false;
+  },
+};
+window.TouchKeyboard = TouchKeyboard;
+
 el('textPromptConfirm').addEventListener('click', () => AccessibleTextPrompt.confirm());
 el('textPromptCancel').addEventListener('click', () => AccessibleTextPrompt.cancel());
 el('textPromptInput').addEventListener('keydown', (e) => {
