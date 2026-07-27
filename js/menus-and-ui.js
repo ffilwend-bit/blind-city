@@ -1280,6 +1280,7 @@ function startGame(seed) {
     setInterval(() => Game.updateVehicleDelivery(), 1000);
     setInterval(() => Game.updateGangCombat(), 1500);
     setInterval(() => Game.updateWantedResponseCombat(), 1500);
+    setInterval(() => Game.updateWantedChase(), 800);
     setInterval(() => Game.tickUnconscious(), 5000);
     setInterval(() => Game.tickDrivingExam(), 1000);
     setInterval(() => Game.tickFlightExam(), 1000);

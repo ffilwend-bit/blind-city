@@ -3884,15 +3884,10 @@ const Game = {
     announce(`${count} agent${count > 1 ? 's' : ''} vous encerclent !`, 'assertive');
   },
   fleePoliceResponse() {
-    const chance = this.inVehicle && this.vehicle ? 0.6 : 0.3;
-    if (UTIL.chance(chance)) {
-      this.wanted = Math.max(0, this.wanted - 20);
-      this.wantedResponseState = null;
-      announce('Vous parvenez à leur échapper. Niveau de recherche réduit.', 'assertive');
-    } else {
-      announce('Ils vous rattrapent avant que vous ne puissiez fuir !', 'assertive');
-      this.resistPoliceResponse();
-    }
+    // Vraie course-poursuite : au lieu d'un simple lancer de dé, des unités de
+    // police vous prennent en chasse. On leur échappe en creusant l'écart
+    // (bien plus facile en véhicule rapide) — voir startPoliceChase/updateWantedChase.
+    this.startPoliceChase();
   },
   // Appelé en continu tant que l'équipe d'intervention est en combat.
   updateWantedResponseCombat() {
@@ -3915,6 +3910,88 @@ const Game = {
         announce(`${n.name} vous touche ! ${dmg} dégâts.`, 'assertive');
       }
     });
+  },
+
+  /* ==========================================================
+     COURSE-POURSUITE (option « Tenter de fuir » de l'intervention).
+     Des unités de police vous suivent réellement : on entend la sirène
+     (plus forte quand elles se rapprochent), la distance est annoncée,
+     et on s'échappe en creusant l'écart — facile en véhicule rapide,
+     difficile à pied. Rattrapé au contact : ça bascule en combat, en
+     réutilisant l'équipe déjà existante (updateWantedResponseCombat).
+     ========================================================== */
+  startPoliceChase() {
+    const count = UTIL.randInt(2, 3);
+    const npcIds = [];
+    for (let i = 0; i < count; i++) {
+      let px = this.x, py = this.y, tries = 0;
+      do {
+        const ang = Math.random() * Math.PI * 2, r = UTIL.randInt(6, 9);
+        px = UTIL.clamp(Math.round(this.x + Math.cos(ang) * r), 0, City.W - 1);
+        py = UTIL.clamp(Math.round(this.y + Math.sin(ang) * r), 0, City.H - 1);
+      } while (City.isSolid(px, py) && ++tries < 8);
+      const npc = {
+        id: 'chase_' + Date.now() + '_' + i, name: UTIL.pick(['Agent Somé', 'Agent Kientega', 'Agent Zerbo', 'Agent Ilboudo']),
+        job: 'policier', gender: UTIL.pick(['homme', 'femme']), x: px, y: py,
+        health: 100, relation: -100, money: 0, inCar: true, dialogue: [], home: { x: this.x, y: this.y },
+        hostile: true, weapon: UTIL.pick(['pistolet_9', 'pompe']), outfit: generateNPCAppearance('policier'),
+      };
+      City.npcs.push(npc); npcIds.push(npc.id);
+    }
+    this.wantedResponseState = { stage: 'chase', npcIds, farTicks: 0, lastDistMsg: 0 };
+    this._chaseSirenOn = true;
+    AudioLib.playLoop('sirene_vehicule_police', 0.5);
+    announce(`La police vous prend en chasse ! Semez-les en creusant l'écart ${this.inVehicle ? 'au volant' : 'à pied'}.`, 'assertive');
+  },
+  // Fait avancer un poursuivant de `speed` cases vers le joueur, en contournant
+  // sommairement les obstacles.
+  _stepChaserToward(n, speed) {
+    for (let s = 0; s < speed; s++) {
+      const dx = this.x - n.x, dy = this.y - n.y;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+      const sx = Math.abs(dx) >= Math.abs(dy) ? Math.sign(dx) : 0;
+      const sy = sx === 0 ? Math.sign(dy) : 0;
+      if (!City.isSolid(n.x + sx, n.y + sy)) { n.x += sx; n.y += sy; }
+      else { // bloqué : essayer l'autre axe pour contourner
+        const ax = Math.sign(dx), ay = Math.sign(dy);
+        if (sx === 0 && ax && !City.isSolid(n.x + ax, n.y)) n.x += ax;
+        else if (sy === 0 && ay && !City.isSolid(n.x, n.y + ay)) n.y += ay;
+      }
+    }
+  },
+  updateWantedChase() {
+    const ws = this.wantedResponseState; if (!ws || ws.stage !== 'chase') return;
+    if (this.health <= 0) { this.endPoliceChase(false); return; }
+    const squad = ws.npcIds.map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
+    if (!squad.length) { this.wanted = Math.max(0, this.wanted - 30); this.endPoliceChase(true, 'Vous avez neutralisé vos poursuivants. Niveau de recherche réduit.'); return; }
+    const speed = (this.inVehicle && this.vehicle) ? 2 : 1;
+    squad.forEach(n => this._stepChaserToward(n, speed));
+    let nearest = Infinity, closest = squad[0];
+    squad.forEach(n => { const d = UTIL.dist(n, this); if (d < nearest) { nearest = d; closest = n; } });
+    // Sirène plus forte quand ils sont proches.
+    AudioLib.playLoop('sirene_vehicule_police', UTIL.clamp(0.72 - nearest * 0.035, 0.12, 0.72));
+    if (nearest <= 1.6) { announce('Ils vous rattrapent et vous bloquent la route !', 'assertive'); this.endPoliceChase(false, null, true); return; }
+    if (nearest > 14) {
+      ws.farTicks = (ws.farTicks || 0) + 1;
+      if (ws.farTicks >= 3) { this.wanted = Math.max(0, this.wanted - 25); this.endPoliceChase(true, 'Vous les avez semés ! Niveau de recherche réduit.'); return; }
+    } else ws.farTicks = 0;
+    const now = Date.now();
+    if (now - (ws.lastDistMsg || 0) > 3000) {
+      ws.lastDistMsg = now;
+      const m = Math.round(nearest * CONFIG.METERS_PER_TILE);
+      announce(nearest > 10 ? `Vous creusez l'écart : police à ${m} mètres.` : `La police est à ${m} mètres, vers le ${UTIL.bearing(closest.x - this.x, closest.y - this.y)}.`, nearest <= 5 ? 'assertive' : 'polite');
+    }
+  },
+  endPoliceChase(escaped, msg, toCombat) {
+    // Couper la sirène de poursuite — sauf si c'est celle du véhicule du joueur (policier).
+    if (this._chaseSirenOn && !(this.vehicle && this.vehicle.siren)) AudioLib.stopLoop('sirene_vehicule_police');
+    this._chaseSirenOn = false;
+    const ws = this.wantedResponseState;
+    if (toCombat) { this.wantedResponseState = { stage: 'combat', npcIds: (ws && ws.npcIds) || [] }; return; }
+    if (ws && ws.npcIds) City.npcs = City.npcs.filter(n => !ws.npcIds.includes(n.id)); // les poursuivants abandonnent
+    this.wantedResponseState = null;
+    if (msg) announce(msg, 'assertive');
+    updateHud();
   },
 
   grantGangLoot(gang, multiplier) {
