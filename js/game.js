@@ -62,7 +62,7 @@ const Game = {
       // devant, on prévient tout de suite (avant de foncer dedans).
       let msg = `Vous vous tournez vers le ${this.HEADING_NAMES[this.heading]}.`;
       const dd = this.headingToDelta(this.heading);
-      if ((dd.dx || dd.dy) && City.isSolid(Math.round(this.x + dd.dx), Math.round(this.y + dd.dy))) msg += ' Attention, obstacle juste devant.';
+      if (!this.interior && (dd.dx || dd.dy) && City.isSolid(Math.round(this.x + dd.dx), Math.round(this.y + dd.dy))) msg += ' Attention, obstacle juste devant.';
       announce(msg, 'polite');
     }
     updateHud();
@@ -70,7 +70,7 @@ const Game = {
   // Signale un obstacle DROIT DEVANT avant qu'on ne le heurte (essentiel pour
   // naviguer sans voir). Throttlé pour ne pas répéter en boucle.
   warnObstacleAhead() {
-    if (this.inVehicle || this.unconscious || this.guidanceTarget) return;
+    if (this.inVehicle || this.unconscious || this.guidanceTarget || this.interior) return;
     const { dx, dy } = this.headingToDelta(this.heading);
     if (dx === 0 && dy === 0) return;
     if (City.isSolid(Math.round(this.x + dx), Math.round(this.y + dy))) {
@@ -109,6 +109,7 @@ const Game = {
     this.move(-dx, -dy, { keepHeading: true, reverse: true });
   },
   move(dx, dy, opts = {}) {
+    if (this.interior) return this._moveInterior(dx, dy); // déplacement dans le plan intérieur
     if (this.ridingWith) return announce('Vous êtes passager. Appuyez sur Interagir pour descendre avant de marcher.', 'polite');
     if (this.inVehicle && this.vehicle) {
       this.driveVehicle(dx, dy);
@@ -1802,6 +1803,7 @@ const Game = {
   // déjà. Une fois dedans, on peut interagir librement avec E sans ressortir, et
   // continuer à se déplacer ; on ne ressort que par un nouveau Ctrl+Alt+E.
   toggleIndoor() {
+    if (this.interior) return this.exitInterior();
     if (this.inVehicle) return announce('Descendez du véhicule pour entrer dans un lieu.', 'assertive');
     if (this.indoors) {
       const name = this.indoors.name;
@@ -1813,14 +1815,85 @@ const Game = {
     // Chercher un lieu (bâtiment ou maison) à portée pour y entrer.
     const poi = City.pois.map(p => ({ p, d: UTIL.dist(p, this) })).filter(o => o.d < 4).sort((a, b) => a.d - b.d)[0];
     const house = City.houses.map(h => ({ h, d: UTIL.dist(h, this) })).filter(o => o.d < 4).sort((a, b) => a.d - b.d)[0];
-    if (poi && (!house || poi.d <= house.d)) { this.announceEnterBuilding(poi.p.name, 'porte', poi.p); this.enterPOI(poi.p); }
-    else if (house) { this.announceEnterBuilding(house.h.name || 'la maison', 'cour', house.h); this.enterHouse(house.h); }
-    else announce('Aucun lieu où entrer ici. Approchez-vous d\'une porte, puis refaites Ctrl+Alt+E.', 'assertive');
+    // Une maison à soi (ou dont on a les clés) : on entre DANS la maison, en
+    // grille de pièces à parcourir. Une maison qu'on ne possède pas : proposition
+    // d'achat (comportement existant).
+    if (house && (!poi || house.d <= poi.d)) {
+      const h = house.h;
+      const owned = this.ownedHouses.includes(h.id) || (h.authorizedUsers || []).includes(Net.accountUsername);
+      if (owned) return this.enterHouseInterior(h);
+      return this.enterHouse(h);
+    }
+    if (poi) { this.announceEnterBuilding(poi.p.name, 'porte', poi.p); this.enterPOI(poi.p); return; }
+    announce('Aucun lieu où entrer ici. Approchez-vous d\'une porte, puis refaites Ctrl+Alt+E.', 'assertive');
+  },
+  /* ==========================================================
+     INTÉRIEURS À PARCOURIR — on marche vraiment dans le plan (pièces
+     contiguës), tout à l'oreille. Étape 1 : maison vide (les meubles
+     s'achètent plus tard). E décrit/utilise la pièce ; Ctrl+Alt+E sort.
+     ========================================================== */
+  interior: null,
+  enterHouseInterior(house) {
+    const key = (house.floors >= 2) ? 'maison_luxe' : 'maison';
+    this._enterInterior(house, house.name || 'votre maison', key);
+  },
+  _enterInterior(ref, name, key) {
+    const tpl = (typeof INTERIOR_TYPES !== 'undefined' && INTERIOR_TYPES[key]) || INTERIOR_TYPES.maison;
+    const ent = tpl.entrance || { x: 0, y: 0 };
+    this.interior = { ref, name, rooms: tpl.rooms, ix: ent.x, iy: ent.y, room: null, returnX: this.x, returnY: this.y };
+    this.indoors = { name, ref, kind: 'interior' }; // ambiance de ville atténuée
+    if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
+    const room = this._roomAt(ent.x, ent.y);
+    this.interior.room = room ? room.name : null;
+    announce(`Vous entrez dans ${name}. Pièce : ${room ? room.name : 'entrée'}. Déplacez-vous pour explorer les pièces. E pour interagir, Ctrl+Alt+E pour sortir.`, 'assertive');
+    updateHud();
+  },
+  _roomAt(ix, iy) {
+    if (!this.interior) return null;
+    return this.interior.rooms.find(r => ix >= r.x && ix < r.x + r.w && iy >= r.y && iy < r.y + r.h) || null;
+  },
+  _moveInterior(dx, dy) {
+    const it = this.interior;
+    const sx = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+    const sy = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+    if (sx === 0 && sy === 0) return;
+    const nx = it.ix + sx, ny = it.iy + sy;
+    const room = this._roomAt(nx, ny);
+    if (!room) { // mur / bord du plan
+      if (window.Audio && Audio.impact) Audio.impact(UTIL.clamp(sx, -1, 1) * 0.5);
+      announce('Mur.', 'assertive');
+      return;
+    }
+    it.ix = nx; it.iy = ny;
+    if (window.Audio && Audio.tone) Audio.tone({ freq: 210, type: 'sine', duration: 0.05, gain: 0.045, pan: 0 });
+    if (room.name !== it.room) { it.room = room.name; announce(`Pièce : ${room.name}.`, 'polite'); }
+  },
+  exitInterior() {
+    if (!this.interior) return;
+    const name = this.interior.name;
+    this.x = this.interior.returnX; this.y = this.interior.returnY;
+    this.interior = null; this.indoors = null;
+    if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
+    announce(`Vous sortez de ${name}. Vous êtes de nouveau dehors.`, 'assertive');
+    updateHud();
+  },
+  // E à l'intérieur : décrit la pièce et donne accès au rangement de la maison
+  // (les meubles/objets interactifs par pièce viendront avec la personnalisation).
+  _interactInterior() {
+    const it = this.interior;
+    const house = it.ref;
+    if (house && typeof house.capacity === 'number') {
+      house.storage = house.storage || [];
+      announce(`Pièce : ${it.room || 'entrée'}.`, 'polite');
+      return this.openStorage(house.storage, house.capacity, it.name || 'Maison');
+    }
+    announce(`Pièce : ${it.room || 'entrée'}. Rien à interagir ici pour l'instant.`, 'assertive');
   },
 
   // Interactions
   interact() {
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
+    if (this.interior) return this._interactInterior(); // dedans : on interagit avec la pièce
     // On considère qu'on est ressorti si l'on s'est éloigné du lieu où l'on
     // était entré (Ctrl+Alt+E). E n'est PLUS détourné pour rouvrir toujours le
     // même lieu : il propose normalement TOUT ce qu'il y a autour (le lieu

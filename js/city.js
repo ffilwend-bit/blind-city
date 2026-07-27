@@ -1,3 +1,34 @@
+// ============================================================
+//  PLANS D'INTÉRIEURS — grille de pièces à parcourir à pied (façon GTA RP,
+//  mais tout se « voit » à l'oreille : nom de la pièce en y entrant, mur
+//  signalé quand on bute). Les pièces sont contiguës (elles se touchent) pour
+//  former une zone marchable connectée, sans porte explicite. Les MEUBLES ne
+//  sont PAS pré-placés : ils s'achètent pour personnaliser sa maison.
+//  entrance = case de départ ; rooms = { name, x, y, w, h } en coordonnées
+//  intérieures (y vers le bas).
+// ============================================================
+const INTERIOR_TYPES = {
+  maison: {
+    entrance: { x: 1, y: 1 },
+    rooms: [
+      { name: 'entrée', x: 0, y: 0, w: 3, h: 2 },
+      { name: 'salon', x: 0, y: 2, w: 4, h: 3 },
+      { name: 'cuisine', x: 4, y: 2, w: 3, h: 3 },
+      { name: 'chambre', x: 3, y: 0, w: 4, h: 2 },
+    ],
+  },
+  maison_luxe: {
+    entrance: { x: 1, y: 1 },
+    rooms: [
+      { name: 'entrée', x: 0, y: 0, w: 3, h: 2 },
+      { name: 'grand salon', x: 0, y: 2, w: 5, h: 4 },
+      { name: 'cuisine', x: 5, y: 2, w: 3, h: 3 },
+      { name: 'chambre principale', x: 3, y: 0, w: 5, h: 2 },
+      { name: 'bureau', x: 5, y: 5, w: 3, h: 3 },
+    ],
+  },
+};
+
 const City = {
   W: CONFIG.W, H: CONFIG.H,
   grid: new Map(), // "x,y" -> tile type
