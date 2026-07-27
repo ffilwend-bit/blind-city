@@ -1130,15 +1130,15 @@ function setupInput() {
     if (typeof QtyPicker !== 'undefined' && QtyPicker.active) {
       if (fingers === 2 && isSwipe && dir === 'down') { QtyPicker.cancel(); return; }
       if (fingers === 1 && isSwipe) { if (Math.abs(dy) > Math.abs(dx)) QtyPicker.change(dy < 0 ? 1 : -1); else QtyPicker.change(dx > 0 ? 5 : -5); return; }
-      if (fingers === 1 && isTap) { const now = Date.now(); if (now - gLastTap < 350) { QtyPicker.confirm(); gLastTap = 0; } else { gLastTap = now; speak(String(QtyPicker.value), 'polite'); } return; }
+      if (fingers === 1 && isTap) { const now = Date.now(); if (now - gLastTap < 350) { QtyPicker.confirm(); gLastTap = 0; } else { gLastTap = now; speak(String(QtyPicker.value), 'interrupt'); } return; }
       return;
     }
     // Menu à cartes ouvert : balayage gauche/droite pour parcourir, double-tap pour valider.
     if (isOpen('menuOverlay')) {
       const cards = Array.from(document.querySelectorAll('#menuContent .menu-card'));
       if (cards.length) {
-        if (fingers === 1 && isSwipe && Math.abs(dx) > Math.abs(dy)) { let idx = cards.indexOf(document.activeElement); idx = idx === -1 ? 0 : (dx > 0 ? Math.min(cards.length - 1, idx + 1) : Math.max(0, idx - 1)); cards[idx].focus(); speak(cards[idx].querySelector('h4')?.textContent || '', 'polite'); return; }
-        if (fingers === 1 && isTap) { const now = Date.now(); if (now - gLastTap < 350 && cards.includes(document.activeElement)) { document.activeElement.click(); gLastTap = 0; } else { gLastTap = now; if (!cards.includes(document.activeElement)) { cards[0].focus(); speak(cards[0].querySelector('h4')?.textContent || '', 'polite'); } } return; }
+        if (fingers === 1 && isSwipe && Math.abs(dx) > Math.abs(dy)) { let idx = cards.indexOf(document.activeElement); idx = idx === -1 ? 0 : (dx > 0 ? Math.min(cards.length - 1, idx + 1) : Math.max(0, idx - 1)); cards[idx].focus(); speak(cards[idx].querySelector('h4')?.textContent || '', 'interrupt'); return; }
+        if (fingers === 1 && isTap) { const now = Date.now(); if (now - gLastTap < 350 && cards.includes(document.activeElement)) { document.activeElement.click(); gLastTap = 0; } else { gLastTap = now; if (!cards.includes(document.activeElement)) { cards[0].focus(); speak(cards[0].querySelector('h4')?.textContent || '', 'interrupt'); } } return; }
         if (fingers === 2 && isSwipe && dir === 'left') { menuGoBack(); return; } // 2 doigts vers la gauche : retour
         if (fingers === 2 && isSwipe && dir === 'down') { closeMenu(); return; }
       }

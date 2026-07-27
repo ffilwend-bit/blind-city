@@ -238,10 +238,12 @@ const QtyPicker = {
   change(delta) {
     if (!this.active) return;
     const next = Math.min(this.max, Math.max(this.min, this.value + delta));
-    if (next === this.value) { speak('Limite atteinte.', 'polite'); return; }
-    this.value = next; this.render(); speak(String(this.value), 'polite');
+    // 'interrupt' : en passant à la valeur suivante, la voix COUPE l'annonce en
+    // cours et énonce tout de suite la nouvelle — pas d'empilement ni de retard.
+    if (next === this.value) { speak('Limite atteinte.', 'interrupt'); return; }
+    this.value = next; this.render(); speak(String(this.value), 'interrupt');
   },
-  setMax() { if (!this.active) return; this.value = this.max; this.render(); speak(String(this.value), 'polite'); },
+  setMax() { if (!this.active) return; this.value = this.max; this.render(); speak(String(this.value), 'interrupt'); },
   confirm() {
     if (!this.active) return;
     const v = this.value; const cb = this.onConfirm;
@@ -267,9 +269,11 @@ const FreqPicker = {
   },
   press(char) {
     const input = el('freqInput'); if (!input) return;
-    if (char === '⌫') input.value = input.value.slice(0, -1);
+    // 'interrupt' : chaque chiffre pressé coupe l'annonce précédente et est
+    // énoncé immédiatement (retour direct, sans attendre ni empiler).
+    if (char === '⌫') { input.value = input.value.slice(0, -1); speak('Effacé.', 'interrupt'); }
     else if (char === '.' && input.value.includes('.')) return;
-    else input.value += char;
+    else { input.value += char; speak(char === '.' ? 'point' : String(char), 'interrupt'); }
   },
   confirm() {
     const input = el('freqInput');
