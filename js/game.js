@@ -207,12 +207,27 @@ const Game = {
     const dir = v.heading;
     const ndx = dir === 2 ? step : dir === 6 ? -step : 0;
     const ndy = dir === 4 ? step : dir === 0 ? -step : 0;
-    const nx = Math.round(v.x + ndx), ny = Math.round(v.y + ndy);
+    // Avancement fluide même à basse vitesse : à vitesse suffisante on arrondit
+    // (comportement classique), sinon on ACCUMULE la fraction de case parcourue
+    // et on ne franchit une case entière que quand le cumul l'atteint. Sans ça,
+    // Math.round(120 + 0.06) = 120 : le véhicule restait bloqué sur place au
+    // démarrage (impossible de passer le permis).
+    let nx, ny;
+    if (step >= 0.5) { nx = Math.round(v.x + ndx); ny = Math.round(v.y + ndy); v._moveAccum = 0; }
+    else {
+      v._moveAccum = (v._moveAccum || 0) + step;
+      let adv = 0;
+      if (v._moveAccum >= 1) { v._moveAccum -= 1; adv = 1; }
+      nx = v.x + (dir === 2 ? adv : dir === 6 ? -adv : 0);
+      ny = v.y + (dir === 4 ? adv : dir === 0 ? -adv : 0);
+    }
     if (cls.flies) {
       v.altitude = Math.max(0, v.altitude + (Game.keys.has('shift') ? 2 : Game.keys.has('control') ? -2 : 0));
       this.altitude = v.altitude;
     }
-    if (City.isSolid(nx, ny)) {
+    // Un aéronef EN VOL (altitude > 0) survole les bâtiments : pas de collision
+    // au sol. Il ne heurte que s'il roule au sol (altitude 0).
+    if (!(cls.flies && v.altitude > 0) && City.isSolid(nx, ny)) {
       const impactDmg = Math.round(Math.abs(v.speed) * 40 * (1 - (cls.armor || 0)));
       v.hp = Math.max(0, v.hp - impactDmg);
       if (this.fragileState) this.fragileState.condition = Math.max(0, this.fragileState.condition - UTIL.randInt(15, 35));

@@ -1045,9 +1045,10 @@ function gameLoop() {
       Game.updateBikeAudio();
     } else {
       Game.stopBikeAudio(); // au cas où on vient de descendre du vélo
-      if (Game.inVehicle && Game.vehicle && Math.abs(Game.vehicle.speed) > 0) {
-        Audio.playEngine(_cls, Math.abs(Game.vehicle.speed) / _cls.maxSpeed);
-      }
+      // Les autres véhicules ont leur VRAI moteur (RealEngine / RealEngine2 /
+      // RealElectricEngine / RealAirEngine) déjà joué dans driveVehicle. On
+      // n'ajoute PLUS le moteur synthétique de playEngine, qui se superposait au
+      // fichier audio réel (double moteur).
     }
 
     // Sons partagés en réseau : moteur (quand on roule) et sirène (si active),

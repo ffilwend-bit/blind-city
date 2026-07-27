@@ -122,7 +122,11 @@ const Audio = {
       // Tant qu'on est à l'intérieur d'un lieu, l'ambiance de la ville reste
       // nettement assourdie (sans qu'on l'annonce), jusqu'à ressortir.
       const indoors = (typeof Game !== 'undefined' && !!Game.indoors && !Game.inVehicle);
-      const vol = Math.max(0, 1 - nearest / 30) * bestDensity * 0.35 * (indoors ? 0.3 : 1);
+      // En vol (altitude > 0), on ne doit pas entendre la circulation routière
+      // du sol comme si l'on marchait dessus : on l'atténue selon l'altitude.
+      const altitude = (typeof Game !== 'undefined' && Game.altitude) ? Game.altitude : 0;
+      const flyFactor = altitude > 0 ? Math.max(0, 1 - altitude / 20) : 1;
+      const vol = Math.max(0, 1 - nearest / 30) * bestDensity * 0.35 * (indoors ? 0.3 : 1) * flyFactor;
       const t = c.currentTime;
       this.road.gain.gain.setTargetAtTime(vol, t, 0.2);
       this.road.filter.frequency.setTargetAtTime(300 + vol * 2000, t, 0.2);
@@ -612,7 +616,7 @@ const RealEngine = {
     const delta = speedRatio - this.lastSpeedRatio;
     this.lastSpeedRatio = speedRatio;
     if (now - this.lastEventTime < 650) return;
-    if (delta > 0.14) {
+    if (delta > 0.14 && speedRatio > 0.15) { // il faut rouler un minimum : pas de son d'accélération à l'arrêt (tapotage)
       this.lastEventTime = now;
       const key = delta > 0.3 ? 'veh1_accel_forte' : UTIL.pick(['veh1_accel_courte1', 'veh1_accel_courte2', 'veh1_accel_progressive2']);
       AudioLib.playOnce(key, { volume: 0.4 });
@@ -714,7 +718,7 @@ function createSampleEngine(keys) {
       const delta = speedRatio - this.lastSpeedRatio;
       this.lastSpeedRatio = speedRatio;
       if (now - this.lastEventTime < 700) return;
-      if (delta > 0.14) {
+      if (delta > 0.14 && speedRatio > 0.15) { // pas de son d'accélération à l'arrêt (tapotage)
         this.lastEventTime = now;
         AudioLib.playOnce(delta > 0.3 ? keys.accelForte : UTIL.pick(keys.accels), { volume: 0.4 });
       } else if (delta < -0.18) {
