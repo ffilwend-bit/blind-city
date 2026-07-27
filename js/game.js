@@ -1824,8 +1824,36 @@ const Game = {
       if (owned) return this.enterHouseInterior(h);
       return this.enterHouse(h);
     }
-    if (poi) { this.announceEnterBuilding(poi.p.name, 'porte', poi.p); this.enterPOI(poi.p); return; }
+    if (poi) {
+      // Lieux publics « bâtis » (boutiques, banque, commissariat, hôpital…) :
+      // on entre dans un intérieur à parcourir. Les autres (station-service,
+      // monuments…) gardent l'accès direct à leur service.
+      if (this._poiHasInterior(poi.p.type)) return this.enterPOIInterior(poi.p);
+      this.announceEnterBuilding(poi.p.name, 'porte', poi.p); this.enterPOI(poi.p); return;
+    }
     announce('Aucun lieu où entrer ici. Approchez-vous d\'une porte, puis refaites Ctrl+Alt+E.', 'assertive');
+  },
+  // Types de POI dotés d'un intérieur à parcourir.
+  _poiHasInterior(type) {
+    return ['banque', 'police', 'prison', 'hopital', 'magasin', 'restaurant', 'pharmacie', 'armurerie', 'vetements', 'quincaillerie', 'electronique', 'magasin_general', 'bar', 'concessionnaire', 'marche_noir', 'marche_noir_lointain'].includes(type);
+  },
+  _poiInteriorKey(type) {
+    if (type === 'banque') return 'banque';
+    if (type === 'police' || type === 'prison') return 'commissariat';
+    if (type === 'hopital') return 'hopital';
+    if (['magasin', 'restaurant', 'pharmacie', 'armurerie', 'vetements', 'quincaillerie', 'electronique', 'magasin_general', 'bar', 'concessionnaire', 'marche_noir', 'marche_noir_lointain'].includes(type)) return 'commerce';
+    return 'service';
+  },
+  enterPOIInterior(poi) {
+    const tpl = (typeof POI_INTERIORS !== 'undefined' && POI_INTERIORS[this._poiInteriorKey(poi.type)]) || (POI_INTERIORS && POI_INTERIORS.service);
+    const ent = tpl.entrance || { x: 0, y: 0 };
+    this.interior = { ref: poi, poi, kind: 'poi', name: poi.name, rooms: tpl.rooms, service: tpl.service, ix: ent.x, iy: ent.y, room: null, returnX: this.x, returnY: this.y };
+    this.indoors = { name: poi.name, ref: poi, kind: 'interior' };
+    if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
+    const room = this._roomAt(ent.x, ent.y);
+    this.interior.room = room ? room.name : null;
+    announce(`Vous entrez dans ${poi.name}. Pièce : ${room ? room.name : 'entrée'}. Allez au ${tpl.service.label} et appuyez sur E pour être servi. Ctrl+Alt+E pour sortir.`, 'assertive');
+    updateHud();
   },
   /* ==========================================================
      INTÉRIEURS À PARCOURIR — on marche vraiment dans le plan (pièces
@@ -1840,7 +1868,7 @@ const Game = {
   _enterInterior(ref, name, key) {
     const tpl = (typeof INTERIOR_TYPES !== 'undefined' && INTERIOR_TYPES[key]) || INTERIOR_TYPES.maison;
     const ent = tpl.entrance || { x: 0, y: 0 };
-    this.interior = { ref, name, rooms: tpl.rooms, ix: ent.x, iy: ent.y, room: null, returnX: this.x, returnY: this.y };
+    this.interior = { ref, name, kind: 'house', rooms: tpl.rooms, ix: ent.x, iy: ent.y, room: null, returnX: this.x, returnY: this.y };
     this.indoors = { name, ref, kind: 'interior' }; // ambiance de ville atténuée
     if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
     const room = this._roomAt(ent.x, ent.y);
@@ -1869,6 +1897,7 @@ const Game = {
     if (room.name !== it.room) { it.room = room.name; announce(`Pièce : ${room.name}.`, 'polite'); }
     const obj = this._objectAt(nx, ny);
     if (obj) announce(`Objet : ${obj.name}. E pour l'utiliser.`, 'polite');
+    if (it.service && it.service.x === nx && it.service.y === ny) announce(`${it.service.label}. Appuyez sur E pour être servi.`, 'polite');
   },
   // Meuble/objet posé sur une case de l'intérieur, s'il y en a un.
   _objectAt(ix, iy) {
@@ -1926,6 +1955,12 @@ const Game = {
   // (les meubles/objets interactifs par pièce viendront avec la personnalisation).
   _interactInterior() {
     const it = this.interior;
+    // Lieu public : au comptoir/guichet/accueil (case de service ou juste à
+    // côté), E ouvre le service du lieu (boutique, banque, soins, police…).
+    if (it.kind === 'poi') {
+      if (it.service && Math.abs(it.ix - it.service.x) <= 1 && Math.abs(it.iy - it.service.y) <= 1) return this.enterPOI(it.poi);
+      return announce(`Pièce : ${it.room || 'entrée'}. Allez au ${it.service ? it.service.label : 'comptoir'} pour être servi.`, 'assertive');
+    }
     // Un meuble sous les pieds : on l'utilise directement.
     const obj = this._objectAt(it.ix, it.iy);
     if (obj) return this.interactFurniture(obj);

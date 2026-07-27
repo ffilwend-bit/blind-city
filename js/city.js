@@ -29,6 +29,38 @@ const INTERIOR_TYPES = {
   },
 };
 
+// Plans d'intérieurs des LIEUX PUBLICS (boutiques, banque, commissariat,
+// hôpital…), à parcourir comme les maisons. Chacun a un « point de service »
+// (comptoir/guichet/accueil) : c'est là qu'on appuie sur E pour être servi
+// (le service existant du lieu, via Game.enterPOI). Pièces contiguës.
+const POI_INTERIORS = {
+  commerce: { entrance: { x: 1, y: 1 }, service: { x: 4, y: 0, label: 'comptoir' }, rooms: [
+    { name: 'entrée', x: 0, y: 0, w: 3, h: 2 },
+    { name: 'rayons', x: 0, y: 2, w: 5, h: 3 },
+    { name: 'comptoir', x: 3, y: 0, w: 3, h: 2 },
+  ] },
+  banque: { entrance: { x: 1, y: 1 }, service: { x: 5, y: 0, label: 'guichet' }, rooms: [
+    { name: 'entrée', x: 0, y: 0, w: 3, h: 2 },
+    { name: 'hall', x: 0, y: 2, w: 5, h: 3 },
+    { name: 'guichets', x: 3, y: 0, w: 4, h: 2 },
+  ] },
+  commissariat: { entrance: { x: 1, y: 1 }, service: { x: 1, y: 3, label: 'accueil' }, rooms: [
+    { name: 'entrée', x: 0, y: 0, w: 3, h: 2 },
+    { name: 'accueil', x: 0, y: 2, w: 3, h: 3 },
+    { name: 'bureau', x: 4, y: 2, w: 3, h: 3 },
+    { name: 'cellules', x: 3, y: 0, w: 4, h: 2 },
+  ] },
+  hopital: { entrance: { x: 1, y: 1 }, service: { x: 1, y: 3, label: 'accueil' }, rooms: [
+    { name: 'entrée', x: 0, y: 0, w: 3, h: 2 },
+    { name: 'accueil', x: 0, y: 2, w: 4, h: 3 },
+    { name: 'salle de soins', x: 4, y: 2, w: 3, h: 3 },
+  ] },
+  service: { entrance: { x: 1, y: 1 }, service: { x: 1, y: 3, label: 'comptoir' }, rooms: [
+    { name: 'entrée', x: 0, y: 0, w: 3, h: 2 },
+    { name: 'salle', x: 0, y: 2, w: 4, h: 3 },
+  ] },
+};
+
 const City = {
   W: CONFIG.W, H: CONFIG.H,
   grid: new Map(), // "x,y" -> tile type
