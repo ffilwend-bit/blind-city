@@ -700,6 +700,64 @@ function announceGestureHelp() {
   ];
   announce(lignes.join(' '), 'assertive');
 }
+// ============================================================
+//  ROTOR CONTEXTUEL (façon VoiceOver iOS)
+//  Appui long d'un doigt (sans bouger, ≥ 500 ms) : fait défiler les
+//  actions disponibles selon le contexte — à pied, cible verrouillée,
+//  ou dans un véhicule. Double-tap d'un doigt : exécute l'action
+//  sélectionnée. N'altère AUCUN autre geste : l'appui long immobile
+//  n'était rattaché à rien auparavant, et le double-tap conserve son
+//  comportement (scanner) tant que le rotor n'est pas armé.
+// ============================================================
+const Rotor = {
+  list: [], idx: 0, armed: false, _timer: null,
+  buildList() {
+    if (Game.inVehicle) {
+      return [
+        { label: 'menu du véhicule', run: () => Game.openVehicleMenu() },
+        { label: 'klaxon', run: () => Game.honk() },
+        { label: 'sirène', run: () => Game.toggleSiren() },
+        { label: 'boussole sonore', run: () => Game.soundCompass() },
+      ];
+    }
+    if (typeof Game.getLiveTarget === 'function' && Game.getLiveTarget()) {
+      return [
+        { label: 'fouiller', run: () => Game.searchTarget() },
+        { label: 'menotter ou démenotter', run: () => Game.toggleCuffs() },
+        { label: 'cibler la personne suivante', run: () => Game.target(1) },
+        { label: 'ma position', run: () => Game.announceLocation() },
+      ];
+    }
+    return [
+      { label: 'interagir', run: () => Game.interact() },
+      { label: 'scanner les alentours', run: () => Game.scan() },
+      { label: 'radar de proximité', run: () => Game.soundRadar() },
+      { label: 'ma position', run: () => Game.announceLocation() },
+      { label: 'menu principal', run: () => openMainMenu() },
+      { label: 'téléphone', run: () => Phone.openPhone() },
+      { label: 'micro de proximité', run: () => toggleProxVoice() },
+    ];
+  },
+  cycle() {
+    if (!this.armed) { this.list = this.buildList(); this.idx = 0; this.armed = true; }
+    else if (this.list.length) { this.idx = (this.idx + 1) % this.list.length; }
+    this._rearm();
+    const a = this.list[this.idx];
+    if (!a) { this.disarm(); speak('Rotor, aucune action disponible.', 'assertive'); return; }
+    speak(`Rotor, ${a.label}. ${this.idx + 1} sur ${this.list.length}. Tapez deux fois pour exécuter.`, 'assertive');
+  },
+  execute() {
+    if (!this.armed) return false;
+    const a = this.list[this.idx];
+    this.disarm();
+    if (a && a.run) { a.run(); return true; }
+    return false;
+  },
+  _rearm() { clearTimeout(this._timer); this._timer = setTimeout(() => this.disarm(), 8000); },
+  disarm() { this.armed = false; clearTimeout(this._timer); this._timer = null; },
+};
+window.Rotor = Rotor;
+
 function setupInput() {
   // Keyboard
   document.addEventListener('keydown', (e) => {
@@ -854,7 +912,7 @@ function setupInput() {
     interruptSpeech();
     if (fingers === 1) {
       if (count === 1) Game.interact();
-      else if (count === 2) Game.scan();
+      else if (count === 2) { if (Rotor.armed && Rotor.execute()) return; Game.scan(); }
       else if (count === 3) Game.announceLocation();
       else (Game.inVehicle ? Game.brakeVehicle() : Game.move(0, 1));
     } else if (fingers === 2) {
@@ -958,6 +1016,8 @@ function setupInput() {
     if (overlayOpen()) return;
 
     // --- EN JEU ---
+    // Appui long d'un doigt, immobile : rotor contextuel (façon VoiceOver).
+    if (fingers === 1 && !moved && !isSwipe && duration >= 500) { Rotor.cycle(); return; }
     if (isSwipe) {
       if (fingers === 1) { gStartHold(dir); gStopHold(); return; } // filet : un pas si touchmove n'a pas déclenché
       gFireSwipe(fingers, dir); return;
