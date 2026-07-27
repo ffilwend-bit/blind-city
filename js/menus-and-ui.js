@@ -56,6 +56,33 @@ const Convoy = {
 };
 window.Convoy = Convoy;
 
+// Menu de la pièce où l'on se trouve dans sa maison : interagir avec les meubles
+// présents, en acheter/placer un nouveau, ou accéder au rangement de la maison.
+function openHouseRoomMenu() {
+  const it = Game.interior; if (!it) return;
+  el('menuTitle').textContent = `Pièce : ${it.room || 'entrée'}`;
+  const items = [];
+  const here = (it.ref.furniture || []).filter(f => f.room === it.room);
+  here.forEach((f, i) => items.push({ id: 'obj_' + i, title: `🪑 ${f.name}`, desc: 'Interagir avec ce meuble.', furn: f }));
+  items.push({ id: 'buy', title: '🛒 Acheter et placer un meuble ici', desc: 'Personnalisez votre maison à votre goût.' });
+  if (it.ref && typeof it.ref.capacity === 'number') items.push({ id: 'storage', title: '📦 Rangement de la maison', desc: `Capacité ${it.ref.capacity}.` });
+  renderMenu(items, (sel) => {
+    if (sel.furn) { closeMenu(); Game.interactFurniture(sel.furn); }
+    else if (sel.id === 'buy') { closeMenu(); openFurnitureShop(); }
+    else if (sel.id === 'storage') { closeMenu(); it.ref.storage = it.ref.storage || []; Game.openStorage(it.ref.storage, it.ref.capacity, it.name || 'Maison'); }
+  });
+  el('menuOverlay').style.display = 'flex';
+}
+function openFurnitureShop() {
+  el('menuTitle').textContent = '🛒 Boutique de meubles';
+  const items = Object.entries(FURNITURE_CATALOG).map(([id, f]) => ({ id, title: `${f.name} — ${UTIL.formatMoney(f.price)}`, desc: f.desc || '', furnId: id }));
+  items.push({ id: 'back', title: '↩️ Retour', desc: '' });
+  renderMenu(items, (sel) => {
+    if (sel.furnId) { closeMenu(); Game.buyFurniture(sel.furnId); }
+    else if (sel.id === 'back') { openHouseRoomMenu(); }
+  });
+  el('menuOverlay').style.display = 'flex';
+}
 function openConvoyMenu() {
   el('menuTitle').textContent = '🚗 Convoi';
   const items = [];

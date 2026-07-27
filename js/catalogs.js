@@ -209,6 +209,25 @@ const DRUG_CATALOG = [
 ];
 
 /* ============================================================
+   MOBILIER — objets à acheter pour personnaliser sa maison. Certains sont
+   fonctionnels (rangement, ordinateur, lit), d'autres décoratifs. On les
+   place dans la pièce où l'on se trouve (voir Game.buyFurniture).
+   type : 'storage' (rangement), 'ordi' (ordinateur), 'lit' (repos), 'deco'.
+============================================================ */
+const FURNITURE_CATALOG = {
+  coffre: { name: 'Coffre de rangement', type: 'storage', capacity: 30, price: 90000, desc: 'Rangez-y des objets. Capacité 30.' },
+  coffre_fort_maison: { name: 'Coffre-fort', type: 'storage', capacity: 60, price: 300000, desc: 'Rangement sécurisé. Capacité 60.' },
+  armoire: { name: 'Armoire', type: 'storage', capacity: 25, price: 55000, desc: 'Rangement. Capacité 25.' },
+  refrigerateur: { name: 'Réfrigérateur', type: 'storage', capacity: 20, price: 70000, desc: 'Conservez vos provisions. Capacité 20.' },
+  ordinateur: { name: 'Ordinateur de bureau', type: 'ordi', price: 250000, desc: 'Accès à l\'ordinateur (banque, annonces, etc.).' },
+  lit: { name: 'Lit', type: 'lit', price: 90000, desc: 'Reposez-vous pour récupérer de l\'énergie.' },
+  television: { name: 'Télévision', type: 'deco', price: 80000, desc: 'Élément de confort.' },
+  canape: { name: 'Canapé', type: 'deco', price: 60000, desc: 'Élément de confort.' },
+  table: { name: 'Table à manger', type: 'deco', price: 40000, desc: 'Élément de décoration.' },
+  plante: { name: 'Plante verte', type: 'deco', price: 15000, desc: 'Un peu de verdure.' },
+};
+
+/* ============================================================
    VILLE / MAP — génération procédurale, districts, POI, routes
 ============================================================ */
 // Missions recommandées aux nouveaux joueurs : pas de système d'IDs à saisir pour celles-ci.

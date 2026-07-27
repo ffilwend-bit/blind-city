@@ -1867,6 +1867,51 @@ const Game = {
     it.ix = nx; it.iy = ny;
     if (window.Audio && Audio.tone) Audio.tone({ freq: 210, type: 'sine', duration: 0.05, gain: 0.045, pan: 0 });
     if (room.name !== it.room) { it.room = room.name; announce(`Pièce : ${room.name}.`, 'polite'); }
+    const obj = this._objectAt(nx, ny);
+    if (obj) announce(`Objet : ${obj.name}. E pour l'utiliser.`, 'polite');
+  },
+  // Meuble/objet posé sur une case de l'intérieur, s'il y en a un.
+  _objectAt(ix, iy) {
+    const it = this.interior; if (!it || !it.ref || !it.ref.furniture) return null;
+    return it.ref.furniture.find(f => f.ix === ix && f.iy === iy) || null;
+  },
+  // Première case libre de la pièce (celle où l'on se tient en priorité).
+  _freeFurnitureSpot(roomName, prefX, prefY) {
+    const it = this.interior; const room = (it.rooms || []).find(r => r.name === roomName); if (!room) return null;
+    const taken = (x, y) => (it.ref.furniture || []).some(f => f.ix === x && f.iy === y);
+    if (prefX >= room.x && prefX < room.x + room.w && prefY >= room.y && prefY < room.y + room.h && !taken(prefX, prefY)) return { x: prefX, y: prefY };
+    for (let y = room.y; y < room.y + room.h; y++) for (let x = room.x; x < room.x + room.w; x++) if (!taken(x, y)) return { x, y };
+    return null;
+  },
+  // Acheter un meuble et le placer dans la pièce courante de sa maison.
+  buyFurniture(furnId) {
+    const it = this.interior; if (!it) return announce('Entrez dans votre maison pour la meubler.', 'assertive');
+    const f = (typeof FURNITURE_CATALOG !== 'undefined') && FURNITURE_CATALOG[furnId]; if (!f) return;
+    if (this.money < f.price) return announce(`${f.name} coûte ${UTIL.formatMoney(f.price)}. Fonds insuffisants.`, 'assertive');
+    const spot = this._freeFurnitureSpot(it.room, it.ix, it.iy);
+    if (!spot) return announce('Plus de place dans cette pièce. Essayez une autre pièce.', 'assertive');
+    this.money -= f.price;
+    it.ref.furniture = it.ref.furniture || [];
+    it.ref.furniture.push({ id: 'furn_' + Date.now(), type: f.type, name: f.name, room: it.room, ix: spot.x, iy: spot.y, capacity: f.capacity || 0, storage: [] });
+    if (window.Audio && Audio.cash) Audio.cash();
+    announce(`${f.name} acheté et placé dans ${it.room} pour ${UTIL.formatMoney(f.price)}. Placez-vous dessus et appuyez sur E pour l'utiliser.`, 'assertive');
+    updateHud();
+  },
+  // Interagir avec un meuble selon son type.
+  interactFurniture(obj) {
+    switch (obj.type) {
+      case 'storage':
+        obj.storage = obj.storage || [];
+        return this.openStorage(obj.storage, obj.capacity || 20, obj.name);
+      case 'ordi':
+        return (typeof Computer !== 'undefined') ? Computer.boot() : announce('Ordinateur indisponible.', 'assertive');
+      case 'lit':
+        this.energy = Math.min(100, (this.energy || 0) + 40);
+        if (window.AudioLib) AudioLib.playOnce('sfx_notification', { volume: 0.3 });
+        return announce('Vous vous reposez un moment. Énergie restaurée.', 'assertive');
+      default:
+        return announce(`${obj.name}. Un bel élément de votre intérieur.`, 'polite');
+    }
   },
   exitInterior() {
     if (!this.interior) return;
@@ -1881,13 +1926,14 @@ const Game = {
   // (les meubles/objets interactifs par pièce viendront avec la personnalisation).
   _interactInterior() {
     const it = this.interior;
+    // Un meuble sous les pieds : on l'utilise directement.
+    const obj = this._objectAt(it.ix, it.iy);
+    if (obj) return this.interactFurniture(obj);
+    // Sinon : menu de la pièce (acheter/placer un meuble, rangement de la maison).
+    if (typeof openHouseRoomMenu === 'function') return openHouseRoomMenu();
     const house = it.ref;
-    if (house && typeof house.capacity === 'number') {
-      house.storage = house.storage || [];
-      announce(`Pièce : ${it.room || 'entrée'}.`, 'polite');
-      return this.openStorage(house.storage, house.capacity, it.name || 'Maison');
-    }
-    announce(`Pièce : ${it.room || 'entrée'}. Rien à interagir ici pour l'instant.`, 'assertive');
+    if (house && typeof house.capacity === 'number') { house.storage = house.storage || []; return this.openStorage(house.storage, house.capacity, it.name || 'Maison'); }
+    announce(`Pièce : ${it.room || 'entrée'}.`, 'polite');
   },
 
   // Interactions
@@ -4429,6 +4475,9 @@ const Game = {
       phones: this.phones, activePhoneIndex: this.activePhoneIndex, lastParkedVehicle: this.lastParkedVehicle, theoryPassed: this.theoryPassed, flightTheoryPassed: this.flightTheoryPassed, myContacts: this.myContacts,
       hasHelmet: this.hasHelmet, hasVest: this.hasVest, pendingBills: this.pendingBills,
       guideDog: this.guideDog, // chien guide (position, état, équipement) — coûteux, doit persister
+      // Mobilier acheté et placé dans les maisons (personnalisation) : la ville
+      // est régénérée à chaque session, il faut donc le sauvegarder à part.
+      houseFurniture: Object.fromEntries((City.houses || []).filter(h => h.furniture && h.furniture.length).map(h => [h.id, h.furniture])),
       unconscious: this.unconscious, unconsciousSince: this.unconsciousSince, // pour reprendre le décompte de réveil au bon endroit
     };
     localStorage.setItem('blind_city_v18', JSON.stringify(payload));
@@ -4480,6 +4529,8 @@ const Game = {
       (d.ownedVehicleData || []).forEach(v => {
         if (!City.vehicles.some(existing => existing.id === v.id)) City.vehicles.push(v);
       });
+      // Réattache le mobilier des maisons à la ville régénérée.
+      if (d.houseFurniture) (City.houses || []).forEach(h => { if (d.houseFurniture[h.id]) h.furniture = d.houseFurniture[h.id]; });
       if (d.rolesCurrent) Roles.current = d.rolesCurrent;
       if (d.rolesRecruiters) Roles.recruiters = d.rolesRecruiters;
       // Resynchronise les missions déjà accomplies lors d'une session
