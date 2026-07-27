@@ -494,7 +494,7 @@ const Game = {
       this.x = Math.round(this.vehicle.x); this.y = Math.round(this.vehicle.y); this.altitude = 0;
       this.inVehicle = false; this.vehicle.auto = false; Audio.stopEngine(); RealEngine.stop(); RealEngine2.stop(); RealElectricEngine.stop(); RealAirEngine.stop(); AudioLib.stopLoop('veh_essuie_glaces');
       if (this.vehicle.siren) { const sk = SIREN_SOUNDS[this.vehicle.type]; if (sk) AudioLib.stopLoop(sk); this.vehicle.siren = false; }
-      if (cls && !cls.flies) {
+      if (cls && !cls.flies && !cls.human) { // pas de portière/ceinture/frein à main pour un vélo
         AudioLib.playOnce('veh_ceinture_out', { volume: 0.6 });
         setTimeout(() => AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 }), 250);
         setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_frein_main', { volume: 0.5 }); }, 700);
@@ -559,7 +559,7 @@ const Game = {
     // Le permis est exigé pour conduire — mais pas pour un véhicule-école, ni
     // pour un vélo ou tout véhicule à propulsion humaine (cls.noLicense).
     if (!v.examVehicle && !cls?.noLicense && !this.checkLicense(cls?.flies ? 'flying' : 'driving')) return;
-    if (cls && !cls.flies) {
+    if (cls && !cls.flies && !cls.human) { // pas de portière/ceinture pour un vélo
       AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 });
       if (Net.connected) Net.emitSound('veh1_ouverture_porte', { vol: 0.5 }); // porte audible par les joueurs proches
       setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
@@ -1642,17 +1642,19 @@ const Game = {
   indoors: null,
   // Franchissement d'une porte : son de porte + on marque qu'on est à
   // l'intérieur du lieu (l'ambiance s'assourdit d'elle-même, sans l'annoncer).
-  announceEnterBuilding(name, zone) {
+  announceEnterBuilding(name, zone, ref) {
     if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
     if (window.Audio && Audio.tone) Audio.tone({ freq: 170, type: 'sine', duration: 0.4, gain: 0.06, pan: 0 });
     const lieu = zone === 'cour' ? `la cour de ${name}` : name;
-    this.indoors = { name: lieu };
+    // On mémorise le lieu où l'on entre : tant qu'on est dedans, la touche E
+    // rouvre CE lieu (son contenu interne), jamais l'extérieur.
+    this.indoors = { name: lieu, ref: ref || null, kind: zone === 'cour' ? 'house' : 'poi' };
     announce(`Vous entrez dans ${lieu}. Touche E pour interagir avec ce qui s'y trouve, Ctrl+Alt+E pour ressortir.`, 'assertive');
   },
   // Entrer dans un bâtiment via sa porte (annonce + son), puis ouvrir le lieu.
   enterBuilding(poi) {
     const noDoor = ['station_essence', 'mine', 'aeroport', 'heliport', 'port'];
-    if (!noDoor.includes(poi.type)) this.announceEnterBuilding(poi.name, 'porte');
+    if (!noDoor.includes(poi.type)) this.announceEnterBuilding(poi.name, 'porte', poi);
     this.enterPOI(poi);
   },
   // Ctrl+Alt+E : entrer dans le lieu le plus proche, ou en ressortir si on y est
@@ -1670,14 +1672,24 @@ const Game = {
     // Chercher un lieu (bâtiment ou maison) à portée pour y entrer.
     const poi = City.pois.map(p => ({ p, d: UTIL.dist(p, this) })).filter(o => o.d < 4).sort((a, b) => a.d - b.d)[0];
     const house = City.houses.map(h => ({ h, d: UTIL.dist(h, this) })).filter(o => o.d < 4).sort((a, b) => a.d - b.d)[0];
-    if (poi && (!house || poi.d <= house.d)) { this.announceEnterBuilding(poi.p.name, 'porte'); this.enterPOI(poi.p); }
-    else if (house) { this.announceEnterBuilding(house.h.name || 'la maison', 'cour'); this.enterHouse(house.h); }
+    if (poi && (!house || poi.d <= house.d)) { this.announceEnterBuilding(poi.p.name, 'porte', poi.p); this.enterPOI(poi.p); }
+    else if (house) { this.announceEnterBuilding(house.h.name || 'la maison', 'cour', house.h); this.enterHouse(house.h); }
     else announce('Aucun lieu où entrer ici. Approchez-vous d\'une porte, puis refaites Ctrl+Alt+E.', 'assertive');
   },
 
   // Interactions
   interact() {
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
+    // Déjà à l'intérieur d'un lieu : E rouvre le CONTENU de ce lieu (rayons du
+    // magasin, services…), jamais les lieux de l'extérieur. On ressort par
+    // Ctrl+Alt+E, ou automatiquement si l'on s'est éloigné du lieu.
+    if (this.indoors && this.indoors.ref) {
+      if (UTIL.dist(this.indoors.ref, this) <= 4) {
+        if (this.indoors.kind === 'house') return this.enterHouse(this.indoors.ref);
+        return this.enterPOI(this.indoors.ref);
+      }
+      this.indoors = null; // éloigné du lieu : on est ressorti
+    }
     // Un vrai joueur inconscient à proximité : assistance immédiate, ou
     // portage physique réel (pour l'emmener où on veut — otage, escorte...).
     if (Net.connected) {
@@ -1741,7 +1753,7 @@ const Game = {
       targets.push({ d: UTIL.dist(p, this), label: `🏢 ${p.name}`, act: () => this.enterBuilding(p) });
     });
     City.houses.filter(h => UTIL.dist(h, this) < 4).forEach(h => {
-      targets.push({ d: UTIL.dist(h, this), label: `🏠 ${h.name || 'une maison'}`, act: () => { this.announceEnterBuilding(h.name || 'la maison', 'cour'); this.enterHouse(h); } });
+      targets.push({ d: UTIL.dist(h, this), label: `🏠 ${h.name || 'une maison'}`, act: () => { this.announceEnterBuilding(h.name || 'la maison', 'cour', h); this.enterHouse(h); } });
     });
     City.vehicles.filter(v => !this.inVehicle && UTIL.dist(v, this) < 3).forEach(v => {
       targets.push({ d: UTIL.dist(v, this), label: `🚗 ${v.name} (véhicule)`, act: () => this.interactVehicle() });
