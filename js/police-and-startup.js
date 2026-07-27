@@ -1765,6 +1765,8 @@ const AccessibleCardMenu = {
   // système sert aussi bien les cartes du menu principal que les boutons des
   // listes du téléphone (lieux utiles, carte de la ville...).
   cardLabel(card) {
+    const vl = card.dataset && card.dataset.voiceLabel;
+    if (vl) return vl.trim();
     const aria = card.getAttribute && card.getAttribute('aria-label');
     if (aria) return aria.trim();
     const h4 = card.querySelector && card.querySelector('h4')?.textContent || '';
@@ -1777,6 +1779,7 @@ const AccessibleCardMenu = {
     container._a11ySwipeAttached = true;
     let startX = 0, startY = 0, startTime = 0;
     let lastTapTime = 0, lastTapCard = null;
+    let lastMovedCard = null; // dernière carte lue en glissant le doigt (exploration)
     const getCards = () => Array.from(container.querySelectorAll(cardSelector));
     const focusDelta = (delta) => {
       const cards = getCards();
@@ -1789,6 +1792,22 @@ const AccessibleCardMenu = {
     container.addEventListener('touchstart', (e) => {
       const t = e.changedTouches[0];
       startX = t.clientX; startY = t.clientY; startTime = Date.now();
+      lastMovedCard = null;
+    }, { passive: true });
+    // « Toucher pour explorer » (standard VoiceOver) : en glissant le doigt sur
+    // le menu, on lit la carte située SOUS le doigt dès qu'elle change. Aucune
+    // action n'est déclenchée — seule la lecture. La validation reste le
+    // double-tap. Le balayage rapide horizontal (touchend) reste possible.
+    container.addEventListener('touchmove', (e) => {
+      const t = e.changedTouches[0];
+      const elem = document.elementFromPoint(t.clientX, t.clientY);
+      const card = elem && elem.closest && elem.closest(cardSelector);
+      if (card && card !== lastMovedCard && container.contains(card)) {
+        lastMovedCard = card;
+        card.focus();
+        speak(AccessibleCardMenu.cardLabel(card), 'interrupt');
+        lastTapTime = 0; lastTapCard = null; // un glissement annule un double-tap en cours
+      }
     }, { passive: true });
     container.addEventListener('touchend', (e) => {
       const t = e.changedTouches[0];
@@ -1801,7 +1820,13 @@ const AccessibleCardMenu = {
         lastTapTime = 0; lastTapCard = null;
         return;
       }
-      const card = e.target.closest(cardSelector);
+      // Carte visée : celle sous le doigt, sinon (double-tap « n'importe où »)
+      // la carte actuellement lue/focusée à l'intérieur de ce menu.
+      let card = e.target.closest(cardSelector);
+      if (!card) {
+        const af = document.activeElement;
+        if (af && af.matches && af.matches(cardSelector) && container.contains(af)) card = af;
+      }
       if (!card) return;
       const now = Date.now();
       if (lastTapCard === card && (now - lastTapTime) < AccessibleCardMenu.DOUBLE_TAP_DELAY) {
