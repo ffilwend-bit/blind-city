@@ -80,6 +80,11 @@ const Net = {
       Game.policeRank = msg.rank;
       announce(`${msg.byName} vous nomme ${POLICE_RANKS[msg.rank]?.name || msg.rank}.`, 'assertive');
       updateHud();
+    } else if (msg.type === 'recruiter_appointed') {
+      Roles.recruiters[msg.role] = Roles.recruiters[msg.role] || [];
+      const myName = `${Game.player.firstName} ${Game.player.lastName}`;
+      if (!Roles.recruiters[msg.role].includes(myName)) Roles.recruiters[msg.role].push(myName);
+      announce(`${msg.byName} vous nomme recruteur pour le métier « ${msg.roleName || msg.role} ». Vous pouvez désormais valider les candidatures de ce métier.`, 'assertive');
     } else if (msg.type === 'player_treated') {
       Game.heal(msg.healthGain);
       announce(`${msg.byName} vous a soigné(e). Santé +${msg.healthGain}%.`, 'assertive');

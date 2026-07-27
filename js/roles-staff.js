@@ -135,6 +135,9 @@ const Roles = {
     if (this.list[role].free) { this.set(role); return; }
     if (this.pending) return announce(`Une candidature pour ${this.list[this.pending.role].name} est déjà en attente.`, 'assertive');
     this.pending = { role, time: Date.now(), applicant: `${Game.player.firstName} ${Game.player.lastName}` };
+    // Notifie les administrateurs connectés : sans ça, une candidature restait
+    // purement locale et aucun admin distant ne la « recevait ».
+    if (typeof Net !== 'undefined' && Net.connected) Net.send({ type: 'job_request', role, roleName: this.list[role].name });
     announce(`Candidature envoyée pour le métier ${this.list[role].name}. En attente de validation par un administrateur ou un recruteur habilité.`, 'assertive');
   },
   approve() {

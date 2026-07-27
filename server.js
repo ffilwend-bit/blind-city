@@ -456,6 +456,19 @@ wss.on('connection', (ws, req) => {
       target.carriedBy = null;
       send(target.ws, { type: 'you_are_released', byName: `${player.firstName} ${player.lastName}`, atHospital: !!msg.atHospital });
     }
+    else if (msg.type === 'job_request') {
+      // Une candidature de métier : les administrateurs connectés en sont informés.
+      const roleName = safeName(msg.roleName, '', 60) || safeName(msg.role, '', 40);
+      broadcastStaffLog(`${player.firstName} ${player.lastName} demande le métier « ${roleName} ».`);
+    }
+    else if (msg.type === 'appoint_recruiter') {
+      const target = players.get(msg.targetId);
+      if (!target) return;
+      const role = safeName(msg.role, '', 40);
+      const roleName = safeName(msg.roleName, '', 60) || role;
+      send(target.ws, { type: 'recruiter_appointed', role, roleName, byName: `${player.firstName} ${player.lastName}` });
+      broadcastStaffLog(`${player.firstName} ${player.lastName} nomme ${target.firstName} ${target.lastName} recruteur pour « ${roleName} ».`);
+    }
     else if (msg.type === 'promote_police') {
       const target = players.get(msg.targetId);
       if (!target) return;

@@ -367,17 +367,42 @@ function openAdminMenu() {
     else if (it.id === 'codes') { openStaffCodeMenu(); }
     else if (it.id === 'approve') { Roles.approve(); closeMenu(); }
     else if (it.id === 'reject') { Roles.reject(); closeMenu(); }
-    else if (it.id === 'recruiter') {
-      closeMenu();
-      AccessibleTextPrompt.open('Identifiant du métier', 'Exemples : concessionnaire, agent_immo, avocat, mecanicien, medecin, mineur_pro, police.', '', (role) => {
-        if (!role || !Roles.list[role]) return announce('Métier inconnu.', 'assertive');
-        AccessibleTextPrompt.open('Nom du recruteur', 'Nom de la personne à nommer recruteur pour ce métier.', '', (name) => {
-          if (name) Roles.appointRecruiter(role, name);
-        });
-      });
-    }
+    else if (it.id === 'recruiter') { openRecruiterAppointMenu(); }
     else if (it.id === 'pendingaccounts') { openStaffPendingAccountsMenu(); }
   });
+}
+// Nomination d'un recruteur — par listes déroulantes (plus de saisie de texte) :
+// on choisit d'abord le métier dans un menu, puis la personne parmi les joueurs
+// connectés.
+function openRecruiterAppointMenu() {
+  el('menuTitle').textContent = '🧑‍💼 Nommer un recruteur — choisir le métier';
+  const items = Object.entries(Roles.list)
+    .filter(([id, r]) => !r.free)
+    .map(([id, r]) => ({ id: 'job_' + id, title: r.name, desc: `Compétences : ${r.perms.join(', ') || 'aucune'}.`, roleId: id }));
+  items.push({ id: 'back', title: '↩️ Retour', desc: '' });
+  renderMenu(items, (it) => {
+    if (it.id === 'back') return openAdminMenu();
+    if (it.roleId) openRecruiterPersonMenu(it.roleId);
+  });
+  el('menuOverlay').style.display = 'flex';
+}
+function openRecruiterPersonMenu(roleId) {
+  const roleName = Roles.list[roleId] ? Roles.list[roleId].name : roleId;
+  el('menuTitle').textContent = `Recruteur ${roleName} — choisir la personne`;
+  const players = (typeof Net !== 'undefined' && Net.connected) ? Array.from(Net.remotePlayers.values()) : [];
+  const items = players.map(p => ({ id: 'p_' + p.id, title: `${p.firstName} ${p.lastName}`, desc: 'Nommer recruteur pour ce métier.', personId: p.id, personName: `${p.firstName} ${p.lastName}` }));
+  if (!items.length) items.push({ id: 'none', title: 'Aucun joueur connecté', desc: 'Personne à nommer pour l\'instant.' });
+  items.push({ id: 'back', title: '↩️ Retour', desc: '' });
+  renderMenu(items, (it) => {
+    if (it.id === 'back') return openRecruiterAppointMenu();
+    if (it.personName) {
+      closeMenu();
+      Roles.appointRecruiter(roleId, it.personName);
+      // Prévenir l'intéressé (et le staff) côté serveur, s'il est en ligne.
+      if (typeof Net !== 'undefined' && Net.connected) Net.send({ type: 'appoint_recruiter', targetId: it.personId, role: roleId, roleName });
+    }
+  });
+  el('menuOverlay').style.display = 'flex';
 }
 function openStaffPendingAccountsMenu() {
   if (!Net.connected) { closeMenu(); return announce('Nécessite une connexion au serveur.', 'assertive'); }
