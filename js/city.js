@@ -234,7 +234,14 @@ const City = {
       }
       this.setTile(pos.x, pos.y, 'maison');
       const floors = UTIL.randInt(1, 3);
-      this.houses.push({ id: 'maison_' + i, x: pos.x, y: pos.y, floors, owner: null, price: 300000 + floors * 150000, capacity: 40 + floors * 20, name: `Maison ${i + 1}`, storage: [], authorizedUsers: [] });
+      // Prix immobilier réaliste : une maison est un gros investissement (des
+      // millions), variable selon le nombre d'étages et le standing du quartier,
+      // avec un peu d'aléa. (Avant : 450 000 à 750 000 FCFA, dérisoire.)
+      const dn = (d && d.name) || '';
+      const districtMult = /Gounghin/i.test(dn) ? 1.6 : /Cissin/i.test(dn) ? 1.3 : /Koulouba/i.test(dn) ? 1.15 : /A[ée]roport/i.test(dn) ? 0.9 : 1.0;
+      const base = 6000000 + floors * 4000000; // 10 M / 14 M / 18 M avant quartier et aléa
+      const price = Math.round(base * districtMult * UTIL.rand(0.85, 1.2) / 100000) * 100000;
+      this.houses.push({ id: 'maison_' + i, x: pos.x, y: pos.y, floors, owner: null, price, capacity: 40 + floors * 20, name: `Maison ${i + 1}`, storage: [], authorizedUsers: [] });
     }
   },
 
