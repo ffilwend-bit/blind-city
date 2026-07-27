@@ -804,11 +804,27 @@ function guideToPoi(poi) {
 function openMapMenu() {
   ensureMenuOpen();
   el('menuTitle').textContent = 'Carte et lieux';
-  // TOUS les lieux, du plus proche au plus loin (avant : 15 seulement), et
-  // choisir un lieu GUIDE vers lui (à pied par défaut).
-  const items = City.pois.map(p => ({ p, d: UTIL.dist(p, Game) })).sort((a, b) => a.d - b.d)
-    .map(({ p, d }) => ({ id: p.id, title: p.name, desc: `${SERVICE_TYPES[p.type] || DISTRICT_TYPES[p.type] || p.type}, ${Math.round(d * CONFIG.METERS_PER_TILE)} m, ${UTIL.bearing(p.x - Game.x, p.y - Game.y)}.` }));
-  renderMenu(items, (it) => { const poi = City.pois.find(p => p.id === it.id); closeMenu(); guideToPoi(poi); });
+  // TOUS les lieux, du plus proche au plus loin, y compris les SITES MINIERS
+  // (qui ne sont pas des POI classiques et n'apparaissaient donc pas ici).
+  // Choisir un lieu guide vers lui (à pied ou au volant).
+  const entries = [
+    ...City.pois.map(p => ({ target: p, isMine: false })),
+    ...(City.miningSites || []).map(m => ({ target: m, isMine: true })),
+  ].map(e => ({ ...e, d: UTIL.dist(e.target, Game) })).sort((a, b) => a.d - b.d);
+  const items = entries.map((e, i) => ({
+    id: 'loc_' + i,
+    title: e.target.name,
+    desc: `${e.isMine ? '⛏️ Site minier' : (SERVICE_TYPES[e.target.type] || DISTRICT_TYPES[e.target.type] || e.target.type)}, ${Math.round(e.d * CONFIG.METERS_PER_TILE)} m, ${UTIL.bearing(e.target.x - Game.x, e.target.y - Game.y)}.`,
+    entry: e,
+  }));
+  renderMenu(items, (it) => {
+    closeMenu();
+    const e = it.entry; if (!e) return;
+    if (e.isMine) {
+      if (UTIL.dist(e.target, Game) < 4) Game.mine(e.target);
+      else Game.setGuidance({ name: e.target.name, x: e.target.x, y: e.target.y });
+    } else guideToPoi(e.target);
+  });
 }
 
 /* ============================================================

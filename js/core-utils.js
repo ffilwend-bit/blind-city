@@ -17,8 +17,8 @@ const CONFIG = {
   MISSION_COUNT: 38,
   GANG_COUNT: 5,
   MINING_SITES: 4,
-  POLICE_STATIONS: 3,
-  HOSPITALS: 2,
+  POLICE_STATIONS: 1, // un commissariat unique (l'admin peut en ajouter d'autres)
+  HOSPITALS: 1,       // un hôpital unique (l'admin peut en ajouter d'autres)
   SHOP_TYPES: ['alimentation','vetements','restaurant','pharmacie','armurerie','quincaillerie','electronique','magasin_general','bar','station_essence','concessionnaire','agence_immo','banque','marche_noir','marche_noir_lointain','mine'],
   CURRENCY: 'FCFA',
   SPEECH_RATE: 1.08,

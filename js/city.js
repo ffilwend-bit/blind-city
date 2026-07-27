@@ -254,9 +254,8 @@ const City = {
         this.pois.push({ id: type + '_' + i, name, type, x: pos.x, y: pos.y, floors: type === 'immeuble' ? UTIL.randInt(2, CONFIG.MAX_HEIGHT) : 1, stock: [] });
       }
     };
-    add('Commissariat', 'police', 'Koulouba', CONFIG.POLICE_STATIONS);
+    add('Commissariat central', 'police', 'Koulouba', CONFIG.POLICE_STATIONS);
     add('Prison centrale', 'prison', 'Zone industrielle de Kossodo', 1);
-    add('Commissariat de Gounghin', 'police', 'Gounghin', 1);
     add('Hôpital central', 'hopital', 'Koulouba', CONFIG.HOSPITALS);
     add('Banque', 'banque', 'Koulouba', 2);
     add('QG des missions extrêmes', 'qg_extreme', 'Zone industrielle de Kossodo', 1);
