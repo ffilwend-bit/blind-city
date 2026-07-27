@@ -47,16 +47,43 @@ function npcTick() {
       if (nx >= 0 && ny >= 0 && nx < City.W && ny < City.H && !City.isSolid(nx, ny)) { n.x = nx; n.y = ny; }
       continue;
     }
+    // --- Réaction à une arme braquée (bug #11) ---
+    // Un civil non armé prend peur quand on sort une arme près de lui. La cible
+    // VISÉE (verrouillée) réagit le plus fort : mains en l'air si elle est
+    // acculée (tout près), sinon elle prend la fuite. Les témoins proches
+    // s'affolent aussi. Les hostiles/fugitifs/policiers ne sont pas concernés.
+    if (Game.weaponOut && !n.hostile && !n.menotte && !n.knockedOut && n.job !== 'police' && n.job !== 'fugitif') {
+      const d = UTIL.dist(n, Game);
+      const aimed = Game.lockedTarget && !Game.lockedTarget.isPlayer && Game.lockedTarget.id === n.id;
+      if ((aimed || d < 6) && !n.handsUp && !n.fleeing) {
+        n.relation = Math.max(-100, (n.relation || 0) - 15);
+        if (d < 3) { n.handsUp = true; if (aimed) announce(`${n.name} lève les mains, terrifié(e).`, 'assertive'); log(`${n.name} lève les mains !`, 'npc'); }
+        else { n.fleeing = true; if (aimed) announce(`${n.name} prend la fuite !`, 'assertive'); }
+        Game.npcVoiceReaction(n.x, n.y, { group: 'panique', count: 1, radius: 12 });
+      } else if (d < 9 && !n.fleeing && !n.handsUp && Math.random() < 0.2) {
+        n.fleeing = true; // témoin proche qui s'affole
+      }
+    }
+    // Mains en l'air : figé tant qu'on le braque de près ; se calme sinon.
+    if (n.handsUp) {
+      if (!Game.weaponOut || UTIL.dist(n, Game) > 8) n.handsUp = false;
+      else continue;
+    }
+    // Fuite : court à l'opposé du joueur ; s'arrête quand la menace s'éloigne.
+    if (n.fleeing) {
+      if (!Game.weaponOut || UTIL.dist(n, Game) > 16) { n.fleeing = false; }
+      else {
+        const dx = Math.sign(n.x - Game.x) || UTIL.randInt(-1, 1), dy = Math.sign(n.y - Game.y) || UTIL.randInt(-1, 1);
+        const nx = n.x + dx, ny = n.y + dy;
+        if (nx >= 0 && ny >= 0 && nx < City.W && ny < City.H && !City.isSolid(nx, ny)) { n.x = nx; n.y = ny; }
+        continue; // pas de déambulation tant qu'il fuit
+      }
+    }
     // Routine: move toward home or work district
     if (Math.random() < 0.4) {
       const dx = Math.sign((n.home?.x || n.x) - n.x + UTIL.randInt(-2, 2)); const dy = Math.sign((n.home?.y || n.y) - n.y + UTIL.randInt(-2, 2));
       const nx = n.x + dx, ny = n.y + dy;
       if (nx >= 0 && ny >= 0 && nx < City.W && ny < City.H && !City.isSolid(nx, ny)) { n.x = nx; n.y = ny; }
-    }
-    // Reaction to weapon
-    if (Game.weaponOut && UTIL.dist(n, Game) < 8 && !n.hostile) {
-      if (Math.random() < 0.15) { n.relation -= 5; log(`${n.name} s\'inquiète de votre arme.`, 'npc'); }
-
     }
     // Illegal clients
     if (n.job === 'civil' && Math.random() < 0.02 && Game.inventory.some(i => i.category === 'munition' || i.id === 'coffre_fort' || !i.legal)) {

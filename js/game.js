@@ -1406,6 +1406,16 @@ const Game = {
     if (!n) return announce('Cible invalide.', 'assertive');
     this.lockedTarget = n;
     announce(`Cible verrouillée : ${n.name}, ${n.isPlayer ? 'joueur réel' : n.job}, ${Math.round(n.dist)} mètres, ${n.bearing}.`, 'assertive');
+    // Braquer une arme en verrouillant : la cible PNJ réagit tout de suite
+    // (mains en l'air si acculée, sinon fuite) — le reste est géré par npcTick.
+    if (this.weaponOut && !n.isPlayer) {
+      const live = City.npcs.find(x => x.id === n.id);
+      if (live && !live.hostile && !live.menotte && !live.knockedOut && !live.handsUp && !live.fleeing && live.job !== 'police') {
+        if (UTIL.dist(live, this) < 3) { live.handsUp = true; announce(`${live.name} lève les mains, terrifié(e).`, 'polite'); }
+        else { live.fleeing = true; announce(`${live.name} prend la fuite !`, 'polite'); }
+        this.npcVoiceReaction(live.x, live.y, { group: 'panique', count: 1, radius: 12 });
+      }
+    }
     updateHud();
   },
   // Résout la cible verrouillée EN DIRECT plutôt que d'utiliser la photo
