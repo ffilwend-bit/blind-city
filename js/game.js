@@ -871,26 +871,47 @@ const Game = {
     return Math.max(-1, Math.min(1, (rx * dx + ry * dy) / len));
   },
 
-  // F — Radar de balayage : balaie de gauche à droite les lieux proches,
-  // chacun joué comme un bip spatialisé (position = pan, distance = hauteur),
-  // suivi d'une courte annonce. Donne une "photo sonore" instantanée.
+  // F — Radar de PROXIMITÉ : « photo sonore » instantanée de tout ce qui vous
+  // entoure — personnes (PNJ ET vrais joueurs), véhicules et lieux — chacun
+  // joué comme un bip spatialisé (position stéréo = direction réelle, hauteur =
+  // proximité) avec un TIMBRE distinct par catégorie (reconnaissable à l'oreille),
+  // balayé de la gauche vers la droite, puis un résumé parlé du plus proche de
+  // chaque type. Le détail verbal complet reste sur le Scan.
+  RADAR_CATS: {
+    joueur:   { type: 'square',   base: 560, label: 'joueur réel' },
+    personne: { type: 'sine',     base: 500, label: 'personne' },
+    vehicule: { type: 'sawtooth', base: 340, label: 'véhicule' },
+    lieu:     { type: 'triangle', base: 280, label: 'lieu' },
+  },
   soundRadar() {
-    const near = City.pois
-      .map(p => ({ p, dist: UTIL.dist(p, this), pan: this.panForPoint(p.x, p.y), ang: this.relativeAngle(p.x, p.y) }))
-      .filter(o => o.dist < 35)
-      .sort((a, b) => a.pan - b.pan) // de la gauche vers la droite
-      .slice(0, 8);
-    if (!near.length) { announce('Radar : aucun lieu identifié à proximité.', 'interrupt'); Audio.tone({ freq: 300, type: 'sine', duration: 0.2, gain: 0.08, pan: 0 }); return; }
-    announce(`Radar : ${near.length} lieux autour de vous, de la gauche vers la droite.`, 'interrupt');
+    const R = 35;
+    const items = [];
+    City.npcs.forEach(n => { const d = UTIL.dist(n, this); if (d < R) items.push({ x: n.x, y: n.y, dist: d, name: n.name || 'personne', cat: 'personne' }); });
+    if (Net.connected) Array.from(Net.remotePlayers.values()).forEach(p => { if (!p || p.unconscious) return; const d = UTIL.dist(p, this); if (d < R) items.push({ x: p.x, y: p.y, dist: d, name: (p.firstName || 'Joueur') + ' (joueur réel)', cat: 'joueur' }); });
+    City.vehicles.forEach(v => { if (v.owner) return; const d = UTIL.dist(v, this); if (d < R) items.push({ x: v.x, y: v.y, dist: d, name: v.name || 'véhicule', cat: 'vehicule' }); });
+    City.pois.forEach(p => { const d = UTIL.dist(p, this); if (d < R) items.push({ x: p.x, y: p.y, dist: d, name: p.name, cat: 'lieu' }); });
+    if (!items.length) { announce('Radar de proximité : rien à signaler autour de vous.', 'interrupt'); Audio.tone({ freq: 300, type: 'sine', duration: 0.2, gain: 0.08, pan: 0 }); return; }
+    // On garde les plus proches, puis on les ordonne de la gauche vers la droite.
+    const near = items.slice().sort((a, b) => a.dist - b.dist).slice(0, 12).map(o => ({ ...o, pan: this.panForPoint(o.x, o.y) })).sort((a, b) => a.pan - b.pan);
+    const c = { personne: 0, joueur: 0, vehicule: 0, lieu: 0 };
+    near.forEach(o => c[o.cat]++);
+    const people = c.personne + c.joueur;
+    announce(`Radar de proximité : ${people} personne${people > 1 ? 's' : ''}, ${c.vehicule} véhicule${c.vehicule > 1 ? 's' : ''}, ${c.lieu} lieu${c.lieu > 1 ? 'x' : ''}. Balayage de la gauche vers la droite.`, 'interrupt');
+    // Phase 1 : bip spatialisé par entité, timbre selon le type.
     near.forEach((o, i) => {
       setTimeout(() => {
-        // Plus c'est proche, plus le son est aigu ; position stéréo = direction réelle.
-        const freq = 400 + Math.max(0, (35 - o.dist)) * 18;
-        Audio.tone({ freq, type: 'sine', duration: 0.16, gain: 0.1, pan: o.pan });
-        const side = o.pan < -0.33 ? 'à gauche' : o.pan > 0.33 ? 'à droite' : 'devant';
-        speak(`${o.p.name}, ${side}, ${Math.round(o.dist * CONFIG.METERS_PER_TILE)} mètres`, i === 0 ? 'interrupt' : 'polite');
-      }, i * 850);
+        const cat = this.RADAR_CATS[o.cat];
+        Audio.tone({ freq: cat.base + Math.max(0, (R - o.dist)) * 12, type: cat.type, duration: 0.13, gain: 0.09, pan: o.pan });
+      }, i * 220);
     });
+    // Phase 2 : résumé parlé — l'entité la plus proche de chaque type.
+    const nearestOf = (kinds) => items.filter(o => kinds.includes(o.cat)).sort((a, b) => a.dist - b.dist)[0];
+    const lines = [];
+    [['personne', 'joueur'], ['vehicule'], ['lieu']].forEach(kinds => {
+      const o = nearestOf(kinds);
+      if (o) lines.push(`${o.name}, ${Math.round(o.dist * CONFIG.METERS_PER_TILE)} mètres vers le ${UTIL.bearing(o.x - this.x, o.y - this.y)}`);
+    });
+    if (lines.length) setTimeout(() => speak('Le plus proche : ' + lines.join(' ; ') + '.', 'polite'), near.length * 220 + 250);
   },
 
   // Balises sonores de proximité : appelé en boucle par le gameLoop. Chaque type
@@ -1355,7 +1376,7 @@ const Game = {
       const dist = Math.round(UTIL.dist({ x: cx, y: cy }, this) * CONFIG.METERS_PER_TILE);
       parts.push(`${d.name}, vers le ${dir}, à environ ${dist} mètres.`);
     });
-    parts.push('Utilisez F pour balayer les lieux proches, C pour la boussole, et le menu carte du téléphone pour vous faire guider vers une destination.');
+    parts.push('Utilisez F pour le radar de proximité qui balaye tout ce qui vous entoure, C pour la boussole, et le menu carte du téléphone pour vous faire guider vers une destination.');
     announce(parts.join(' '), 'interrupt');
   },
 
