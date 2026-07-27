@@ -801,6 +801,7 @@ const Rotor = {
     }
     if (typeof Game.getLiveTarget === 'function' && Game.getLiveTarget()) {
       return [
+        { label: 'info de la cible', run: () => Game.announceTarget() },
         { label: 'fouiller', run: () => Game.searchTarget() },
         { label: 'menotter ou démenotter', run: () => Game.toggleCuffs() },
         { label: 'cibler la personne suivante', run: () => Game.target(1) },
@@ -867,6 +868,7 @@ function setupInput() {
     else if (key === 't' && !e.shiftKey) Game.startBurst();
     else if (key === 'r') Game.reload();
     else if (key === 'g' && Game.lockedTarget) Game.changeAim(1); // visée tête/torse/jambes
+    else if (key === 'z' && !e.shiftKey) Game.announceTarget(); // rafraîchir/réentendre la cible verrouillée
     else if (key === 'n') Game.announceInventory();
     else if (key === 'i') Game.announceLocation();
     else if (key === 'o') Game.openGarage();
@@ -1361,6 +1363,7 @@ function startGame(seed) {
     setInterval(() => Game.updateWantedChase(), 800);
     setInterval(() => Convoy.tick(), 2500);
     setInterval(() => Game.vendorTick(), 2000);
+    setInterval(() => Game.refreshTargetValidity(), 1500);
     setInterval(() => Game.tickUnconscious(), 5000);
     setInterval(() => Game.tickDrivingExam(), 1000);
     setInterval(() => Game.tickFlightExam(), 1000);

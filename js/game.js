@@ -1416,12 +1416,47 @@ const Game = {
   // pour de vrai) ; pour un joueur réel, son état réseau le plus récent.
   getLiveTarget() {
     if (!this.lockedTarget) return null;
+    let live;
     if (this.lockedTarget.isPlayer) {
-      const live = Net.remotePlayers.get(this.lockedTarget.id);
-      if (!live) return null; // déconnecté ou hors de portée réseau
-      return { id: live.id, name: this.lockedTarget.name, isPlayer: true, x: live.x, y: live.y, health: live.health, unconscious: live.unconscious, outfit: live.outfit, role: live.role, policeRank: live.policeRank };
+      const p = Net.remotePlayers.get(this.lockedTarget.id);
+      if (!p) return null; // déconnecté ou hors de portée réseau
+      live = { id: p.id, name: this.lockedTarget.name, isPlayer: true, x: p.x, y: p.y, health: p.health, unconscious: p.unconscious, isCuffed: p.isCuffed, outfit: p.outfit, role: p.role, policeRank: p.policeRank };
+    } else {
+      live = City.npcs.find(n => n.id === this.lockedTarget.id) || null;
+      if (!live) return null;
     }
-    return City.npcs.find(n => n.id === this.lockedTarget.id) || null;
+    // Rafraîchit la « photo » du verrou (position et santé) : l'affichage HUD et
+    // toute lecture qui s'appuie encore sur lockedTarget restent ainsi à jour
+    // quand la cible se déplace ou encaisse des dégâts.
+    this.lockedTarget.x = live.x; this.lockedTarget.y = live.y;
+    if (typeof live.health === 'number') this.lockedTarget.health = live.health;
+    return live;
+  },
+  // Rafraîchit et RÉANNONCE la cible verrouillée en direct : distance, cap,
+  // santé et état à jour. Si elle n'est plus repérable (PNJ disparu, joueur
+  // déconnecté), on déverrouille proprement.
+  announceTarget() {
+    if (!this.lockedTarget) return announce('Aucune cible verrouillée. Scannez, puis tapez 1 à 9 pour en choisir une.', 'assertive');
+    const live = this.getLiveTarget();
+    if (!live) { const name = this.lockedTarget.name; this.lockedTarget = null; updateHud(); return announce(`${name} n'est plus repérable. Cible déverrouillée.`, 'assertive'); }
+    const d = Math.round(UTIL.dist(live, this) * CONFIG.METERS_PER_TILE);
+    const bearing = UTIL.bearing(live.x - this.x, live.y - this.y);
+    let state = '';
+    if (live.dead) state = ', à terre, sans vie';
+    else if (live.knockedOut || live.unconscious) state = ', inconsciente';
+    if (live.menotte || live.isCuffed) state += ', menottée';
+    const hp = typeof live.health === 'number' ? `, santé ${Math.round(live.health)} pour cent` : '';
+    announce(`Cible : ${this.lockedTarget.name || live.name}, ${d} mètres vers le ${bearing}${hp}${state}. Visée : ${this.aimPart}.`, 'assertive');
+    if (window.Audio && Audio.tone) Audio.tone({ freq: 700, type: 'sine', duration: 0.12, gain: 0.1, pan: this.panForPoint(live.x, live.y) });
+  },
+  // Invalidation automatique : si la cible verrouillée n'est plus repérable
+  // (disparue/déconnectée), on la déverrouille au lieu de la garder figée.
+  refreshTargetValidity() {
+    if (!this.lockedTarget) return;
+    if (!this.getLiveTarget()) {
+      const name = this.lockedTarget.name; this.lockedTarget = null; updateHud();
+      announce(`${name} n'est plus en vue. Cible déverrouillée.`, 'polite');
+    }
   },
   changeAim(dir) {
     const idx = CONFIG.AIM_PARTS.indexOf(this.aimPart);
