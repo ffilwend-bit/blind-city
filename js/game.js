@@ -606,7 +606,7 @@ const Game = {
   // sont proposées.
   openVehicleDoorMenu(v, driver) {
     const name = v ? v.name : (driver && driver.vehicleName ? driver.vehicleName : 'le véhicule');
-    AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
+    this.doorCue();
     if (typeof ensureMenuOpen === 'function') ensureMenuOpen(); else el('menuOverlay').style.display = 'flex';
     el('menuTitle').textContent = `Monter dans ${name}`;
     const items = [];
@@ -1364,9 +1364,10 @@ const Game = {
     if (rel < 0.55) cote = 'droit devant';
     else if (rel > Math.PI - 0.55) cote = 'derrière vous';
     else cote = (pan < 0) ? 'à gauche' : 'à droite';
-    // Son de porte spatialisé (volume selon la distance).
+    // Son de porte synthétique spatialisé (le bip directionnel ci-dessous
+    // complète le repérage).
     const vol = Math.max(0.15, Math.min(0.9, 1 - t.d / (R + 4)));
-    if (window.AudioLib && AudioLib.playOnce) AudioLib.playOnce('sfx_porte_vehicule', { volume: vol });
+    this.doorCue(pan);
     // Bip directionnel panoramique en renfort (grave = loin, aigu = proche).
     if (window.Audio && Audio.tone) {
       Audio.tone({ freq: 480 + (1 - vol) * -160 + 220 * vol, type: 'triangle', duration: 0.18, gain: 0.14, pan });
@@ -1827,11 +1828,18 @@ const Game = {
   // ville reste assourdie (voir updateRoadAmbience) et l'on reste dedans jusqu'à
   // ressortir volontairement (Ctrl+Alt+E). On ne commente PAS le bruit.
   indoors: null,
-  // Franchissement d'une porte : son de porte + on marque qu'on est à
-  // l'intérieur du lieu (l'ambiance s'assourdit d'elle-même, sans l'annoncer).
+  // Son de porte SYNTHÉTIQUE (le fichier de porte fourni a été retiré à la
+  // demande — on garde uniquement un son de synthèse) : un petit « toc » grave,
+  // éventuellement panoramique.
+  doorCue(pan = 0) {
+    if (!window.Audio || !Audio.tone) return;
+    Audio.tone({ freq: 150, type: 'sine', duration: 0.16, gain: 0.09, pan });
+    setTimeout(() => { if (window.Audio && Audio.tone) Audio.tone({ freq: 105, type: 'sine', duration: 0.13, gain: 0.07, pan }); }, 85);
+  },
+  // Franchissement d'une porte : son de porte synthétique + on marque qu'on est
+  // à l'intérieur du lieu (l'ambiance s'assourdit d'elle-même, sans l'annoncer).
   announceEnterBuilding(name, zone, ref) {
-    if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
-    if (window.Audio && Audio.tone) Audio.tone({ freq: 170, type: 'sine', duration: 0.4, gain: 0.06, pan: 0 });
+    this.doorCue();
     const lieu = zone === 'cour' ? `la cour de ${name}` : name;
     // On mémorise le lieu où l'on entre : tant qu'on est dedans, la touche E
     // rouvre CE lieu (son contenu interne), jamais l'extérieur.
@@ -1853,7 +1861,7 @@ const Game = {
     if (this.indoors) {
       const name = this.indoors.name;
       this.indoors = null;
-      if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
+      this.doorCue();
       announce(`Vous sortez de ${name}. Vous êtes de nouveau dehors.`, 'assertive');
       return;
     }
@@ -1894,7 +1902,7 @@ const Game = {
     const ent = tpl.entrance || { x: 0, y: 0 };
     this.interior = { ref: poi, poi, kind: 'poi', name: poi.name, rooms: tpl.rooms, service: tpl.service, ix: ent.x, iy: ent.y, room: null, returnX: this.x, returnY: this.y };
     this.indoors = { name: poi.name, ref: poi, kind: 'interior' };
-    if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
+    this.doorCue();
     const room = this._roomAt(ent.x, ent.y);
     this.interior.room = room ? room.name : null;
     announce(`Vous entrez dans ${poi.name}. Pièce : ${room ? room.name : 'entrée'}. Allez au ${tpl.service.label} et appuyez sur E pour être servi. Ctrl+Alt+E pour sortir.`, 'assertive');
@@ -1915,7 +1923,7 @@ const Game = {
     const ent = tpl.entrance || { x: 0, y: 0 };
     this.interior = { ref, name, kind: 'house', rooms: tpl.rooms, ix: ent.x, iy: ent.y, room: null, returnX: this.x, returnY: this.y };
     this.indoors = { name, ref, kind: 'interior' }; // ambiance de ville atténuée
-    if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
+    this.doorCue();
     const room = this._roomAt(ent.x, ent.y);
     this.interior.room = room ? room.name : null;
     announce(`Vous entrez dans ${name}. Pièce : ${room ? room.name : 'entrée'}. Déplacez-vous pour explorer les pièces. E pour interagir, Ctrl+Alt+E pour sortir.`, 'assertive');
@@ -2001,7 +2009,7 @@ const Game = {
     const name = this.interior.name;
     this.x = this.interior.returnX; this.y = this.interior.returnY;
     this.interior = null; this.indoors = null;
-    if (window.AudioLib) AudioLib.playOnce('sfx_porte_vehicule', { volume: 0.5 });
+    this.doorCue();
     announce(`Vous sortez de ${name}. Vous êtes de nouveau dehors.`, 'assertive');
     updateHud();
   },

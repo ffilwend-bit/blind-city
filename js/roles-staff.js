@@ -556,8 +556,8 @@ Game.startDrivingExam = function() {
   City.vehicles.push({ id: vid, type: 'berline', name: 'Véhicule-école', x: spot.x, y: spot.y, fuel: 1, hp: 100, locked: false, owner: null, inventory: [], auto: false, altitude: 0, speed: 0, heading: 0, autoDest: null, price: 0, trunk: VEHICLE_CATALOG.berline.trunk, examVehicle: true });
   this.drivingExamState = { waypoints, current: 0, collisions: 0, vehicleId: vid, startHp: 100 };
   announce(`Examen commencé ! Un véhicule-école vous attend juste à côté : appuyez sur E pour monter côté conducteur, aucun permis n'est requis. Suivez ensuite le guidage vocal jusqu'aux 4 points du circuit. 2 collisions maximum tolérées.`, 'assertive');
-  // Repère sonore vers le véhicule-école, puis guidage vers le premier point.
-  if (window.AudioLib) AudioLib.playPositional && AudioLib.playPositional('sfx_porte_vehicule', UTIL.clamp((spot.x - this.x) / 6, -1, 1), 0.6);
+  // Repère sonore (synthétique) vers le véhicule-école, puis guidage vers le premier point.
+  if (typeof Game !== 'undefined' && Game.doorCue) Game.doorCue(UTIL.clamp((spot.x - this.x) / 6, -1, 1));
   this.setGuidance({ name: 'Point 1 du circuit', x: waypoints[0].x, y: waypoints[0].y });
 };
 // Appelé en continu tant qu'un examen est en cours (voir gameLoop).
