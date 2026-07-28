@@ -305,7 +305,7 @@ const AccessibleTextPrompt = {
     // sur mobile il remplace le clavier natif.
     if (typeof TouchKeyboard !== 'undefined') TouchKeyboard.open();
     const onMobile = (typeof Platform !== 'undefined' && Platform.isMobile);
-    announce(`${title}. ${desc || ''} ${onMobile ? 'Clavier tactile : glissez le doigt pour entendre les lettres, levez le doigt pour écrire.' : ''}`, 'assertive');
+    announce(`${title}. ${desc || ''} ${onMobile ? 'Clavier tactile : glissez le doigt pour entendre les lettres, levez le doigt pour écrire. En bas, touche Valider pour enregistrer, Annuler pour abandonner.' : ''}`, 'assertive');
     if (!onMobile) setTimeout(() => focusTextInput(input, title), 30);
   },
   confirm() {
@@ -334,10 +334,13 @@ const TouchKeyboard = {
     ['y','z','0','1','2','3','4','5'],
     ['6','7','8','9','@','.','-','_'],
     [{k:'shift',l:'Majuscules'},{k:'space',l:'Espace'},{k:'back',l:'Effacer'}],
+    [{k:'cancel',l:'Annuler'},{k:'enter',l:'Valider'}],
   ],
   _labelFor(k) {
     if (k === 'space') return 'Espace';
     if (k === 'back') return 'Effacer';
+    if (k === 'enter') return 'Valider';
+    if (k === 'cancel') return 'Annuler';
     if (k === 'shift') return this.shift ? 'Majuscules activées' : 'Majuscules';
     if (k === '.') return 'point'; if (k === '-') return 'tiret'; if (k === '_') return 'trait bas'; if (k === '@') return 'arobase';
     if (/[a-z]/.test(k)) return (this.shift ? 'majuscule ' : '') + k.toUpperCase();
@@ -356,7 +359,7 @@ const TouchKeyboard = {
         btn.textContent = typeof cell === 'string' ? cell : cell.l;
         btn.setAttribute('aria-label', this._labelFor(k));
         btn.dataset.voiceLabel = this._labelFor(k);
-        const wide = (k === 'space') ? 'flex:2;' : (k === 'shift' || k === 'back') ? 'flex:1.4;' : 'flex:1;';
+        const wide = (k === 'space') ? 'flex:2;' : (k === 'shift' || k === 'back' || k === 'enter' || k === 'cancel') ? 'flex:2;' : 'flex:1;';
         btn.style.cssText = `${wide} min-width:34px; min-height:44px; font-size:1rem; background:#11161e; color:#fff; border:1px solid var(--border); border-radius:8px;`;
         r.appendChild(btn);
       });
@@ -370,6 +373,10 @@ const TouchKeyboard = {
   },
   _commit(k) {
     const input = el('textPromptInput'); if (!input) return;
+    // Valider / Annuler : indispensables sur mobile (le champ est en lecture
+    // seule, Entrée n'existe pas) — avant, on restait bloqué dans la saisie.
+    if (k === 'enter') { if (typeof AccessibleTextPrompt !== 'undefined' && AccessibleTextPrompt.active) AccessibleTextPrompt.confirm(); return; }
+    if (k === 'cancel') { if (typeof AccessibleTextPrompt !== 'undefined' && AccessibleTextPrompt.active) AccessibleTextPrompt.cancel(); return; }
     if (k === 'shift') { this.shift = !this.shift; this._refreshLabels(); speak(this.shift ? 'Majuscules activées' : 'Majuscules désactivées', 'interrupt'); return; }
     if (typeof Audio !== 'undefined' && Audio.click) Audio.click(0);
     if (k === 'space') { input.value += ' '; speak('espace', 'assertive'); return; }
