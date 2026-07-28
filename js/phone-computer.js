@@ -87,6 +87,16 @@ const Phone = {
         const li = document.createElement('li'); li.innerHTML = `<span>${c.name} <span class="badge badge-${c.role === 'police' ? 'police' : c.role === 'medecin' ? 'medecin' : c.role === 'meca' ? 'meca' : 'citoyen'}">${c.role}</span></span><button class="phone-btn">📞</button>`;
         li.querySelector('button').addEventListener('click', () => this.call(c)); ul.appendChild(li);
       });
+      // Contacts ENREGISTRÉS par le joueur (le prénom/nom qu'il a donné à chaque
+      // personne). Ils n'apparaissaient pas dans la liste — c'était le bug.
+      (Game.myContacts || []).forEach(c => {
+        const online = c.username ? Array.from(Net.remotePlayers.values()).find(p => p.accountUsername === c.username) : null;
+        const statut = online ? 'en ligne' : (c.number ? c.number : 'contact');
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${c.label} <span class="badge badge-citoyen">${statut}</span></span><button class="phone-btn" aria-label="Appeler ${c.label}">📞</button>`;
+        li.querySelector('button').addEventListener('click', () => this.callSavedContact(c));
+        ul.appendChild(li);
+      });
       // Add nearby NPCs as contacts
       City.npcs.filter(n => !n.dead && UTIL.dist(n, Game) < 50).forEach(n => {
         const li = document.createElement('li'); li.innerHTML = `<span>${n.name} (${n.job})</span><button class="phone-btn">📞</button>`;
@@ -410,6 +420,23 @@ const Phone = {
     if (this.currentMsgTarget.id) Net.smsSend(this.currentMsgTarget.id, text, onResult);
     else Net.smsDial(this.currentMsgTarget.dialNumber, text, onResult);
     input.value = '';
+  },
+  // Appeler un contact ENREGISTRÉ : s'il correspond à un joueur réel connecté,
+  // vrai appel ; sinon on compose son numéro (s'il en a un et qu'on est en
+  // ligne) ; sinon on prévient qu'il n'est pas joignable.
+  callSavedContact(c) {
+    const online = c.username ? Array.from(Net.remotePlayers.values()).find(p => p.accountUsername === c.username) : null;
+    if (online) return this.call({ name: c.label, isPlayer: true, id: online.id });
+    if (c.number && Net.connected) {
+      this.currentCall = { name: c.label, number: c.number }; this.renderApp('call');
+      if (el('callName')) el('callName').textContent = c.label;
+      this._lastDialedNumber = c.number;
+      announce(`Vous appelez ${c.label}.`, 'polite');
+      Net.dialNumber(c.number, (res) => { if (res && res.ok && el('callStatus')) el('callStatus').textContent = 'Ça sonne...'; });
+      return;
+    }
+    if (c.number) return this.call({ name: c.label, number: c.number }); // hors ligne : appel simulé
+    announce(`${c.label} n'est pas joignable pour le moment.`, 'assertive');
   },
   call(contact) {
     // Anti-appel fantôme : ouvrir l'app Contacts affichait une liste dont le
