@@ -1072,7 +1072,7 @@ const Game = {
           || City.npcs.some(n => !n.dead && UTIL.dist(n, this) < 3);
         if (canInteract) {
           const nearBuilding = City.pois.some(p => UTIL.dist(p, this) < 4) || City.houses.some(h => UTIL.dist(h, this) < 4);
-          hint = ' Appuyez sur E pour interagir' + (nearBuilding ? ', ou Ctrl+Alt+E pour entrer' : '') + '.';
+          hint = ' Appuyez sur E pour interagir' + (nearBuilding ? ', ou la touche Q pour entrer' : '') + '.';
         }
       }
       announce((this.guidanceFollowId ? `Vous avez rejoint ${t.name}.` : `Vous êtes arrivé à ${t.name}.`) + hint, 'interrupt');
@@ -1844,7 +1844,7 @@ const Game = {
     // On mémorise le lieu où l'on entre : tant qu'on est dedans, la touche E
     // rouvre CE lieu (son contenu interne), jamais l'extérieur.
     this.indoors = { name: lieu, ref: ref || null, kind: zone === 'cour' ? 'house' : 'poi' };
-    announce(`Vous entrez dans ${lieu}. Touche E pour interagir avec ce qui s'y trouve, Ctrl+Alt+E pour ressortir.`, 'assertive');
+    announce(`Vous entrez dans ${lieu}. Touche E pour interagir avec ce qui s'y trouve, touche Q ou Ctrl+Alt+E pour ressortir.`, 'assertive');
   },
   // Entrer dans un bâtiment via sa porte (annonce + son), puis ouvrir le lieu.
   enterBuilding(poi) {
@@ -1905,7 +1905,7 @@ const Game = {
     this.doorCue();
     const room = this._roomAt(ent.x, ent.y);
     this.interior.room = room ? room.name : null;
-    announce(`Vous entrez dans ${poi.name}. Pièce : ${room ? room.name : 'entrée'}. Allez au ${tpl.service.label} et appuyez sur E pour être servi. Ctrl+Alt+E pour sortir.`, 'assertive');
+    announce(`Vous entrez dans ${poi.name}. Pièce : ${room ? room.name : 'entrée'}. Allez au ${tpl.service.label} et appuyez sur E pour être servi. Touche Q ou Ctrl+Alt+E pour sortir.`, 'assertive');
     updateHud();
   },
   /* ==========================================================
@@ -1926,7 +1926,7 @@ const Game = {
     this.doorCue();
     const room = this._roomAt(ent.x, ent.y);
     this.interior.room = room ? room.name : null;
-    announce(`Vous entrez dans ${name}. Pièce : ${room ? room.name : 'entrée'}. Déplacez-vous pour explorer les pièces. E pour interagir, Ctrl+Alt+E pour sortir.`, 'assertive');
+    announce(`Vous entrez dans ${name}. Pièce : ${room ? room.name : 'entrée'}. Déplacez-vous pour explorer les pièces. E pour interagir, Touche Q ou Ctrl+Alt+E pour sortir.`, 'assertive');
     updateHud();
   },
   _roomAt(ix, iy) {
@@ -2110,7 +2110,7 @@ const Game = {
       if (noDoorEnter.includes(p.type) || inside) {
         targets.push({ d: UTIL.dist(p, this), label: `🏢 ${p.name}${inside ? ' (intérieur)' : ''}`, act: () => this.enterPOI(p) });
       } else {
-        targets.push({ d: UTIL.dist(p, this), label: `🚪 ${p.name} — Ctrl+Alt+E pour entrer`, act: () => announce(`Vous êtes devant ${p.name}. Faites Ctrl+Alt+E pour entrer.`, 'assertive') });
+        targets.push({ d: UTIL.dist(p, this), label: `🚪 ${p.name} — touche Q pour entrer`, act: () => announce(`Vous êtes devant ${p.name}. Appuyez sur la touche Q, ou Ctrl+Alt+E, pour entrer.`, 'assertive') });
       }
     });
     City.houses.filter(h => UTIL.dist(h, this) < 4).forEach(h => {
@@ -2118,7 +2118,7 @@ const Game = {
       if (inside) {
         targets.push({ d: UTIL.dist(h, this), label: `🏠 ${h.name || 'une maison'} (intérieur)`, act: () => this.enterHouse(h) });
       } else {
-        targets.push({ d: UTIL.dist(h, this), label: `🏠 ${h.name || 'une maison'} — Ctrl+Alt+E pour entrer`, act: () => announce(`Vous êtes devant ${h.name || 'cette maison'}. Faites Ctrl+Alt+E pour entrer.`, 'assertive') });
+        targets.push({ d: UTIL.dist(h, this), label: `🏠 ${h.name || 'une maison'} — touche Q pour entrer`, act: () => announce(`Vous êtes devant ${h.name || 'cette maison'}. Appuyez sur la touche Q, ou Ctrl+Alt+E, pour entrer.`, 'assertive') });
       }
     });
     City.vehicles.filter(v => !this.inVehicle && UTIL.dist(v, this) < 3).forEach(v => {

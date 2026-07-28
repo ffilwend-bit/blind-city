@@ -13,6 +13,7 @@ function setupExtraInput() {
     // Maj+P / Maj+B étaient capturés ici (téléphone / inventaire) au lieu
     // d'atteindre plus bas Maj+P (appareils de poche) et Maj+B (balises).
     if (key === 'p' && !ctrl && !alt && !shift) { e.preventDefault(); Phone.openPhone(); }
+    else if (key === 'q' && !ctrl && !alt && !shift) { e.preventDefault(); Game.toggleIndoor(); } // entrer / sortir d'un lieu — touche SIMPLE fiable partout (Ctrl+Alt+E est capté par l'OS sur beaucoup de portables)
     else if (key === 'k' && !ctrl && !alt && !shift) { e.preventDefault(); Computer.boot(); }
     else if (key === 'b' && !ctrl && !alt && !shift) { e.preventDefault(); Game.announceInventory(); }
     else if (key === 'l' && !ctrl && !alt) { e.preventDefault(); Game.announceLocation(); }
