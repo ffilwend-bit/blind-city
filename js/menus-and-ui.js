@@ -1046,8 +1046,13 @@ function setupInput() {
   // scan) doit céder la place à la nouvelle action que la personne déclenche.
   const interruptSpeech = () => { try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch (e) { /* ignore */ } const a = el('announcerPolite'); if (a) a.textContent = ''; };
 
-  function gStopHold() { if (gHoldTimer) { clearInterval(gHoldTimer); gHoldTimer = null; } gHoldDir = null; }
+  function gStopHold() { Game._touchDriveDir = null; if (gHoldTimer) { clearInterval(gHoldTimer); gHoldTimer = null; } gHoldDir = null; }
   function gStartHold(dir) {
+    // EN VÉHICULE : on ne fait pas d'appels pas-à-pas (la vitesse repartirait de
+    // zéro et « rien ne bougeait »). On mémorise la direction maintenue ; c'est
+    // la boucle de jeu qui accélère/tourne en CONTINU, exactement comme au
+    // clavier — d'où une conduite fluide au tactile.
+    if (Game.inVehicle && Game.vehicle) { Game._touchDriveDir = dir; interruptSpeech(); return; }
     if (gHoldDir === dir) return;
     gStopHold(); gHoldDir = dir; interruptSpeech();
     const step = () => {
@@ -1218,21 +1223,8 @@ function gameLoop() {
     // ignore déjà les répétitions système via e.repeat). Pour avancer plusieurs
     // fois / "courir", on appuie plusieurs fois. Le geste tactile "glisser et
     // garder" reste, lui, un déplacement continu voulu.
-    if (Game.inVehicle && Game.vehicle && !Game.vehicle.auto && !menuIsOpen) {
-      // Conduite : accélération/freinage à chaque image pour une sensation fluide
-      // et continue (contrairement au pas-à-pas piéton, volontairement cadencé).
-      const fwd = Game.keys.has('arrowup');
-      const back = Game.keys.has('arrowdown');
-      const { dx, dy } = Game.headingToDelta(Game.vehicle.heading);
-      if (fwd) Game.driveVehicle(dx, dy);
-      else if (back) Game.driveVehicle(-dx, -dy);
-      else Game.driveVehicle(0, 0); // relâché : freinage naturel jusqu'à l'arrêt
-      const now2 = Date.now();
-      if (now2 - (Game._lastContinuousMove || 0) > 220) {
-        if (Game.keys.has('arrowleft')) { Game.turn(-1); Game._lastContinuousMove = now2; }
-        else if (Game.keys.has('arrowright')) { Game.turn(1); Game._lastContinuousMove = now2; }
-      }
-    }
+    // Conduite continue (clavier OU tactile maintenu), tant qu'aucun menu n'est ouvert.
+    if (!menuIsOpen) Game.tickManualDrive();
     // Auto-drive step
     if (Game.inVehicle && Game.vehicle?.auto) Game.autoDriveStep();
 

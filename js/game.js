@@ -196,12 +196,20 @@ const Game = {
       }
     }
     // acceleration model
-    const accel = (dx === 0 && dy === 0) ? -cls.brake : (cls.accel || 0.06);
-    const targetSpeed = (dx === 0 && dy === 0) ? 0 : cls.maxSpeed * (v.fuel > 0 ? 1 : 0.3);
+    const accel = cls.accel || 0.06;
+    const targetSpeed = cls.maxSpeed * (v.fuel > 0 ? 1 : 0.3);
     const offroadFactor = (City.getTile(v.x, v.y) === 'route' || City.getTile(v.x, v.y) === 'rue') ? 1 : cls.offroad;
     const isReverse = (dx === 0 && dy === 0) ? false : this.isReverse(v.heading, dx, dy);
-    if (isReverse) v.speed = UTIL.clamp(v.speed - cls.accel, -cls.maxSpeed * 0.3, 0);
-    else v.speed = UTIL.clamp(v.speed + (dx === 0 && dy === 0 ? -cls.brake : accel * offroadFactor), -cls.maxSpeed * 0.3, targetSpeed * offroadFactor);
+    if (dx === 0 && dy === 0) {
+      // Freinage : on décélère jusqu'à l'ARRÊT, sans repartir tout seul en
+      // marche arrière (avant, le relâché faisait reculer le véhicule).
+      if (v.speed > 0) v.speed = Math.max(0, v.speed - cls.brake);
+      else if (v.speed < 0) v.speed = Math.min(0, v.speed + cls.brake);
+    } else if (isReverse) {
+      v.speed = UTIL.clamp(v.speed - cls.accel, -cls.maxSpeed * 0.3, 0);
+    } else {
+      v.speed = UTIL.clamp(v.speed + accel * offroadFactor, -cls.maxSpeed * 0.3, targetSpeed * offroadFactor);
+    }
     if (v.fuel <= 0 && v.speed > 0.1) { v.speed *= 0.5; announce('Panne d\'essence.', 'assertive'); }
     if (Math.abs(v.speed) < 0.05) v.speed = 0;
     const step = v.speed * (v.speed < 0 ? -1 : 1);
@@ -359,6 +367,26 @@ const Game = {
     if (Math.random() < 0.04) announce(`${remaining} mètres, cap ${bearing}, vers ${dest.name}.`, 'polite');
   },
 
+  // Conduite MANUELLE continue : appelée à chaque image de la boucle de jeu.
+  // Accélère/tourne tant qu'une direction est maintenue — au clavier (Game.keys)
+  // OU au tactile (Game._touchDriveDir) — pour une conduite fluide sans dépendre
+  // de la répétition des touches, et surtout pour que le tactile fonctionne
+  // (avant, seul le clavier était pris en compte : rien ne bougeait sur mobile).
+  tickManualDrive() {
+    if (!this.inVehicle || !this.vehicle || this.vehicle.auto) return;
+    const td = this._touchDriveDir;
+    const fwd = Game.keys.has('arrowup') || td === 'up';
+    const back = Game.keys.has('arrowdown') || td === 'down';
+    const { dx, dy } = this.headingToDelta(this.vehicle.heading);
+    if (fwd) this.driveVehicle(dx, dy);
+    else if (back) this.driveVehicle(-dx, -dy);
+    else this.driveVehicle(0, 0); // relâché : freinage naturel jusqu'à l'arrêt
+    const now2 = Date.now();
+    if (now2 - (this._lastContinuousMove || 0) > 220) {
+      if (Game.keys.has('arrowleft') || td === 'left') { this.turn(-1); this._lastContinuousMove = now2; }
+      else if (Game.keys.has('arrowright') || td === 'right') { this.turn(1); this._lastContinuousMove = now2; }
+    }
+  },
   // Conduite automatique vers un point précis {name,x,y}.
   setAutoDriveTo(dest) {
     if (!this.inVehicle || !this.vehicle) return announce('Montez d\'abord dans un véhicule.', 'assertive');
@@ -615,7 +643,8 @@ const Game = {
       setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
     }
     this.vehicle = v; this.inVehicle = true; this.altitude = v.altitude || 0; this.floor = 0;
-    if (cls?.human || cls?.doors === 0) announce(`Vous enfourchez ${v.name}. Flèches pour pédaler et tourner, espace pour freiner.`, 'assertive');
+    if (cls?.human) announce(`Vous enfourchez ${v.name}. Flèches pour pédaler et tourner, espace pour freiner.`, 'assertive');
+    else if (cls?.doors === 0) announce(`Vous enfourchez ${v.name}. Flèches pour accélérer et tourner, espace pour freiner.`, 'assertive'); // moto / scooter / quad : on accélère, on ne pédale pas
     else announce(`Vous montez au volant de ${v.name}. Flèches pour conduire, espace pour freiner, M pour conduite auto.`, 'assertive');
     if (this.activeMission && this.activeMission.type === 'convoyage' && this.activeMission.vehicleId === v.id && !this.deliveryState) this.startVehicleDelivery(this.activeMission);
     this._vehProg = null; // réinitialise le suivi de progression
