@@ -1928,10 +1928,19 @@ const Game = {
     if (obj) announce(`Objet : ${obj.name}. E pour l'utiliser.`, 'polite');
     if (it.service && it.service.x === nx && it.service.y === ny) announce(`${it.service.label}. Appuyez sur E pour être servi.`, 'polite');
   },
-  // Meuble/objet posé sur une case de l'intérieur, s'il y en a un.
+  // Meuble/objet posé exactement sur une case (pour l'annonce en marchant).
   _objectAt(ix, iy) {
     const it = this.interior; if (!it || !it.ref || !it.ref.furniture) return null;
     return it.ref.furniture.find(f => f.ix === ix && f.iy === iy) || null;
+  },
+  // Meuble sur la case OU juste à côté (pour interagir sans alignement pixel
+  // parfait : « impossible d'interagir avec certains objets » venait de là).
+  _objectNear(ix, iy) {
+    const it = this.interior; if (!it || !it.ref || !it.ref.furniture) return null;
+    return it.ref.furniture
+      .map(f => ({ f, d: Math.max(Math.abs(f.ix - ix), Math.abs(f.iy - iy)) }))
+      .filter(o => o.d <= 1)
+      .sort((a, b) => a.d - b.d)[0]?.f || null;
   },
   // Première case libre de la pièce (celle où l'on se tient en priorité).
   _freeFurnitureSpot(roomName, prefX, prefY) {
@@ -1990,8 +1999,8 @@ const Game = {
       if (it.service && Math.abs(it.ix - it.service.x) <= 1 && Math.abs(it.iy - it.service.y) <= 1) return this.enterPOI(it.poi);
       return announce(`Pièce : ${it.room || 'entrée'}. Allez au ${it.service ? it.service.label : 'comptoir'} pour être servi.`, 'assertive');
     }
-    // Un meuble sous les pieds : on l'utilise directement.
-    const obj = this._objectAt(it.ix, it.iy);
+    // Un meuble sous les pieds OU juste à côté : on l'utilise directement.
+    const obj = this._objectNear(it.ix, it.iy);
     if (obj) return this.interactFurniture(obj);
     // Sinon : menu de la pièce (acheter/placer un meuble, rangement de la maison).
     if (typeof openHouseRoomMenu === 'function') return openHouseRoomMenu();

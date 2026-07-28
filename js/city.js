@@ -252,6 +252,7 @@ const City = {
     const pos = this.findFree(d.x1 + 2, d.y1 + 2, d.x2 - 2, d.y2 - 2);
     this.setTile(pos.x, pos.y, type);
     const poi = { id: type + '_custom_' + Date.now(), name, type, x: pos.x, y: pos.y, floors: floors || 1, stock: [] };
+    this.assignPOIStock(poi); // stock selon le type (sinon boutique vide, rien à acheter)
     this.pois.push(poi);
     return poi;
   },
@@ -360,19 +361,21 @@ const City = {
     add('Restaurant de Kongoussi', 'restaurant', 'Kongoussi', 1);
     add('Pharmacie de Kongoussi', 'pharmacie', 'Kongoussi', 1);
     // Populate shop stocks
-    for (const p of this.pois) {
-      if (p.type === 'magasin') p.stock = this.generateStock('food+general', 40);
-      if (p.type === 'armurerie') p.stock = this.generateStock('legal_weapons', 15);
-      if (p.type === 'marche_noir') p.stock = [...this.generateStock('illegal_weapons', 25), { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier, même un uniforme de policier caché dessous.' }];
-      if (p.type === 'marche_noir_lointain') p.stock = [...this.generateStock('illegal_weapons', 35), { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier.' }];
-      if (p.type === 'pharmacie') p.stock = this.generateStock('medical', 20);
-      if (p.type === 'restaurant') p.stock = this.generateStock('food', 25);
-      if (p.type === 'vetements') p.stock = this.generateStock('clothes', 30);
-      if (p.type === 'concessionnaire') p.stock = [];
-      if (p.type === 'police') {
-        p.stock = [{ id: 'uniforme_police', name: 'Uniforme de police', category: 'vetement_police', price: 15000, q: 99, legal: true, desc: 'Tenue officielle, réservée aux policiers en service. Reconnaissable par tous, décrite comme telle.' }];
-      }
-    }
+    for (const p of this.pois) this.assignPOIStock(p);
+  },
+  // Remplit le stock d'un POI selon son type. Réutilisé pour les commerces
+  // ajoutés via le panneau administrateur (sinon leur stock restait vide et
+  // l'on ne pouvait rien y acheter).
+  assignPOIStock(p) {
+    if (p.type === 'magasin') p.stock = this.generateStock('food+general', 40);
+    else if (p.type === 'armurerie') p.stock = this.generateStock('legal_weapons', 15);
+    else if (p.type === 'marche_noir') p.stock = [...this.generateStock('illegal_weapons', 25), { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier, même un uniforme de policier caché dessous.' }];
+    else if (p.type === 'marche_noir_lointain') p.stock = [...this.generateStock('illegal_weapons', 35), { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier.' }];
+    else if (p.type === 'pharmacie') p.stock = this.generateStock('medical', 20);
+    else if (p.type === 'restaurant') p.stock = this.generateStock('food', 25);
+    else if (p.type === 'vetements') p.stock = this.generateStock('clothes', 30);
+    else if (p.type === 'concessionnaire') p.stock = [];
+    else if (p.type === 'police') p.stock = [{ id: 'uniforme_police', name: 'Uniforme de police', category: 'vetement_police', price: 15000, q: 99, legal: true, desc: 'Tenue officielle, réservée aux policiers en service. Reconnaissable par tous, décrite comme telle.' }];
   },
 
   generateStock(kind, count) {
