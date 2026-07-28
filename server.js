@@ -244,6 +244,8 @@ const players = new Map();
 const newsArticles = [];
 /** @type {Map<string, any>} callId -> { callerId, targetId, status, timeout } */
 const calls = new Map();
+/** @type {Map<string, {id:string,name:string,role:string,roleName:string,time:number}>} candidatures de métier en attente, par id de joueur */
+const jobRequests = new Map();
 
 function publicState(p) {
   return {
@@ -457,9 +459,33 @@ wss.on('connection', (ws, req) => {
       send(target.ws, { type: 'you_are_released', byName: `${player.firstName} ${player.lastName}`, atHospital: !!msg.atHospital });
     }
     else if (msg.type === 'job_request') {
-      // Une candidature de métier : les administrateurs connectés en sont informés.
-      const roleName = safeName(msg.roleName, '', 60) || safeName(msg.role, '', 40);
+      // Candidature de métier : mise en file d'attente ET diffusée aux admins,
+      // qui pourront la lister et l'approuver (voir staff_list_job_requests).
+      const role = safeName(msg.role, '', 40);
+      const roleName = safeName(msg.roleName, '', 60) || role;
+      jobRequests.set(player.id, { id: player.id, name: `${player.firstName} ${player.lastName}`, role, roleName, time: Date.now() });
       broadcastStaffLog(`${player.firstName} ${player.lastName} demande le métier « ${roleName} ».`);
+    }
+    else if (msg.type === 'staff_list_job_requests') {
+      if (!player.staffRole) { send(ws, { type: 'staff_error', text: 'Réservé au mode staff.' }); return; }
+      // Seules les demandes de joueurs encore connectés.
+      const list = [...jobRequests.values()].filter(r => players.has(r.id));
+      send(ws, { type: 'staff_job_requests', requests: list });
+    }
+    else if (msg.type === 'staff_grant_job') {
+      if (!player.staffRole) { send(ws, { type: 'staff_error', text: 'Réservé au mode staff.' }); return; }
+      const target = players.get(msg.targetId);
+      const req = jobRequests.get(msg.targetId);
+      jobRequests.delete(msg.targetId);
+      if (!target || !req) { send(ws, { type: 'staff_error', text: 'Demande introuvable (joueur déconnecté ?).' }); return; }
+      if (msg.approve) {
+        target.role = req.role;
+        send(target.ws, { type: 'job_granted', role: req.role, roleName: req.roleName, byName: `${player.firstName} ${player.lastName}` });
+      } else {
+        send(target.ws, { type: 'job_rejected', roleName: req.roleName, byName: `${player.firstName} ${player.lastName}` });
+      }
+      send(ws, { type: 'staff_job_review_result', name: req.name, roleName: req.roleName, approved: !!msg.approve });
+      broadcastStaffLog(`${player.firstName} ${player.lastName} a ${msg.approve ? 'accordé' : 'refusé'} le métier « ${req.roleName} » à ${req.name}.`);
     }
     else if (msg.type === 'appoint_recruiter') {
       const target = players.get(msg.targetId);
@@ -1027,6 +1053,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('close', () => {
     players.delete(id);
+    jobRequests.delete(id);
     for (const [callId, call] of calls.entries()) {
       if (call.callerId === id || call.targetId === id) {
         clearTimeout(call.timeout);

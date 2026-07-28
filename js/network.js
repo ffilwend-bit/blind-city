@@ -217,6 +217,17 @@ const Net = {
       if (Game.unconscious) Game.wakeAtHospital(msg.fromName);
     } else if (msg.type === 'staff_pending_accounts') {
       if (this._pendingAccountsCallback) this._pendingAccountsCallback(msg.accounts || []);
+    } else if (msg.type === 'staff_job_requests') {
+      if (this._jobRequestsCallback) this._jobRequestsCallback(msg.requests || []);
+    } else if (msg.type === 'staff_job_review_result') {
+      announce(`${msg.name} : métier « ${msg.roleName} » ${msg.approved ? 'accordé' : 'refusé'}.`, 'assertive');
+    } else if (msg.type === 'job_granted') {
+      Roles.pending = null;
+      Roles.set(msg.role);
+      announce(`${msg.byName} vous accorde le métier ${msg.roleName || (Roles.list[msg.role] && Roles.list[msg.role].name) || msg.role}.`, 'assertive');
+    } else if (msg.type === 'job_rejected') {
+      Roles.pending = null;
+      announce(`Votre demande de métier « ${msg.roleName} » a été refusée par ${msg.byName}.`, 'assertive');
     } else if (msg.type === 'staff_review_result') {
       announce(`Compte @${msg.username} : ${msg.status === 'approved' ? 'approuvé' : 'rejeté'}.`, 'assertive');
     } else if (msg.type === 'register_result' || msg.type === 'login_result' || msg.type === 'security_question_result' || msg.type === 'reset_password_result') {

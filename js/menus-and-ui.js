@@ -351,6 +351,7 @@ function openAdminMenu() {
       items.push({ id: 'approve', title: '✅ Approuver la candidature', desc: 'Valide le métier demandé.' });
       items.push({ id: 'reject', title: '❌ Refuser la candidature', desc: 'Refuse le métier demandé.' });
     }
+    items.push({ id: 'jobrequests', title: '📨 Demandes de métier des joueurs', desc: 'Voir les candidatures de métier envoyées par les joueurs connectés, et les accorder ou refuser.' });
     items.push({ id: 'recruiter', title: '🧑‍💼 Nommer un recruteur', desc: 'Autoriser une personne à valider les candidatures d\'un métier précis (chaque patron peut recruter ses employés).' });
     items.push({ id: 'pendingaccounts', title: '🎭 Comptes en attente (entretien RP)', desc: 'Voir les nouveaux comptes dont l\'entretien RP n\'a pas été assez concluant, et décider de les accepter ou non.' });
   }
@@ -368,8 +369,35 @@ function openAdminMenu() {
     else if (it.id === 'approve') { Roles.approve(); closeMenu(); }
     else if (it.id === 'reject') { Roles.reject(); closeMenu(); }
     else if (it.id === 'recruiter') { openRecruiterAppointMenu(); }
+    else if (it.id === 'jobrequests') { openStaffJobRequestsMenu(); }
     else if (it.id === 'pendingaccounts') { openStaffPendingAccountsMenu(); }
   });
+}
+// Demandes de métier des joueurs connectés : l'admin les liste et les accorde
+// ou refuse. Réservé au multijoueur (les candidatures transitent par le serveur).
+function openStaffJobRequestsMenu() {
+  if (!Net.connected) { closeMenu(); return announce('Nécessite une connexion au serveur pour recevoir les demandes des joueurs.', 'assertive'); }
+  Net.send({ type: 'staff_list_job_requests' });
+  Net._jobRequestsCallback = (requests) => {
+    el('menuTitle').textContent = 'Demandes de métier';
+    if (!requests.length) { renderMenu([{ id: 'empty', title: 'Aucune demande en attente', desc: 'Personne n\'a fait de demande de métier pour le moment.' }], () => {}); el('menuOverlay').style.display = 'flex'; return; }
+    const items = requests.map(r => ({ id: r.id, title: `${r.name} → ${r.roleName}`, desc: 'Accorder ou refuser ce métier.', req: r }));
+    renderMenu(items, (sel) => {
+      if (!sel.req) return;
+      el('menuTitle').textContent = `${sel.req.name} : ${sel.req.roleName}`;
+      const sub = [
+        { id: 'grant', title: '✅ Accorder le métier', desc: `${sel.req.name} deviendra ${sel.req.roleName}.` },
+        { id: 'refuse', title: '❌ Refuser', desc: 'La demande est rejetée.' },
+        { id: 'back', title: '↩️ Retour', desc: '' },
+      ];
+      renderMenu(sub, (s) => {
+        if (s.id === 'back') return openStaffJobRequestsMenu();
+        Net.send({ type: 'staff_grant_job', targetId: sel.req.id, role: sel.req.role, approve: s.id === 'grant' });
+        closeMenu();
+      });
+    });
+    el('menuOverlay').style.display = 'flex';
+  };
 }
 // Nomination d'un recruteur — par listes déroulantes (plus de saisie de texte) :
 // on choisit d'abord le métier dans un menu, puis la personne parmi les joueurs
