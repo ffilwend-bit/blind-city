@@ -353,16 +353,17 @@ const GuideDog = {
     // Besoins qui montent doucement.
     if (now - d._lastNeed > 4000) {
       d._lastNeed = now;
-      // Épuisement bien plus lent (environ 4× plus long à s'user) : le chien
-      // tient beaucoup plus longtemps avant d'avoir faim, soif ou d'être fatigué.
       d.hunger = Math.min(100, d.hunger + 0.15);
       d.thirst = Math.min(100, d.thirst + 0.22);
-      if (d.leashed && d.target) d.fatigue = Math.min(100, d.fatigue + 0.2);
+      // ENDURANCE ×50 : la fatigue monte 50 fois plus lentement qu'avant — le
+      // chien peut guider très, très longtemps avant de fatiguer.
+      if (d.leashed && d.target) d.fatigue = Math.min(100, d.fatigue + 0.004);
       // Halètement si soif ou fatigue élevées.
       if ((d.thirst > 70 || d.fatigue > 70) && now - d._lastPant > 6000) { d._lastPant = now; this.pant(); }
-      // Trop faim/soif : santé qui baisse, gémissement.
-      if (d.hunger >= 100 || d.thirst >= 100) { d.health = Math.max(0, d.health - 1); if (Math.random() < 0.3) this.whine(); }
-      if (d.health <= 0) return this.die('épuisement');
+      // Le chien est IMMORTEL par fatigue / épuisement : la faim ou la soif le
+      // font seulement gémir — elles ne le tuent JAMAIS (seules les blessures
+      // le peuvent, voir die('blessures')).
+      if (d.hunger >= 100 || d.thirst >= 100) { if (Math.random() < 0.3) this.whine(); }
     }
 
     if (!d.active) return; // désactivé sur place : ne bouge pas
