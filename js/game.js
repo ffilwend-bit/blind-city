@@ -704,10 +704,26 @@ const Game = {
   openGarage() {
     if (!this.ownedVehicles.length) return announce('Vous ne possédez pas de véhicule.', 'assertive');
     const owned = this.ownedVehicles.map(id => City.vehicles.find(v => v.id === id)).filter(Boolean);
-    if (!owned.length) return;
-    const v = owned[0];
-    v.x = this.x + 1; v.y = this.y + 1; v.fuel = 1; v.hp = 100; v.locked = false;
-    announce(`Garage : ${v.name} sorti à côté de vous.`, 'assertive');
+    if (!owned.length) return announce('Aucun de vos véhicules n\'est disponible pour le moment.', 'assertive');
+    const summon = (v) => {
+      v.x = this.x + 1; v.y = this.y + 1; v.fuel = 1; v.hp = 100; v.locked = false;
+      if (window.AudioLib) AudioLib.playOnce('sfx_notification', { volume: 0.4 });
+      announce(`${v.name} sorti du garage, juste à côté de vous.`, 'assertive');
+    };
+    // Un seul véhicule : on le fait venir directement. Plusieurs : on LISTE tous
+    // les véhicules possédés (moto, voiture...) pour appeler celui qu'on veut.
+    if (owned.length === 1) return summon(owned[0]);
+    if (typeof ensureMenuOpen === 'function') ensureMenuOpen();
+    el('menuTitle').textContent = '🚗 Mon garage — appeler un véhicule';
+    const items = owned.map((v, i) => ({
+      id: 'veh_' + i,
+      title: v.name,
+      desc: `${VEHICLE_CATALOG[v.type]?.type || v.type}, à ${Math.round(UTIL.dist(v, this) * CONFIG.METERS_PER_TILE)} m.`,
+      veh: v,
+    }));
+    renderMenu(items, (it) => { if (it.veh) { closeMenu(); summon(it.veh); } });
+    el('menuOverlay').style.display = 'flex';
+    announce(`Vous possédez ${owned.length} véhicules. Choisissez celui à faire venir à côté de vous.`, 'assertive');
   },
 
   // Inventory system
