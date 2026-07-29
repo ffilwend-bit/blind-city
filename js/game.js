@@ -211,7 +211,14 @@ const Game = {
     } else {
       v.speed = UTIL.clamp(v.speed + accel * offroadFactor, -cls.maxSpeed * 0.3, targetSpeed * offroadFactor);
     }
-    if (v.fuel <= 0 && v.speed > 0.1) { v.speed *= 0.5; announce('Panne d\'essence.', 'assertive'); }
+    if (v.fuel <= 0 && v.speed > 0.1) {
+      v.speed *= 0.5;
+      // Throttlé : sinon annoncé en 'assertive' (coupe la parole) à chaque
+      // image tant qu'on essaie d'avancer, plusieurs dizaines de fois par
+      // seconde — un spam vocal incessant.
+      const now = Date.now();
+      if (now - (this._lastFuelWarn || 0) > 4000) { this._lastFuelWarn = now; announce('Panne d\'essence.', 'assertive'); }
+    }
     if (Math.abs(v.speed) < 0.05) v.speed = 0;
     // Garder le SIGNE de la vitesse : positif = avance dans le cap, négatif =
     // recule (déplacement inverse du cap). Avant, step était toujours positif
@@ -3085,6 +3092,13 @@ const Game = {
   abandonMission() {
     if (!this.activeMission) return announce('Aucune mission en cours à annuler.', 'assertive');
     const m = this.activeMission;
+    // Véhicule créé spécifiquement pour cette mission (convoyage, recel...) :
+    // sans ça, il restait pour toujours dans City.vehicles à l'abandon (alors
+    // qu'il est bien retiré à la complétion), polluant radar/scan à vie.
+    // On ne le retire pas si le joueur est dedans (il reste utilisable normalement).
+    if (m.vehicleId && !(this.inVehicle && this.vehicle?.id === m.vehicleId)) {
+      City.vehicles = City.vehicles.filter(v => v.id !== m.vehicleId);
+    }
     m.active = false; m.completed = false;
     this.activeMission = null;
     // Réinitialise tous les états d'étape éventuels pour repartir proprement.

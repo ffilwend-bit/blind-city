@@ -1443,6 +1443,13 @@ function startGame(seed) {
   // Intervals : protégés eux aussi, pour que gameLoop() démarre toujours ci-dessous
   try {
     setInterval(moveNPCs, 1200);
+    // Purge les PNJ de mission "envolés" (dead + x=-999 : montés dans un
+    // véhicule, escortés, capturés...) : sans ça, City.npcs grossissait sans
+    // fin, ralentissant tous les filter(!n.dead) des boucles chaudes. Délai
+    // généreux (3 min) pour ne jamais interférer avec une mission en cours.
+    // Les cadavres normaux (killNPC) gardent leurs vraies coordonnées et ne
+    // sont donc jamais concernés.
+    setInterval(() => { City.npcs = City.npcs.filter(n => !(n.dead && n.x === -999)); }, 180000);
     setInterval(() => Game.survivalTick(), 2000);
     setInterval(() => {
       if (Game.health < 100 && Game.hunger < 50 && Game.thirst < 50) Game.heal(0.5);
