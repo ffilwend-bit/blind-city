@@ -280,12 +280,12 @@ const City = {
   },
 
   generatePOIs() {
-    const add = (name, type, dName, count) => {
+    const add = (name, type, dName, count, extra) => {
       for (let i = 0; i < count; i++) {
         const d = this.districts.find(x => x.name === dName) || this.districts[0];
         const pos = this.findFree(d.x1 + 2, d.y1 + 2, d.x2 - 2, d.y2 - 2);
         this.setTile(pos.x, pos.y, type);
-        this.pois.push({ id: type + '_' + i, name, type, x: pos.x, y: pos.y, floors: type === 'immeuble' ? UTIL.randInt(2, CONFIG.MAX_HEIGHT) : 1, stock: [] });
+        this.pois.push({ id: type + '_' + i, name, type, x: pos.x, y: pos.y, floors: type === 'immeuble' ? UTIL.randInt(2, CONFIG.MAX_HEIGHT) : 1, stock: [], ...(extra || {}) });
       }
     };
     add('Commissariat central', 'police', 'Koulouba', CONFIG.POLICE_STATIONS);
@@ -326,9 +326,15 @@ const City = {
     add('Port du barrage', 'port', 'Zone du barrage', 2);
     add('Station-service', 'station_essence', 'Gounghin', 3);
     add('Station-service de Koulouba', 'station_essence', 'Koulouba', 2);
-    add('Parking de Kossodo', 'garage', 'Zone industrielle de Kossodo', 2);
-    add('Parking de Koulouba', 'garage', 'Koulouba', 2);
-    add('Parking de Gounghin', 'garage', 'Gounghin', 1);
+    // Garages principaux : les 3 seuls garages-relais de la ville où un
+    // véhicule possédé peut être livré par un chauffeur PNJ via le téléphone
+    // (voir Game.requestVehicleDelivery). Les autres "Parking de X" restent de
+    // simples emplacements de stationnement, sans service de livraison.
+    add('Garage principal 1', 'garage', 'Zone industrielle de Kossodo', 1, { principal: true });
+    add('Parking de Kossodo', 'garage', 'Zone industrielle de Kossodo', 1);
+    add('Garage principal 2', 'garage', 'Koulouba', 1, { principal: true });
+    add('Parking de Koulouba', 'garage', 'Koulouba', 1);
+    add('Garage principal 3', 'garage', 'Gounghin', 1, { principal: true });
     add('Entrepôt', 'entrepot', 'Zone industrielle de Kossodo', 4);
     add('Usine', 'usine', 'Zone industrielle de Kossodo', 3);
     add('Bar', 'bar', 'Gounghin', 2);

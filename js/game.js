@@ -777,30 +777,112 @@ const Game = {
     updateHud();
   },
 
-  // Garage: spawn owned vehicle
+  // ===== Garages et livraison de véhicule (façon GTA RP) =====
+  // Un véhicule n'apparaît plus n'importe où sur demande : sa position RÉELLE
+  // (v.x, v.y) détermine où il se trouve. S'il est garé dans un des 3 garages
+  // principaux de la ville, un chauffeur PNJ peut le livrer via le téléphone.
+  // S'il est chez soi (maison possédée), il faut aller le chercher sur place,
+  // ou demander son transfert vers un garage principal. Un aéronef n'est
+  // jamais livré : uniquement récupérable là où il se trouve physiquement.
+  GARAGE_RADIUS: 5, // ~20 m : rayon de détection "garé à cet endroit"
+  mainGarages() { return City.pois.filter(p => p.type === 'garage' && p.principal); },
+  // Détermine où se trouve RÉELLEMENT un véhicule possédé.
+  getVehicleLocationInfo(v) {
+    const cls = VEHICLE_CATALOG[v.type];
+    if (cls?.flies) {
+      const airport = City.pois.find(p => p.type === 'aeroport' && UTIL.dist(v, p) < this.GARAGE_RADIUS * 3);
+      return airport ? { kind: 'aeroport', poi: airport } : { kind: 'ailleurs' };
+    }
+    const garage = this.mainGarages().find(g => UTIL.dist(v, g) < this.GARAGE_RADIUS);
+    if (garage) return { kind: 'garage_principal', poi: garage };
+    const house = this.ownedHouses.map(hid => City.houses.find(h => h.id === hid)).find(h => h && UTIL.dist(v, h) < this.GARAGE_RADIUS);
+    if (house) return { kind: 'garage_maison', house };
+    return { kind: 'ailleurs' };
+  },
+  // Phrase courte décrivant OÙ se trouve le véhicule (catégorie), pour le
+  // téléphone et pour expliquer pourquoi une livraison est refusée. Ne donne
+  // pas la distance/le cap : voir describeVehicleLocationFull pour ça.
+  describeVehicleLocation(v) {
+    const loc = this.getVehicleLocationInfo(v);
+    if (loc.kind === 'garage_principal') return `garé au ${loc.poi.name}`;
+    if (loc.kind === 'garage_maison') return `garé dans votre garage personnel (${loc.house.name || 'votre maison'})`;
+    if (loc.kind === 'aeroport') return `à ${loc.poi.name}`;
+    return `dernier emplacement connu, quartier ${City.getDistrictAt(v.x, v.y).name}`;
+  },
+  // Description complète (catégorie + distance + cap depuis le joueur), pour
+  // la fonction "Localiser" du téléphone : dire seulement "garage principal 2"
+  // ne suffit pas à s'y rendre sans repère de direction/distance.
+  describeVehicleLocationFull(v) {
+    const d = Math.round(UTIL.dist(v, this) * CONFIG.METERS_PER_TILE);
+    const bearing = UTIL.bearing(v.x - this.x, v.y - this.y);
+    return `${this.describeVehicleLocation(v)}, à ${d} mètres, cap ${bearing}`;
+  },
+  // Menu du garage (touche O) : choisir un véhicule possédé pour demander sa
+  // livraison (s'il est dans un garage principal) — la position affichée
+  // vous dit tout de suite si c'est possible ou pas.
   openGarage() {
     if (!this.ownedVehicles.length) return announce('Vous ne possédez pas de véhicule.', 'assertive');
     const owned = this.ownedVehicles.map(id => City.vehicles.find(v => v.id === id)).filter(Boolean);
     if (!owned.length) return announce('Aucun de vos véhicules n\'est disponible pour le moment.', 'assertive');
-    const summon = (v) => {
-      v.x = this.x + 1; v.y = this.y + 1; v.fuel = 1; v.hp = 100; v.locked = false;
-      if (window.AudioLib) AudioLib.playOnce('sfx_notification', { volume: 0.4 });
-      announce(`${v.name} sorti du garage, juste à côté de vous.`, 'assertive');
-    };
-    // Un seul véhicule : on le fait venir directement. Plusieurs : on LISTE tous
-    // les véhicules possédés (moto, voiture...) pour appeler celui qu'on veut.
-    if (owned.length === 1) return summon(owned[0]);
+    if (owned.length === 1) return this.requestVehicleDelivery(owned[0]);
     if (typeof ensureMenuOpen === 'function') ensureMenuOpen();
     el('menuTitle').textContent = '🚗 Mon garage — appeler un véhicule';
     const items = owned.map((v, i) => ({
       id: 'veh_' + i,
       title: v.name,
-      desc: `${VEHICLE_CATALOG[v.type]?.type || v.type}, à ${Math.round(UTIL.dist(v, this) * CONFIG.METERS_PER_TILE)} m.`,
+      desc: `${VEHICLE_CATALOG[v.type]?.type || v.type}, ${this.describeVehicleLocation(v)}.`,
       veh: v,
     }));
-    renderMenu(items, (it) => { if (it.veh) { closeMenu(); summon(it.veh); } });
+    renderMenu(items, (it) => { if (it.veh) { closeMenu(); this.requestVehicleDelivery(it.veh); } });
     el('menuOverlay').style.display = 'flex';
-    announce(`Vous possédez ${owned.length} véhicules. Choisissez celui à faire venir à côté de vous.`, 'assertive');
+    announce(`Vous possédez ${owned.length} véhicules. Choisissez celui à faire livrer.`, 'assertive');
+  },
+  // Demande la livraison d'un véhicule par un chauffeur PNJ : uniquement
+  // possible s'il est actuellement garé dans un des 3 garages principaux.
+  requestVehicleDelivery(v) {
+    const cls = VEHICLE_CATALOG[v.type];
+    if (cls?.flies) return announce(`${v.name} est un aéronef : pas de livraison possible. Il ne se récupère que là où il se trouve — ${this.describeVehicleLocationFull(v)}.`, 'assertive');
+    if (v.pendingService) return announce(`${v.name} est déjà en cours de service (${v.pendingService === 'livraison' ? 'livraison' : 'transfert'} en cours).`, 'assertive');
+    const loc = this.getVehicleLocationInfo(v);
+    if (loc.kind !== 'garage_principal') {
+      const extra = loc.kind === 'garage_maison' ? ' Depuis le téléphone, vous pouvez demander son transfert vers un garage principal pour pouvoir ensuite le faire livrer.' : '';
+      return announce(`${v.name} n'est pas dans un garage principal (${this.describeVehicleLocationFull(v)}) : impossible de le faire livrer.${extra}`, 'assertive');
+    }
+    const delaySec = UTIL.randInt(30, 60);
+    v.pendingService = 'livraison';
+    announce(`Un chauffeur va vous livrer ${v.name} depuis ${loc.poi.name}. Patientez environ ${delaySec} secondes.`, 'assertive');
+    setTimeout(() => {
+      v.pendingService = null;
+      if (!City.vehicles.includes(v)) return; // vendu/supprimé entre-temps
+      v.x = Math.round(this.x) + 1; v.y = Math.round(this.y) + 1; v.fuel = Math.max(v.fuel, 0.5); v.locked = false;
+      if (window.AudioLib) AudioLib.playOnce('sfx_notification', { volume: 0.4 });
+      announce(`${v.name} vient d'être livré juste à côté de vous.`, 'assertive');
+    }, delaySec * 1000);
+  },
+  // Demande le transfert d'un véhicule depuis le garage personnel (maison)
+  // vers un des 3 garages principaux, pour pouvoir ensuite le faire livrer.
+  openVehicleTransferMenu(v) {
+    const loc = this.getVehicleLocationInfo(v);
+    if (loc.kind !== 'garage_maison') return announce(`${v.name} n'est pas dans un garage personnel (${this.describeVehicleLocationFull(v)}).`, 'assertive');
+    if (v.pendingService) return announce(`${v.name} est déjà en cours de service.`, 'assertive');
+    const garages = this.mainGarages();
+    if (typeof ensureMenuOpen === 'function') ensureMenuOpen();
+    el('menuTitle').textContent = `Transférer ${v.name} vers...`;
+    const items = garages.map((g, i) => ({ id: 'g_' + i, title: g.name, desc: `${Math.round(UTIL.dist(g, this) * CONFIG.METERS_PER_TILE)} m d'ici.`, garage: g }));
+    renderMenu(items, (it) => { if (it.garage) { closeMenu(); this.transferVehicleToGarage(v, it.garage); } });
+    el('menuOverlay').style.display = 'flex';
+    announce(`Choisissez le garage principal vers lequel transférer ${v.name}.`, 'assertive');
+  },
+  transferVehicleToGarage(v, garage) {
+    const delaySec = UTIL.randInt(60, 120);
+    v.pendingService = 'transfert';
+    announce(`Transfert de ${v.name} vers ${garage.name} demandé. Cela prendra quelques minutes.`, 'assertive');
+    setTimeout(() => {
+      v.pendingService = null;
+      if (!City.vehicles.includes(v)) return;
+      v.x = garage.x; v.y = garage.y; v.locked = false;
+      announce(`${v.name} est arrivé au ${garage.name}. Vous pouvez maintenant demander sa livraison depuis le téléphone.`, 'assertive');
+    }, delaySec * 1000);
   },
 
   // Inventory system

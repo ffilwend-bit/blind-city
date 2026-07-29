@@ -630,21 +630,33 @@ const Phone = {
       else VoiceChat.stop();
     }
   },
+  // Garage : montre où se trouve RÉELLEMENT chaque véhicule possédé (garage
+  // principal, garage personnel, aéroport, ou ailleurs) et propose seulement
+  // les actions cohérentes avec cet emplacement — un véhicule chez soi ne
+  // s'appelle pas par livraison, un aéronef ne se livre jamais (voir
+  // Game.getVehicleLocationInfo / requestVehicleDelivery / openVehicleTransferMenu).
   renderGarageApp() {
     const div = el('garageAppList'); div.innerHTML = '';
     const owned = Game.ownedVehicles.map(id => City.vehicles.find(v => v.id === id)).filter(Boolean);
     if (!owned.length) div.innerHTML = '<p style="color:var(--muted);font-size:0.85rem;">Aucun véhicule possédé.</p>';
     owned.forEach(v => {
       const cls = VEHICLE_CATALOG[v.type];
+      const loc = Game.getVehicleLocationInfo(v);
+      const locLabel = loc.kind === 'garage_principal' ? `📍 ${loc.poi.name}` : loc.kind === 'garage_maison' ? `📍 Garage personnel (${loc.house.name || 'maison'})` : loc.kind === 'aeroport' ? `📍 ${loc.poi.name}` : '📍 Ailleurs en ville';
+      const serviceLabel = v.pendingService ? ` — ${v.pendingService === 'livraison' ? 'livraison en cours' : 'transfert en cours'}` : '';
       const p = document.createElement('div'); p.style.cssText = 'background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;';
-      p.innerHTML = `<strong>${v.name}</strong><br><span style="color:var(--muted);font-size:0.75rem;">Essence ${Math.round(v.fuel * 100)}%, État ${Math.round(v.hp)}%, Position ${v.x},${v.y}</span><br>
-      <button class="phone-btn" data-id="${v.id}">📍 Localiser</button> <button class="phone-btn" data-id="${v.id}">🚗 Appeler</button>`;
+      let buttons = `<button class="phone-btn" data-act="locate" data-id="${v.id}">📍 Localiser</button>`;
+      if (!v.pendingService) {
+        if (!cls?.flies && loc.kind === 'garage_principal') buttons += ` <button class="phone-btn" data-act="call" data-id="${v.id}">🚗 Appeler (livraison)</button>`;
+        if (!cls?.flies && loc.kind === 'garage_maison') buttons += ` <button class="phone-btn" data-act="transfer" data-id="${v.id}">🚚 Transférer vers un garage principal</button>`;
+      }
+      p.innerHTML = `<strong>${v.name}</strong><br><span style="color:var(--muted);font-size:0.75rem;">Essence ${Math.round(v.fuel * 100)}%, État ${Math.round(v.hp)}%. ${locLabel}${serviceLabel}</span><br>${buttons}`;
       p.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
         const vv = City.vehicles.find(x => x.id === b.dataset.id);
-        if (b.textContent.includes('Localiser')) {
-          const d = UTIL.dist(vv, Game) * CONFIG.METERS_PER_TILE; const bearing = UTIL.bearing(vv.x - Game.x, vv.y - Game.y);
-          announce(`${vv.name} à ${Math.round(d)} mètres, ${bearing}.`, 'polite');
-        } else { vv.x = Game.x + 1; vv.y = Game.y + 1; vv.fuel = Math.max(vv.fuel, 0.5); announce(`${vv.name} est arrivé près de vous.`, 'assertive'); Audio.beep(); }
+        if (!vv) return;
+        if (b.dataset.act === 'locate') announce(`${vv.name} : ${Game.describeVehicleLocationFull(vv)}.`, 'assertive');
+        else if (b.dataset.act === 'call') Game.requestVehicleDelivery(vv);
+        else if (b.dataset.act === 'transfer') Game.openVehicleTransferMenu(vv);
       }));
       div.appendChild(p);
     });
