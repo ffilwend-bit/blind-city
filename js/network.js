@@ -96,6 +96,10 @@ const Net = {
       Game.isCuffed = !!msg.cuffed;
       announce(msg.cuffed ? `${msg.byName} vous menotte. Vous ne pouvez plus vous déplacer ni agir.` : `${msg.byName} vous démenotte.`, 'assertive');
       updateHud();
+    } else if (msg.type === 'you_are_jailed') {
+      Game.jailed = !!msg.jailed;
+      announce(msg.jailed ? `${msg.byName} vous enferme en cellule. Vous ne pouvez plus sortir tant qu'un policier ne vous libère pas.` : `${msg.byName} vous libère de votre cellule.`, 'assertive');
+      updateHud();
     } else if (msg.type === 'money_received') {
       Game.money += msg.amount;
       Audio.cash();
@@ -384,7 +388,7 @@ const Net = {
       talkieOn: Game.talkie.on, talkieFrequency: Game.talkie.frequency,
       convoy: (typeof Convoy !== 'undefined' ? Convoy.code : null),
       airplane: !!(typeof Phone !== 'undefined' && Phone.airplane),
-      voiceOpen: !!Game.voiceOpen, handsUp: !!Game.handsUp, unconscious: !!Game.unconscious, isCuffed: !!Game.isCuffed,
+      voiceOpen: !!Game.voiceOpen, handsUp: !!Game.handsUp, unconscious: !!Game.unconscious, isCuffed: !!Game.isCuffed, jailed: !!Game.jailed,
     });
   },
   // Émet un son du monde (audible par les joueurs proches). Ponctuel et léger :

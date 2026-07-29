@@ -109,6 +109,7 @@ const Game = {
     this.move(-dx, -dy, { keepHeading: true, reverse: true });
   },
   move(dx, dy, opts = {}) {
+    if (this.jailed) return announce('Vous êtes en cellule. Seul un policier peut vous libérer.', 'polite');
     if (this.interior) return this._moveInterior(dx, dy); // déplacement dans le plan intérieur
     if (this.ridingWith) return announce('Vous êtes passager. Appuyez sur Interagir pour descendre avant de marcher.', 'polite');
     if (this.inVehicle && this.vehicle) {
@@ -1869,6 +1870,7 @@ const Game = {
   // déjà. Une fois dedans, on peut interagir librement avec E sans ressortir, et
   // continuer à se déplacer ; on ne ressort que par un nouveau Ctrl+Alt+E.
   toggleIndoor() {
+    if (this.jailed) return announce('Vous êtes en cellule. Seul un policier peut vous libérer.', 'assertive');
     if (this.interior) return this.exitInterior();
     if (this.inVehicle) return announce('Descendez du véhicule pour entrer dans un lieu.', 'assertive');
     if (this.indoors) {

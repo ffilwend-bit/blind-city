@@ -525,6 +525,12 @@ wss.on('connection', (ws, req) => {
       send(target.ws, { type: 'you_are_cuffed', cuffed: !!msg.cuffed, byName: `${player.firstName} ${player.lastName}` });
     }
 
+    else if (msg.type === 'toggle_jail') {
+      const target = players.get(msg.targetId);
+      if (!target) return;
+      send(target.ws, { type: 'you_are_jailed', jailed: !!msg.jailed, byName: msg.byName || `${player.firstName} ${player.lastName}` });
+    }
+
     else if (msg.type === 'give_money') {
       const target = players.get(msg.targetId);
       if (!target) return;

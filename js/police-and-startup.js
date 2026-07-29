@@ -654,6 +654,34 @@ Game.toggleCuffs = function() {
     announce(live.menotte ? `${name} menotté(e).` : `${name} démenotté(e).`, 'assertive');
   }
 };
+Game.jailed = false; // vrai pour SOI-MÊME si un policier vous a enfermé(e) en cellule : plus aucun déplacement ni sortie de lieu tant qu'on n'est pas libéré.
+// Mettre en cellule / libérer la cible verrouillée. Réservé à la police, et
+// seulement dans les cellules du commissariat — sur une cible déjà maîtrisée
+// (menottée ou neutralisée). Pour un joueur réel, synchronisé par le réseau :
+// la personne enfermée voit vraiment ses déplacements bloqués, jusqu'à ce
+// qu'un policier revienne ouvrir la cellule.
+Game.toggleJail = function() {
+  if (!Roles.hasPerm('cni')) return announce('Réservé à la police.', 'assertive');
+  const inCellBlock = this.interior && this.interior.poi && (this.interior.poi.type === 'police' || this.interior.poi.type === 'prison') && this.interior.room === 'cellules';
+  if (!inCellBlock) return announce('Vous devez être dans les cellules du commissariat pour cette action.', 'assertive');
+  const live = this.getLiveTarget();
+  if (!live) return announce('Cible introuvable ou hors de portée.', 'assertive');
+  const name = this.lockedTarget?.name || live.name || 'la cible';
+  const alreadyJailed = live.isPlayer ? this._targetJailedGuess : !!live.jailed;
+  if (!alreadyJailed && !(live.menotte || live.isCuffed || live.knockedOut)) {
+    return announce(`${name} doit être menotté(e) ou neutralisé(e) avant d'être mis(e) en cellule.`, 'assertive');
+  }
+  if (live.isPlayer) {
+    if (!Net.connected) return announce('Nécessite une connexion au serveur.', 'assertive');
+    const newState = !alreadyJailed;
+    this._targetJailedGuess = newState;
+    Net.send({ type: 'toggle_jail', targetId: live.id, jailed: newState, byName: `${this.player.firstName} ${this.player.lastName}` });
+    announce(newState ? `Vous enfermez ${name} en cellule.` : `Vous libérez ${name} de sa cellule.`, 'assertive');
+  } else {
+    live.jailed = !alreadyJailed;
+    announce(live.jailed ? `${name} enfermé(e) en cellule.` : `${name} libéré(e) de sa cellule.`, 'assertive');
+  }
+};
 Game.policeRank = null; // null tant que le joueur n'a jamais été policier ; sinon 'agent'/'brigadier'/'capitaine'/'chef'
 Game.myContacts = []; // [{ number, username, label }] — reconnaissance d'une personne par nom personnalisé
 Game.newsArticles = []; // [{ title, content, author, time }] — publiées par les journalistes, visibles par tous
@@ -1278,6 +1306,7 @@ Game.openPoliceMenu = function() {
     { id: 'impound', title: '🚛 Mettre en fourrière', desc: 'Un véhicule non-possédé à proximité (8 cases).' },
     { id: 'tank', title: '🪖 Réquisitionner un char d\'assaut', desc: 'Très cher, un seul à la fois.' },
     { id: 'invoice', title: '🧾 Facturer un client', desc: 'Envoyer une facture (frais divers) à un joueur réel proche.' },
+    { id: 'cell', title: '🔒 Mettre en cellule / Libérer', desc: 'Cible verrouillée, menottée ou neutralisée — uniquement dans les cellules du commissariat.' },
     { id: 'reminder', title: 'ℹ️ Rappel des raccourcis', desc: 'Ctrl+F fouiller, Ctrl+S sirène, Maj+T testament, Ctrl+Alt+T char.' },
   ];
   el('menuOverlay').style.display = 'flex';
@@ -1290,6 +1319,7 @@ Game.openPoliceMenu = function() {
     else if (sel.id === 'impound') { closeMenu(); Game.impoundVehicle(); }
     else if (sel.id === 'tank') { closeMenu(); Game.requisitionTank(); }
     else if (sel.id === 'invoice') Game.openInvoiceMenu();
+    else if (sel.id === 'cell') { closeMenu(); Game.toggleJail(); }
     else if (sel.id === 'reminder') { closeMenu(); announce('Ctrl+F pour fouiller une cible, Ctrl+S pour la sirène, Maj+T ou F12 pour le testament, Ctrl+Alt+T pour réquisitionner un char.', 'polite'); }
   });
 };
