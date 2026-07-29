@@ -213,7 +213,10 @@ const Game = {
     }
     if (v.fuel <= 0 && v.speed > 0.1) { v.speed *= 0.5; announce('Panne d\'essence.', 'assertive'); }
     if (Math.abs(v.speed) < 0.05) v.speed = 0;
-    const step = v.speed * (v.speed < 0 ? -1 : 1);
+    // Garder le SIGNE de la vitesse : positif = avance dans le cap, négatif =
+    // recule (déplacement inverse du cap). Avant, step était toujours positif
+    // (valeur absolue), donc la marche arrière avançait quand même.
+    const step = v.speed;
     const dir = v.heading;
     const ndx = dir === 2 ? step : dir === 6 ? -step : 0;
     const ndy = dir === 4 ? step : dir === 0 ? -step : 0;
@@ -223,11 +226,12 @@ const Game = {
     // Math.round(120 + 0.06) = 120 : le véhicule restait bloqué sur place au
     // démarrage (impossible de passer le permis).
     let nx, ny;
-    if (step >= 0.5) { nx = Math.round(v.x + ndx); ny = Math.round(v.y + ndy); v._moveAccum = 0; }
+    if (Math.abs(step) >= 0.5) { nx = Math.round(v.x + ndx); ny = Math.round(v.y + ndy); v._moveAccum = 0; }
     else {
       v._moveAccum = (v._moveAccum || 0) + step;
       let adv = 0;
       if (v._moveAccum >= 1) { v._moveAccum -= 1; adv = 1; }
+      else if (v._moveAccum <= -1) { v._moveAccum += 1; adv = -1; }
       nx = v.x + (dir === 2 ? adv : dir === 6 ? -adv : 0);
       ny = v.y + (dir === 4 ? adv : dir === 0 ? -adv : 0);
     }
@@ -4710,6 +4714,7 @@ const Game = {
       else for (const k of ['couleurHaut', 'couleurBas', 'couleurChaussures', 'coiffure', 'lunettes']) if (!(k in this.outfit)) this.outfit[k] = null;
       if (!('isPolice' in this.outfit)) this.outfit.isPolice = false;
       if (!('masque' in this.outfit)) this.outfit.masque = false;
+      if (!Array.isArray(this.outfit.accessoires)) this.outfit.accessoires = [];
       if (!this.talkie) this.talkie = { owned: false, battery: 1, on: false, frequency: 151.5 };
       // Chien guide : resynchronise le module GuideDog avec l'état restauré.
       if (typeof GuideDog !== 'undefined') GuideDog.data = (this.guideDog && this.guideDog.alive) ? this.guideDog : null;
@@ -4721,6 +4726,10 @@ const Game = {
       // Réinjecte les véhicules possédés (créés dynamiquement, donc absents
       // de la ville fraîchement régénérée) sans dupliquer s'ils y sont déjà.
       (d.ownedVehicleData || []).forEach(v => {
+        // openDoors est un Set : non sérialisable en JSON (devient {} après
+        // sauvegarde/rechargement), donc v.openDoors.add(...) plantait ensuite.
+        // On repart portes fermées, ce qui est de toute façon cohérent après un rechargement.
+        v.openDoors = new Set();
         if (!City.vehicles.some(existing => existing.id === v.id)) City.vehicles.push(v);
       });
       // Réattache le mobilier des maisons à la ville régénérée.

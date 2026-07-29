@@ -200,7 +200,9 @@ function serveStaticFile(res, filePath) {
   });
 }
 const server = http.createServer((req, res) => {
-  const reqPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  let reqPath;
+  try { reqPath = decodeURIComponent((req.url || '/').split('?')[0]); }
+  catch (e) { res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Requête invalide.'); return; }
   // Racine : le jeu lui-même.
   if (reqPath === '/' || reqPath === '/index.html') {
     serveStaticFile(res, path.join(__dirname, GAME_HTML_FILE));
@@ -382,6 +384,10 @@ wss.on('connection', (ws, req) => {
       }
       if (account.status === 'pending') {
         send(ws, { type: 'login_result', ok: false, reason: 'Votre compte est toujours en attente de validation par l\'administrateur.' });
+        return;
+      }
+      if (account.status === 'rejected') {
+        send(ws, { type: 'login_result', ok: false, reason: 'Votre demande de compte a été refusée par l\'administrateur.' });
         return;
       }
       player.accountUsername = username;

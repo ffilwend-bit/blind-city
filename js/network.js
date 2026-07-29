@@ -163,7 +163,7 @@ const Net = {
         }
         Net.send({ type: 'house_sale_response', targetId: msg.fromId, accepted, houseId: msg.houseId });
       });
-    } else if (msg.type === 'house_sale_response') {
+    } else if (msg.type === 'house_sale_response' || msg.type === 'vehicle_sale_response') {
       announce(msg.accepted ? `${msg.byName} accepte votre offre de vente. La vente est conclue.` : `${msg.byName} refuse votre offre de vente.`, 'assertive');
     } else if (msg.type === 'vehicle_sale_offer') {
       AudioLib.playNotification();
@@ -180,7 +180,7 @@ const Net = {
         } else {
           announce('Offre refusée.', 'polite');
         }
-        Net.send({ type: 'house_sale_response', targetId: msg.fromId, accepted, houseId: null });
+        Net.send({ type: 'vehicle_sale_response', targetId: msg.fromId, accepted });
       });
     } else if (msg.type === 'taxi_request') {
       Game.pendingRides = Game.pendingRides || [];
@@ -512,7 +512,7 @@ function speak(text, priority = 'polite') {
     // - 'polite' : routine (déplacement...). Ne coupe pas une phrase en cours,
     //   pour ne pas hacher la parole quand les annonces s'enchaînent vite.
     if (priority === 'polite' && busy) {
-      const a = el('announcerPolite'); a.textContent = ''; a.textContent = text;
+      const a = el('announcerPolite'); if (a) { a.textContent = ''; a.textContent = text; }
       return;
     }
     // Textes longs découpés en phrases enchaînées (fiabilité mobile).
@@ -529,11 +529,17 @@ function speak(text, priority = 'polite') {
     }
   }
   const a = priority === 'polite' ? el('announcerPolite') : el('announcer');
-  a.textContent = ''; a.textContent = text;
+  if (a) { a.textContent = ''; a.textContent = text; }
 }
 function announce(text, priority) { log(text, 'system'); speak(text, priority); }
 function alertUser(text) { log(text, 'damage'); speak(text, 'assertive'); }
 function updateHud() {
+  // Purement de l'affichage : un seul élément HUD manquant (contexte
+  // dégradé, test isolé...) ne doit jamais faire planter la logique de jeu
+  // qui appelle updateHud() partout.
+  try { _updateHudInner(); } catch (e) { console.error('updateHud a échoué :', e); }
+}
+function _updateHudInner() {
   el('hudMoney').textContent = UTIL.formatMoney(Game.money);
   el('hudBank').textContent = UTIL.formatMoney(Game.bank);
   el('hudDirty').textContent = UTIL.formatMoney(Game.dirtyMoney);
@@ -544,7 +550,7 @@ function updateHud() {
   el('hudMission').textContent = Game.activeMission ? Game.activeMission.title : 'aucune';
   el('modeStatus').textContent = Game.inVehicle ? Game.vehicle?.label || 'véhicule' : 'à pied';
   el('vehStatus').textContent = Game.vehicle ? Game.vehicle.name + (Game.vehicle.auto ? ' (auto)' : ' (manuel)') : 'aucun';
-  el('compassStatus').textContent = UTIL.bearing(Math.cos(Game.heading * Math.PI / 4), Math.sin(Game.heading * Math.PI / 4));
+  { const hd = Game.headingToDelta(Game.heading); el('compassStatus').textContent = UTIL.bearing(hd.dx, hd.dy); }
   el('altStatus').textContent = Math.round(Game.altitude) + ' m';
   el('weaponStatus').textContent = Game.weaponOut ? (Game.weapon?.label || 'aucune') : 'rangée';
   el('targetStatus').textContent = Game.lockedTarget ? Game.lockedTarget.name : 'aucune';

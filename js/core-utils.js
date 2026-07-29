@@ -88,9 +88,12 @@ const UTIL = {
   pick(arr) { return arr[Math.floor(this._rng() * arr.length)]; },
   capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); },
   cardinals: ['nord','nord-est','est','sud-est','sud','sud-ouest','ouest','nord-ouest'],
+  // dx positif = est, dy positif = sud (convention du jeu, cf. Game.headingToDelta).
+  // atan2(dx, -dy) place donc bien 0° au nord et tourne dans le sens horaire
+  // (nord→est→sud→ouest), ce qui correspond à l'ordre de `cardinals`.
   bearing(dx, dy) {
-    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-    const idx = Math.round(((angle < 0 ? angle + 360 : angle) + 22.5) / 45) % 8;
+    const angle = Math.atan2(dx, -dy) * 180 / Math.PI;
+    const idx = Math.round((angle < 0 ? angle + 360 : angle) / 45) % 8;
     return this.cardinals[idx];
   },
   formatMoney(n) { return n.toLocaleString('fr-FR') + ' ' + CONFIG.CURRENCY; },

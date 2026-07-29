@@ -120,6 +120,7 @@ const VoiceChat = {
   async handleOffer(callId, data) {
     if (!Phone.voiceChat || callId !== Phone.activeCallId) return; // l'utilisateur n'a pas activé la voix directe
     if (!this.pc || this.callId !== callId) await this.start(callId, false);
+    if (!this.pc) return; // micro refusé/indisponible : start() a déjà annoncé l'échec, on ne peut pas continuer
     await this.pc.setRemoteDescription(new RTCSessionDescription(data));
     this.flushIce();
     const answer = await this.pc.createAnswer();
