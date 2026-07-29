@@ -466,7 +466,7 @@ const DISTRICT_TYPES = {
   aeroport: 'Aéroport', mine: 'Zone minière',
 };
 const SERVICE_TYPES = {
-  magasin: 'Boutique / magasin', restaurant: 'Restaurant', garage: 'Garage / concession auto',
+  magasin: 'Boutique / magasin', restaurant: 'Restaurant', garage: 'Parking public',
   banque: 'Banque', hopital: 'Hôpital', police: 'Commissariat de police',
   prison: 'Prison', immeuble: 'Immeuble (logements)',
   tribunal: 'Cour pénale (tribunal)', monument: 'Monument de la Musique',

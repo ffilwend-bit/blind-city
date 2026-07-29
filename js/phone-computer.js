@@ -207,7 +207,7 @@ const Phone = {
         { type: 'banque', label: '🏦 Banque' },
         { type: 'hopital', label: '🏥 Hôpital' },
         { type: 'police', label: '👮 Commissariat' },
-        { type: 'garage', label: '🔧 Garage' },
+        { type: 'garage', label: '🅿️ Parking public' },
       ];
       types.forEach(t => {
         const list = City.pois.filter(p => p.type === t.type).map(p => ({ ...p, dist: UTIL.dist(p, Game) })).sort((a, b) => a.dist - b.dist);

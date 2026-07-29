@@ -326,7 +326,9 @@ const City = {
     add('Port du barrage', 'port', 'Zone du barrage', 2);
     add('Station-service', 'station_essence', 'Gounghin', 3);
     add('Station-service de Koulouba', 'station_essence', 'Koulouba', 2);
-    add('Garage', 'garage', 'Zone industrielle de Kossodo', 2);
+    add('Parking de Kossodo', 'garage', 'Zone industrielle de Kossodo', 2);
+    add('Parking de Koulouba', 'garage', 'Koulouba', 2);
+    add('Parking de Gounghin', 'garage', 'Gounghin', 1);
     add('Entrepôt', 'entrepot', 'Zone industrielle de Kossodo', 4);
     add('Usine', 'usine', 'Zone industrielle de Kossodo', 3);
     add('Bar', 'bar', 'Gounghin', 2);
@@ -349,7 +351,7 @@ const City = {
     add('Grand marché de Bobo', 'magasin', 'Bobo-Dioulasso', 2);
     add('Restaurant de Bobo', 'restaurant', 'Bobo-Dioulasso', 2);
     add('Station-service de Bobo', 'station_essence', 'Bobo-Dioulasso', 1);
-    add('Garage de Bobo', 'garage', 'Bobo-Dioulasso', 1);
+    add('Parking de Bobo', 'garage', 'Bobo-Dioulasso', 1);
     add('Boutique de vêtements de Bobo', 'vetements', 'Bobo-Dioulasso', 1);
     add('Pharmacie de Bobo', 'pharmacie', 'Bobo-Dioulasso', 1);
     add('Banque de Bobo', 'banque', 'Bobo-Dioulasso', 1);
@@ -358,7 +360,7 @@ const City = {
     add('Héliport de Kongoussi', 'heliport', 'Kongoussi', 1);
     add('Marché de Kongoussi', 'magasin', 'Kongoussi', 1);
     add('Station-service de Kongoussi', 'station_essence', 'Kongoussi', 1);
-    add('Garage de Kongoussi', 'garage', 'Kongoussi', 1);
+    add('Parking de Kongoussi', 'garage', 'Kongoussi', 1);
     add('Restaurant de Kongoussi', 'restaurant', 'Kongoussi', 1);
     add('Pharmacie de Kongoussi', 'pharmacie', 'Kongoussi', 1);
     // Terrain agricole : là où l'on prépare une parcelle et sème des graines
