@@ -202,8 +202,14 @@ const Game = {
       }
     }
     // acceleration model
+    // Un vélo (cls.human) n'a pas de moteur : l'essence ne le concerne jamais,
+    // ni pour la vitesse ni pour la panne — un vélo ne "tombe pas en panne
+    // d'essence", il n'en consomme même pas. Le véhicule-école (examVehicle)
+    // non plus : sinon son plein s'épuisait en cours de circuit (~20s), avant
+    // même d'avoir fait le tour des 4 points, ce qui bloquait l'examen.
+    const noFuelNeeded = cls.human || v.examVehicle;
     const accel = cls.accel || 0.06;
-    const targetSpeed = cls.maxSpeed * (v.fuel > 0 ? 1 : 0.3);
+    const targetSpeed = cls.maxSpeed * (noFuelNeeded || v.fuel > 0 ? 1 : 0.3);
     const offroadFactor = (City.getTile(v.x, v.y) === 'route' || City.getTile(v.x, v.y) === 'rue') ? 1 : cls.offroad;
     const isReverse = (dx === 0 && dy === 0) ? false : this.isReverse(v.heading, dx, dy);
     if (dx === 0 && dy === 0) {
@@ -216,7 +222,7 @@ const Game = {
     } else {
       v.speed = UTIL.clamp(v.speed + accel * offroadFactor, -cls.maxSpeed * 0.3, targetSpeed * offroadFactor);
     }
-    if (v.fuel <= 0 && v.speed > 0.1) {
+    if (!noFuelNeeded && v.fuel <= 0 && v.speed > 0.1) {
       v.speed *= 0.5;
       // Throttlé : sinon annoncé en 'assertive' (coupe la parole) à chaque
       // image tant qu'on essaie d'avancer, plusieurs dizaines de fois par
@@ -224,7 +230,11 @@ const Game = {
       const now = Date.now();
       if (now - (this._lastFuelWarn || 0) > 4000) { this._lastFuelWarn = now; announce('Panne d\'essence.', 'assertive'); }
     }
-    if (Math.abs(v.speed) < 0.05) v.speed = 0;
+    // Seulement au freinage : sinon, hors route, accel*offroadFactor (souvent
+    // < 0.05, ex. berline 0.07×0.4) était remis à zéro à CHAQUE image avant de
+    // pouvoir s'accumuler — le véhicule ne démarrait jamais (bloqué à
+    // l'auto-école, dont le véhicule est posé sur une tuile hors-route).
+    if (isBraking && Math.abs(v.speed) < 0.05) v.speed = 0;
     // Garder le SIGNE de la vitesse : positif = avance dans le cap, négatif =
     // recule (déplacement inverse du cap). Avant, step était toujours positif
     // (valeur absolue), donc la marche arrière avançait quand même.
@@ -276,7 +286,8 @@ const Game = {
       announce(`Collision !${impactDmg > 3 ? ` État du véhicule : ${Math.round(v.hp)}%.` : ''}`, 'assertive');
       if (City.isRoad(v.x, v.y)) this.npcVoiceReaction(v.x, v.y, { group: 'impatient', radius: 12, count: 2 });
     } else {
-      v.x = UTIL.clamp(nx, 0, City.W - 1); v.y = UTIL.clamp(ny, 0, City.H - 1); v.fuel = Math.max(0, v.fuel - Math.abs(v.speed) * 0.002);
+      v.x = UTIL.clamp(nx, 0, City.W - 1); v.y = UTIL.clamp(ny, 0, City.H - 1);
+      if (!noFuelNeeded) v.fuel = Math.max(0, v.fuel - Math.abs(v.speed) * 0.002);
       // Conduite tout-terrain à vitesse notable : chance occasionnelle de
       // taper un trou (juste un bruit, pas de dégâts — la route cahoteuse).
       if (offroadFactor < 1 && Math.abs(v.speed) > cls.maxSpeed * 0.3 && UTIL.chance(0.03)) {

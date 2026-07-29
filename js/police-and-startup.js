@@ -1237,6 +1237,7 @@ Game.payTickets = function() {
 Game.refuelVehicle = function(poi) {
   if (!this.inVehicle || !this.vehicle) return announce('Montez dans un véhicule pour faire le plein ou recharger.', 'assertive');
   const cls = VEHICLE_CATALOG[this.vehicle.type];
+  if (cls.human) return announce('Un vélo n\'a pas de moteur : pas besoin d\'essence.', 'polite');
   if (cls.electric) {
     const missing = 1 - this.vehicle.fuel;
     if (missing <= 0.01) return announce('Batterie déjà chargée à 100%.', 'polite');
