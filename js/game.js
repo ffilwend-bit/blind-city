@@ -1971,7 +1971,14 @@ const Game = {
     }
     it.ix = nx; it.iy = ny;
     if (window.Audio && Audio.tone) Audio.tone({ freq: 210, type: 'sine', duration: 0.05, gain: 0.045, pan: 0 });
-    if (room.name !== it.room) { it.room = room.name; announce(`Pièce : ${room.name}.`, 'polite'); }
+    if (room.name !== it.room) {
+      it.room = room.name; announce(`Pièce : ${room.name}.`, 'polite');
+      // La piscine d'une maison de standing : on peut s'y baigner (touche E,
+      // même mécanique que plonger dans l'eau en extérieur).
+      const wasInWater = this.inWater;
+      this.inWater = (room.name === 'piscine');
+      if (wasInWater && !this.inWater) this.underwater = false;
+    }
     const obj = this._objectAt(nx, ny);
     if (obj) announce(`Objet : ${obj.name}. E pour l'utiliser.`, 'polite');
     if (it.service && it.service.x === nx && it.service.y === ny) announce(`${it.service.label}. Appuyez sur E pour être servi.`, 'polite');
@@ -2033,6 +2040,7 @@ const Game = {
     const name = this.interior.name;
     this.x = this.interior.returnX; this.y = this.interior.returnY;
     this.interior = null; this.indoors = null;
+    this.inWater = City.getTile(this.x, this.y) === 'eau'; this.underwater = false; AudioLib.stopLoop('eau_nage_sous');
     this.doorCue();
     announce(`Vous sortez de ${name}. Vous êtes de nouveau dehors.`, 'assertive');
     updateHud();
@@ -2047,6 +2055,10 @@ const Game = {
       if (it.service && Math.abs(it.ix - it.service.x) <= 1 && Math.abs(it.iy - it.service.y) <= 1) return this.enterPOI(it.poi);
       return announce(`Pièce : ${it.room || 'entrée'}. Allez au ${it.service ? it.service.label : 'comptoir'} pour être servi.`, 'assertive');
     }
+    // Piscine (maison de standing) : E pour se baigner directement.
+    if (it.room === 'piscine') return this.diveInWater();
+    // Jardin : E pour planter des graines, ou récolter si c'est prêt.
+    if (it.room === 'jardin') return this.tendGarden();
     // Un meuble sous les pieds OU juste à côté : on l'utilise directement.
     const obj = this._objectNear(it.ix, it.iy);
     if (obj) return this.interactFurniture(obj);
@@ -2893,6 +2905,34 @@ const Game = {
   // Système d'eau : plonger fait basculer entre nager en surface (pas dans
   // l'eau) et nager sous l'eau (immersion). Boire ne fonctionne que dans
   // l'eau, et réduit vraiment la soif.
+  // Jardin de la maison : planter des graines (achetées au marché noir), puis
+  // revenir plus tard récolter. Illégal comme toute détention de stupéfiant :
+  // la récolte a une chance d'alerter la police, comme d'autres actes illégaux.
+  tendGarden() {
+    const house = this.interior && this.interior.ref;
+    if (!house) return announce('Aucun jardin ici.', 'assertive');
+    if (house.plantation) {
+      const elapsed = Date.now() - house.plantation.startedAt;
+      const drug = DRUG_CATALOG.find(d => d.id === house.plantation.drugId);
+      if (elapsed >= house.plantation.durationMs) {
+        const qty = UTIL.randInt(3, 8);
+        this.addItem({ ...drug, q: qty });
+        announce(`Récolte : ${qty} ${drug?.name || 'plants'} ! C'est illégal, évitez de vous faire remarquer.`, 'assertive');
+        house.plantation = null;
+        updateHud();
+        if (UTIL.chance(0.15)) this.reportCrimeToPolice('culture_drogue', house.name);
+      } else {
+        const remainMin = Math.max(1, Math.ceil((house.plantation.durationMs - elapsed) / 60000));
+        announce(`Vos plants de ${drug?.name.toLowerCase() || 'chanvre'} poussent encore. Environ ${remainMin} minute(s) avant la récolte.`, 'polite');
+      }
+      return;
+    }
+    const seed = this.inventory.find(i => i.id === 'graines_herbe');
+    if (!seed) return announce('Vous n\'avez pas de graines à planter. Achetez-en au marché noir.', 'assertive');
+    this.removeItem('graines_herbe', 1);
+    house.plantation = { drugId: 'herbe', startedAt: Date.now(), durationMs: 6 * 60 * 1000 };
+    announce('Vous plantez des graines de chanvre dans le jardin. Revenez dans environ 6 minutes pour la récolte.', 'assertive');
+  },
   diveInWater() {
     if (this.inVehicle) return announce('Descendez d\'abord du véhicule.', 'assertive');
     if (!this.inWater) return announce('Il n\'y a pas d\'eau ici pour plonger.', 'assertive');

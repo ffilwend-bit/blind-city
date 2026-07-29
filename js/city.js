@@ -15,6 +15,7 @@ const INTERIOR_TYPES = {
       { name: 'salon', x: 0, y: 2, w: 4, h: 3 },
       { name: 'cuisine', x: 4, y: 2, w: 3, h: 3 },
       { name: 'chambre', x: 3, y: 0, w: 4, h: 2 },
+      { name: 'jardin', x: 7, y: 2, w: 3, h: 3 }, // petit jardin : culture de plants (Game.plantSeeds/harvestPlants)
     ],
   },
   maison_luxe: {
@@ -25,6 +26,8 @@ const INTERIOR_TYPES = {
       { name: 'cuisine', x: 5, y: 2, w: 3, h: 3 },
       { name: 'chambre principale', x: 3, y: 0, w: 5, h: 2 },
       { name: 'bureau', x: 5, y: 5, w: 3, h: 3 },
+      { name: 'piscine', x: 8, y: 2, w: 3, h: 3 }, // maison de standing : bassin où l'on peut se baigner (Game.diveInWater)
+      { name: 'jardin', x: 8, y: 5, w: 3, h: 3 }, // jardin : culture de plants (Game.plantSeeds/harvestPlants)
     ],
   },
 };
@@ -369,8 +372,8 @@ const City = {
   assignPOIStock(p) {
     if (p.type === 'magasin') p.stock = this.generateStock('food+general', 40);
     else if (p.type === 'armurerie') p.stock = this.generateStock('legal_weapons', 15);
-    else if (p.type === 'marche_noir') p.stock = [...this.generateStock('illegal_weapons', 25), { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier, même un uniforme de policier caché dessous.' }];
-    else if (p.type === 'marche_noir_lointain') p.stock = [...this.generateStock('illegal_weapons', 35), { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier.' }];
+    else if (p.type === 'marche_noir') p.stock = [...this.generateStock('illegal_weapons', 25), { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier, même un uniforme de policier caché dessous.' }, { id: 'graines_herbe', name: 'Graines de chanvre', category: 'graine', price: 20000, q: 99, legal: false, desc: 'À planter dans le jardin de votre maison pour cultiver de l\'herbe. Illégal : la récolte attire parfois l\'attention de la police.' }];
+    else if (p.type === 'marche_noir_lointain') p.stock = [...this.generateStock('illegal_weapons', 35), { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier.' }, { id: 'graines_herbe', name: 'Graines de chanvre', category: 'graine', price: 20000, q: 99, legal: false, desc: 'À planter dans le jardin de votre maison pour cultiver de l\'herbe. Illégal : la récolte attire parfois l\'attention de la police.' }];
     else if (p.type === 'pharmacie') p.stock = this.generateStock('medical', 20);
     else if (p.type === 'restaurant') p.stock = this.generateStock('food', 25);
     else if (p.type === 'vetements') p.stock = this.generateStock('clothes', 30);
