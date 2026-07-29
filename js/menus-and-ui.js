@@ -1251,8 +1251,17 @@ function gameLoop() {
     // ignore déjà les répétitions système via e.repeat). Pour avancer plusieurs
     // fois / "courir", on appuie plusieurs fois. Le geste tactile "glisser et
     // garder" reste, lui, un déplacement continu voulu.
+    // Le menu de mode de conduite ne doit JAMAIS bloquer la conduite : dès qu'on
+    // pousse une direction, on le referme et on passe en conduite libre. C'est
+    // ce qui empêchait certains joueurs d'avancer (menu ouvert non refermé).
+    if (Game.inVehicle && Game.vehicle && !Game.vehicle.auto && menuIsOpen && Game._driveModeMenuOpen) {
+      const isDriveMenu = (el('menuTitle')?.textContent || '').startsWith('Conduite :');
+      const moveKey = Game.keys.has('arrowup') || Game.keys.has('arrowdown') || Game.keys.has('arrowleft') || Game.keys.has('arrowright') || !!Game._touchDriveDir;
+      if (isDriveMenu && moveKey) { Game._driveModeMenuOpen = false; if (typeof closeMenu === 'function') closeMenu(); }
+      else if (!isDriveMenu) Game._driveModeMenuOpen = false; // un autre menu s'est ouvert : on oublie le drapeau
+    }
     // Conduite continue (clavier OU tactile maintenu), tant qu'aucun menu n'est ouvert.
-    if (!menuIsOpen) Game.tickManualDrive();
+    if (el('menuOverlay').style.display !== 'flex') Game.tickManualDrive();
     // Auto-drive step
     if (Game.inVehicle && Game.vehicle?.auto) Game.autoDriveStep();
 

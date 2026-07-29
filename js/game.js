@@ -411,11 +411,15 @@ const Game = {
       { id: 'libre', title: '🚗 Conduite libre', desc: 'Conduire sans destination ni guidage.' },
     ];
     renderMenu(items, (sel) => {
+      this._driveModeMenuOpen = false;
       if (sel.id === 'libre') { closeMenu(); announce('Conduite libre. Flèches pour conduire, espace pour freiner.', 'assertive'); return; }
       this.openVehicleDestinationMenu(sel.id);
     });
     el('menuOverlay').style.display = 'flex';
-    announce(`Vous êtes au volant de ${v.name}. Choisissez : conduite automatique, conduite manuelle guidée, ou conduite libre.`, 'assertive');
+    // Drapeau : ce menu ne doit PAS bloquer la conduite. Si l'on pousse une
+    // direction, la boucle de jeu le referme et passe en conduite libre.
+    this._driveModeMenuOpen = true;
+    announce(`Vous êtes au volant de ${v.name}. Poussez une flèche pour conduire librement, ou choisissez : conduite automatique, ou conduite manuelle guidée.`, 'assertive');
   },
   // Choix de la destination pour le véhicule (mode 'auto' ou 'manuel').
   openVehicleDestinationMenu(mode) {
@@ -650,8 +654,9 @@ const Game = {
     this._vehProg = null; // réinitialise le suivi de progression
     updateHud();
     // Menu de conduite (automatique / manuel guidé / libre) — sauf en pleine
-    // mission de convoyage, qui a déjà son propre déroulé de livraison.
-    if (!(this.activeMission && this.activeMission.type === 'convoyage')) {
+    // mission de convoyage (déroulé propre) et sauf pour le VÉHICULE-ÉCOLE, qui
+    // a son propre guidage d'examen : on va droit à la conduite manuelle.
+    if (!v.examVehicle && !(this.activeMission && this.activeMission.type === 'convoyage')) {
       setTimeout(() => { if (this.inVehicle && this.vehicle === v) this.openDriveModeMenu(v); }, 500);
     }
   },
