@@ -821,13 +821,35 @@ function ensureMenuOpen() {
     el('menuOverlay').style.display = 'flex';
   }
 }
-// Guide vers un lieu : déjà sur place, on entre ; en véhicule, conduite auto ;
-// à pied, guidage vocal pas-à-pas qui contourne les murs.
+// Guide vers un lieu : déjà sur place, on entre ; en véhicule, propose de
+// choisir entre conduite automatique et conduite manuelle guidée (avant, ceci
+// activait TOUJOURS la conduite automatique sans qu'on l'ait demandé, et sans
+// aucun moyen de choisir la conduite manuelle guidée depuis ce menu) ; à
+// pied, guidage vocal pas-à-pas qui contourne les murs.
 function guideToPoi(poi) {
   if (!poi) return;
-  if (UTIL.dist(poi, Game) < 3) Game.enterPOI(poi);
-  else if (Game.inVehicle) Game.setAutoDrive(poi.type, poi.name);
-  else Game.setGuidance({ name: poi.name, x: poi.x, y: poi.y });
+  if (UTIL.dist(poi, Game) < 3) { Game.enterPOI(poi); return; }
+  if (Game.inVehicle && Game.vehicle) {
+    ensureMenuOpen();
+    el('menuTitle').textContent = `Aller vers ${poi.name}`;
+    const items = [
+      { id: 'auto', title: '🧭 Conduite automatique', desc: 'Le véhicule vous y conduit tout seul.' },
+      { id: 'manuel', title: '🕹️ Conduite manuelle guidée', desc: 'Vous conduisez ; une voix vous guide en continu.' },
+    ];
+    renderMenu(items, (sel) => {
+      closeMenu();
+      if (sel.id === 'auto') Game.setAutoDrive(poi.type, poi.name);
+      else {
+        Game.vehicle.auto = false;
+        Game.setGuidance({ name: poi.name, x: poi.x, y: poi.y });
+        announce(`Conduisez vers ${poi.name}. Je vous guide en continu.`, 'assertive');
+      }
+    });
+    el('menuOverlay').style.display = 'flex';
+    announce(`Comment aller vers ${poi.name} : conduite automatique, ou conduite manuelle guidée ?`, 'polite');
+    return;
+  }
+  Game.setGuidance({ name: poi.name, x: poi.x, y: poi.y });
 }
 function openMapMenu() {
   ensureMenuOpen();
@@ -976,7 +998,14 @@ function setupInput() {
     else if (key === 'c') Game.soundCompass();
     else if (key === 'u') { Game.toggleCuffs(); }
     else if (key === 'j') { const live = Game.getLiveTarget(); if (live?.menotte || live?.knockedOut || live?.dead) Game.searchTarget(); else announce('Cible non fouillable : menottez ou assommez-la d\'abord.', 'assertive'); }
-    else if (key === 'pageup') { if (Game.inVehicle && VEHICLE_CATALOG[Game.vehicle.type].flies) { Game.altitude = Math.min(120, Game.altitude + 5); Game.vehicle.altitude = Game.altitude; announce('Altitude ' + Math.round(Game.altitude) + ' m.', 'polite'); } }
+    else if (key === 'pageup') {
+      if (Game.inVehicle && VEHICLE_CATALOG[Game.vehicle.type].flies) {
+        // Décoller exige le moteur stabilisé (voir driveVehicle) : sinon on
+        // pouvait prendre de l'altitude sans même avoir démarré le moteur.
+        if (!Game.vehicle.engineOn) announce('Le moteur n\'est pas encore prêt : avancez pour le démarrer, puis attendez qu\'il se stabilise.', 'assertive');
+        else { Game.altitude = Math.min(120, Game.altitude + 5); Game.vehicle.altitude = Game.altitude; announce('Altitude ' + Math.round(Game.altitude) + ' m.', 'polite'); }
+      }
+    }
     else if (key === 'pagedown') { if (Game.inVehicle && VEHICLE_CATALOG[Game.vehicle.type].flies) { Game.altitude = Math.max(0, Game.altitude - 5); Game.vehicle.altitude = Game.altitude; announce('Altitude ' + Math.round(Game.altitude) + ' m.', 'polite'); } }
     // Verrouillage de cible 1 à 9. On lit e.code (Digit1.../Numpad1...) plutôt que
     // e.key : sur un clavier AZERTY, la rangée du haut sans Maj donne & é " ' ( etc.,
@@ -1245,21 +1274,11 @@ function gameLoop() {
     // automatiques du système) ; ici on prend le relais à un rythme régulier et
     // maîtrisé, pour avancer/tourner en continu sans dépendre de la vitesse de
     // répétition (très variable) du clavier de l'utilisateur.
-    const menuIsOpen = el('menuOverlay').style.display === 'flex';
     // À PIED : PLUS de répétition automatique au clavier. Une pression de flèche
     // = un seul pas ou une seule rotation (géré dans setupInput au keydown, qui
     // ignore déjà les répétitions système via e.repeat). Pour avancer plusieurs
     // fois / "courir", on appuie plusieurs fois. Le geste tactile "glisser et
     // garder" reste, lui, un déplacement continu voulu.
-    // Le menu de mode de conduite ne doit JAMAIS bloquer la conduite : dès qu'on
-    // pousse une direction, on le referme et on passe en conduite libre. C'est
-    // ce qui empêchait certains joueurs d'avancer (menu ouvert non refermé).
-    if (Game.inVehicle && Game.vehicle && !Game.vehicle.auto && menuIsOpen && Game._driveModeMenuOpen) {
-      const isDriveMenu = (el('menuTitle')?.textContent || '').startsWith('Conduite :');
-      const moveKey = Game.keys.has('arrowup') || Game.keys.has('arrowdown') || Game.keys.has('arrowleft') || Game.keys.has('arrowright') || !!Game._touchDriveDir;
-      if (isDriveMenu && moveKey) { Game._driveModeMenuOpen = false; if (typeof closeMenu === 'function') closeMenu(); }
-      else if (!isDriveMenu) Game._driveModeMenuOpen = false; // un autre menu s'est ouvert : on oublie le drapeau
-    }
     // Conduite continue (clavier OU tactile maintenu), tant qu'aucun menu n'est ouvert.
     if (el('menuOverlay').style.display !== 'flex') Game.tickManualDrive();
     // Auto-drive step

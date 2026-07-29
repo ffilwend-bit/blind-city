@@ -1781,26 +1781,6 @@ document.addEventListener('keydown', (e) => {
   }
   const menuOverlayEl = el('menuOverlay');
   const menuOpen = menuOverlayEl && menuOverlayEl.style.display === 'flex';
-  // Le menu de mode de conduite (auto/manuel/libre) s'ouvre TOUT SEUL après
-  // être monté dans un véhicule. Sans ce cas particulier, les flèches étaient
-  // captées ICI (en phase de capture, avant même Game.keys) pour naviguer
-  // entre les cartes du menu — la conduite ne pouvait donc JAMAIS démarrer
-  // avec les flèches tant qu'on n'avait pas validé une carte au clavier
-  // (Entrée) : une flèche seule ne faisait ni avancer, ni tourner. On ferme
-  // donc ce menu précis dès qu'une flèche est pressée et on conduit tout de
-  // suite avec cette même flèche.
-  if (menuOpen && Game._driveModeMenuOpen && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-    e.preventDefault(); e.stopImmediatePropagation();
-    Game._driveModeMenuOpen = false;
-    closeMenu();
-    Game.keys.add(e.key.toLowerCase());
-    if (e.key === 'ArrowUp') Game.moveForward();
-    else if (e.key === 'ArrowDown') Game.moveBackward();
-    else if (e.key === 'ArrowLeft') Game.turn(-1);
-    else if (e.key === 'ArrowRight') Game.turn(1);
-    updateHud();
-    return;
-  }
   if (menuOpen && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape', 'Backspace'].includes(e.key)) {
     e.preventDefault(); e.stopImmediatePropagation();
     // Échap ou Retour arrière : remonter d'un niveau de menu (ferme au menu racine).

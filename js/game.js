@@ -189,6 +189,31 @@ const Game = {
   // Vehicle physics
   driveVehicle(dx, dy) {
     const v = this.vehicle; const cls = VEHICLE_CATALOG[v.type];
+    // Un moteur thermique/électrique ne répond pas instantanément : il faut le
+    // démarrer, et pour un avion/hélico le laisser se stabiliser avant de
+    // pouvoir décoller — avant, monter dedans suffisait à pouvoir s'envoler
+    // tout de suite, ce qui rendait le pilotage bien trop simple. Un vélo
+    // (cls.human) n'a pas de moteur : jamais concerné. v.engineOn est
+    // `undefined` (donc "faux") tant que le moteur n'a jamais été démarré.
+    if (!cls.human && !v.engineOn) {
+      const wantsMove = dx !== 0 || dy !== 0;
+      if (!v.engineStartAt) {
+        if (!wantsMove) return; // moteur coupé, aucune tentative de partir : rien à faire
+        v.engineStartAt = Date.now();
+        announce(cls.flies ? 'Démarrage du moteur... Patientez qu\'il se stabilise avant de décoller.' : 'Démarrage du moteur...', 'assertive');
+        return;
+      }
+      const startMs = cls.flies ? 4000 : 1500;
+      if (Date.now() - v.engineStartAt < startMs) {
+        if (wantsMove) {
+          const now = Date.now();
+          if (now - (v._lastStartWarn || 0) > 1500) { v._lastStartWarn = now; announce(cls.flies ? 'Moteur pas encore stabilisé, patientez.' : 'Moteur en cours de démarrage, patientez.', 'polite'); }
+        }
+        return;
+      }
+      v.engineOn = true; v.engineStartAt = null;
+      announce(cls.flies ? 'Moteur stabilisé : vous pouvez décoller.' : 'Moteur démarré.', 'assertive');
+    }
     if (dx !== 0 || dy !== 0) v.heading = (dx > 0 ? 2 : dx < 0 ? 6 : dy > 0 ? 4 : dy < 0 ? 0 : v.heading);
     const isBraking = (dx === 0 && dy === 0);
     // Freinage brutal : freinage engagé alors qu'on roulait vite, détecté une
@@ -389,7 +414,10 @@ const Game = {
     for (let h = 0; h < 8; h += 2) { // only cardinal for vehicles
       const nx = v.x + (h === 2 ? 1 : h === 6 ? -1 : 0);
       const ny = v.y + (h === 4 ? 1 : h === 0 ? -1 : 0);
-      if (City.isSolid(nx, ny)) continue;
+      // Un avion/hélico EN VOL survole les bâtiments (comme dans driveVehicle) :
+      // sans ce cas, un appareil en altitude au-dessus d'un quartier bâti
+      // trouvait les 4 caps "solides" et le pilotage auto restait bloqué.
+      if (!(cls.flies && v.altitude > 0) && City.isSolid(nx, ny)) continue;
       const ndx = dest.x - nx, ndy = dest.y - ny;
       let score = -Math.sqrt(ndx * ndx + ndy * ndy);
       if (City.isRoad(nx, ny)) score += 4; // prefer roads
@@ -397,8 +425,13 @@ const Game = {
       if (score > bestScore) { bestScore = score; best = h; }
     }
     v.heading = best;
-    v.speed = Math.min(v.speed + cls.accel, cls.maxSpeed * (City.isRoad(v.x, v.y) ? 0.6 : 0.4));
-    this.driveVehicle(0, 0); // apply physics with current heading
+    // driveVehicle(0,0) = freinage (aucune entrée), pas "avancer dans le cap" :
+    // la conduite auto ne bougeait donc JAMAIS (elle freinait à chaque image,
+    // annulant l'accélération qu'on venait juste de lui donner ci-dessus,
+    // d'où la boucle sans avancer). driveVehicle calcule lui-même
+    // l'accélération selon le cap : on lui donne le vrai dx,dy du cap choisi.
+    const hd = this.headingToDelta(v.heading);
+    this.driveVehicle(hd.dx, hd.dy);
     // Voice guidance
     const bearing = UTIL.bearing(dest.x - v.x, dest.y - v.y);
     const remaining = Math.round(dist * CONFIG.METERS_PER_TILE);
@@ -436,8 +469,11 @@ const Game = {
     announce(`Conduite automatique vers ${this.vehicle.autoDest.name}. Je vous annonce les quartiers et les routes au fur et à mesure. Espace pour reprendre le volant à tout moment.`, 'assertive');
   },
 
-  // Menu proposé DÈS qu'on prend le volant : automatique, manuel guidé, ou
-  // libre. C'est le point d'entrée du guidage « les yeux » pour non-voyants.
+  // Menu accessible à la demande (Ctrl+J, ou Mode de conduite) : automatique,
+  // manuel guidé, ou libre. Comme tout menu du jeu, il se navigue au clavier
+  // (flèches Haut/Bas entre les cartes, Entrée pour valider) — plus de raccourci
+  // spécial qui le refermait au premier appui sur une flèche, ce qui empêchait
+  // un lecteur d'écran (dont les flèches SONT la navigation) d'y accéder.
   openDriveModeMenu(v) {
     if (!this.inVehicle || !this.vehicle) return;
     v = v || this.vehicle;
@@ -449,15 +485,11 @@ const Game = {
       { id: 'libre', title: '🚗 Conduite libre', desc: 'Conduire sans destination ni guidage.' },
     ];
     renderMenu(items, (sel) => {
-      this._driveModeMenuOpen = false;
       if (sel.id === 'libre') { closeMenu(); announce('Conduite libre. Flèches pour conduire, espace pour freiner.', 'assertive'); return; }
       this.openVehicleDestinationMenu(sel.id);
     });
     el('menuOverlay').style.display = 'flex';
-    // Drapeau : ce menu ne doit PAS bloquer la conduite. Si l'on pousse une
-    // direction, la boucle de jeu le referme et passe en conduite libre.
-    this._driveModeMenuOpen = true;
-    announce(`Vous êtes au volant de ${v.name}. Poussez une flèche pour conduire librement, ou choisissez : conduite automatique, ou conduite manuelle guidée.`, 'assertive');
+    announce(`Vous êtes au volant de ${v.name}. Choisissez : conduite automatique, manuelle guidée, ou libre (Échap pour revenir à la conduite libre directement).`, 'assertive');
   },
   // Choix de la destination pour le véhicule (mode 'auto' ou 'manuel').
   openVehicleDestinationMenu(mode) {
@@ -612,6 +644,9 @@ const Game = {
     if (this.inVehicle) {
       const cls = VEHICLE_CATALOG[this.vehicle.type];
       this.x = Math.round(this.vehicle.x); this.y = Math.round(this.vehicle.y); this.altitude = 0;
+      // Le moteur se coupe en descendant : il faudra le redémarrer (et le
+      // laisser se stabiliser pour un avion/hélico) au prochain tour au volant.
+      this.vehicle.engineOn = false; this.vehicle.engineStartAt = null;
       this.inVehicle = false; this.vehicle.auto = false; Audio.stopEngine(); RealEngine.stop(); RealEngine2.stop(); RealElectricEngine.stop(); RealAirEngine.stop(); AudioLib.stopLoop('veh_essuie_glaces');
       if (this.vehicle.siren) { const sk = SIREN_SOUNDS[this.vehicle.type]; if (sk) AudioLib.stopLoop(sk); this.vehicle.siren = false; }
       if (cls && !cls.flies && !cls.human) { // pas de portière/ceinture/frein à main pour un vélo
@@ -691,8 +726,8 @@ const Game = {
     // un lieu précis, le téléphone (Lieux utiles / Carte, bouton 🧭) reste
     // disponible à tout moment, sans jamais bloquer la conduite libre.
     if (cls?.human) announce(`Vous enfourchez ${v.name}. Flèches pour pédaler et tourner, espace pour freiner.`, 'assertive');
-    else if (cls?.doors === 0) announce(`Vous enfourchez ${v.name}. Flèches pour accélérer et tourner, espace pour freiner.`, 'assertive'); // moto / scooter / quad : on accélère, on ne pédale pas
-    else announce(`Vous montez au volant de ${v.name}. Flèches pour conduire, espace pour freiner.`, 'assertive');
+    else if (cls?.doors === 0) announce(`Vous enfourchez ${v.name}. Flèche haut pour démarrer le moteur, puis accélérer et tourner, espace pour freiner.`, 'assertive'); // moto / scooter / quad : on accélère, on ne pédale pas
+    else announce(`Vous montez au volant de ${v.name}. Flèche haut pour démarrer le moteur${cls?.flies ? ' et le laisser se stabiliser' : ''}, puis conduire. Espace pour freiner.`, 'assertive');
     if (this.activeMission && this.activeMission.type === 'convoyage' && this.activeMission.vehicleId === v.id && !this.deliveryState) this.startVehicleDelivery(this.activeMission);
     this._vehProg = null; // réinitialise le suivi de progression
     updateHud();
