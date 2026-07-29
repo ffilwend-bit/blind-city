@@ -607,6 +607,8 @@ Game.openFlightSchool = function() {
     { id: 'theorie', title: this.flightTheoryPassed ? '✅ Théorie déjà validée' : '📖 Examen théorique (règles de vol)', desc: this.flightTheoryPassed ? 'Vous pouvez passer à la pratique.' : 'Obligatoire avant l\'examen pratique.' },
     { id: 'exam', title: this.flightTheoryPassed ? '📋 Passer l\'examen pratique (35 000 FCFA)' : '🔒 Examen pratique (verrouillé)', desc: this.flightTheoryPassed ? 'Un circuit aérien en hélicoptère-école (plein d\'essence fourni), avec prise d\'altitude, à parcourir sans collision. Le permis obtenu vaut aussi pour les avions.' : 'Réussissez d\'abord la théorie.' },
   ];
+  el('menuOverlay').style.display = 'flex';
+  announce('École de pilotage. Choisissez : tutoriel vocal, examen théorique, ou examen pratique. Commencez par le tutoriel puis la théorie.', 'polite');
   renderMenu(items, (sel) => {
     closeMenu();
     if (sel.id === 'tuto') this.flightTutorial();
@@ -795,15 +797,6 @@ Game.buyFromDialog = function(index) {
   announce(`Vous achetez ${it.name}.`, 'assertive');
 };
 Game.closeShopDialog = function() { el('shopDialog').style.display = 'none'; this.shopContext = null; };
-
-// Override enterPOI to use new shop dialog for relevant types
-const originalEnterPOI = Game.enterPOI;
-Game.enterPOI = function(poi) {
-  if (['magasin','restaurant','pharmacie','armurerie','quincaillerie','electronique'].includes(poi.type)) {
-    this.openShopDialog(poi); return;
-  }
-  originalEnterPOI.call(this, poi);
-};
 
 // Override talkTo to add role actions
 const originalTalkTo = Game.talkTo;

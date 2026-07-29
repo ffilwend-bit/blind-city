@@ -82,6 +82,7 @@ function setupExtraInput() {
       else if (!live.menotte) { announce('Aucune cible menottée verrouillée.', 'assertive'); }
       else { live.follow = !live.follow; announce(live.follow ? `${live.name} vous suit.` : `${live.name} ne vous suit plus.`, 'assertive'); }
     }
+    else if (key === 'f6') { e.preventDefault(); Game.announceStatus(); } // bilan vocal : santé, faim, soif, énergie, argent, essence
     else if (key === 'f9') { e.preventDefault(); Game.searchSelf(); }
     else if (key === 'f10') { e.preventDefault(); Game.openVehicleMenu(); }
     else if (key === 'f11') { e.preventDefault(); Game.toggleSiren(); }
@@ -882,7 +883,7 @@ Game.estimateVehicleFromCatalog = function() {
   renderMenu(items, (sel) => {
     closeMenu();
     const v = VEHICLE_CATALOG[sel.id];
-    announce(`${v.name} : ${UTIL.formatMoney(v.price)}, ${v.seats} place(s), coffre ${v.trunk}, ${v.electric ? 'électrique' : v.flies ? 'volant' : 'thermique'}.`, 'assertive');
+    announce(`${v.name} : ${UTIL.formatMoney(v.price)}, ${v.seats} place(s), coffre ${v.trunk}, ${v.human ? 'à pédales' : v.electric ? 'électrique' : v.flies ? 'volant' : 'thermique'}.`, 'assertive');
   });
 };
 Game.sellVehicleToBuyer = function() {

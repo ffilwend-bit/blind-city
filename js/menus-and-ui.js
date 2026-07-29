@@ -788,7 +788,7 @@ function openVehicleCategoryItems(poi, groups, groupName, available) {
   const items = indices.map(i => {
     const v = available[i];
     const tag = v.restricted ? ' — Réservé police' : '';
-    return { id: 'veh_' + i, title: `${v.name}${tag} — ${UTIL.formatMoney(v.price)}`, desc: `${v.seats} place(s), coffre ${v.trunk}, ${v.electric ? 'électrique' : v.flies ? 'volant' : 'thermique'}.${v.restricted ? ' Achat réservé aux policiers en service, via le menu police.' : ''}` };
+    return { id: 'veh_' + i, title: `${v.name}${tag} — ${UTIL.formatMoney(v.price)}`, desc: `${v.seats} place(s), coffre ${v.trunk}, ${v.human ? 'à pédales' : v.electric ? 'électrique' : v.flies ? 'volant' : 'thermique'}.${v.restricted ? ' Achat réservé aux policiers en service, via le menu police.' : ''}` };
   });
   items.push({ id: 'back', title: '↩️ Retour aux catégories', desc: '' });
   renderMenu(items, (sel) => {

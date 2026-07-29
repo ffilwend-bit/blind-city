@@ -287,7 +287,11 @@ const Game = {
       if (City.isRoad(v.x, v.y)) this.npcVoiceReaction(v.x, v.y, { group: 'impatient', radius: 12, count: 2 });
     } else {
       v.x = UTIL.clamp(nx, 0, City.W - 1); v.y = UTIL.clamp(ny, 0, City.H - 1);
-      if (!noFuelNeeded) v.fuel = Math.max(0, v.fuel - Math.abs(v.speed) * 0.002);
+      // Consommation ~ constante par case parcourue, quelle que soit la vitesse
+      // (step = v.speed * MOVE_SCALE, donc fuel/case = ratio * 12). Avant, un
+      // plein ne couvrait qu'environ 167 mètres (0,002 * 12 par case) — bien
+      // trop peu pour un réservoir plein. Réduit à ~8 km par plein.
+      if (!noFuelNeeded) v.fuel = Math.max(0, v.fuel - Math.abs(v.speed) * 0.00004);
       // Conduite tout-terrain à vitesse notable : chance occasionnelle de
       // taper un trou (juste un bruit, pas de dégâts — la route cahoteuse).
       if (offroadFactor < 1 && Math.abs(v.speed) > cls.maxSpeed * 0.3 && UTIL.chance(0.03)) {
@@ -866,6 +870,21 @@ const Game = {
     const vol = this.inventoryVolume(), cap = this.inventoryCapacity();
     announce(`Inventaire : ${parts}. Volume ${vol.toFixed(1)} sur ${cap}.`, 'polite');
   },
+  // Bilan vocal de son propre état : santé, faim, soif, énergie, argent (poche,
+  // banque, sale), et essence/batterie si en véhicule — rien de tout ça
+  // n'était consultable auparavant (seul un HUD visuel existait, inutile pour
+  // un joueur aveugle).
+  announceStatus() {
+    const parts = [`Santé ${Math.round(this.health)}%`, `faim à ${Math.round(this.hunger)}%`, `soif à ${Math.round(this.thirst)}%`, `énergie ${Math.round(this.energy)}%`];
+    parts.push(`argent en poche : ${UTIL.formatMoney(this.money)}`);
+    if (this.bank) parts.push(`en banque : ${UTIL.formatMoney(this.bank)}`);
+    if (this.dirtyMoney) parts.push(`argent sale : ${UTIL.formatMoney(this.dirtyMoney)}`);
+    if (this.inVehicle && this.vehicle) {
+      const cls = VEHICLE_CATALOG[this.vehicle.type];
+      if (!cls.human) parts.push(`${cls.electric ? 'batterie' : 'essence'} ${Math.round(this.vehicle.fuel * 100)}%`);
+    }
+    announce(parts.join(', ') + '.', 'polite');
+  },
   announceLocation() {
     const d = City.getDistrictAt(this.x, this.y);
     const street = City.isRoad(this.x, this.y) ? 'sur la route' : `près d\'un ${City.getTile(this.x, this.y)}`;
@@ -1207,12 +1226,17 @@ const Game = {
     let instr = this._turnInstruction(diff, meters);
     let nextDir = -1;
     if (e < path.length - 1) nextDir = this._dirOf(path[e].x, path[e].y, path[e + 1].x, path[e + 1].y);
-    if (nextDir >= 0) {
+    if (nextDir < 0) {
+      instr += ', vous arrivez';
+    } else if (distToTurn <= 6) {
+      // Aperçu du virage suivant donné seulement s'il est PROCHE : annoncé dès
+      // le début d'un long segment droit (ex. "Tout droit, 92 mètres, puis à
+      // droite"), ce "puis à droite" final ressemblait à une consigne
+      // immédiate et poussait à tourner bien trop tôt — d'où le zigzag
+      // rapporté (le joueur tournait puis devait sans cesse se corriger).
       const nd = ((nextDir - firstDir) % 8 + 8) % 8;
       const w = nd === 2 ? 'à droite' : nd === 6 ? 'à gauche' : nd === 4 ? 'demi-tour' : '';
-      if (w) instr += `, puis ${w}`;
-    } else {
-      instr += ', vous arrivez';
+      if (w) instr += `, bientôt ${w}`;
     }
     return instr + '.';
   },
@@ -2153,6 +2177,26 @@ const Game = {
       const myPos = this.inVehicle && this.vehicle ? this.vehicle : this;
       if (client && UTIL.dist(client, myPos) < 3) return this.openEscorteBoardMenu(client, this.activeMission);
     }
+    // Station-service ou parking à proximité, en véhicule : on propose le
+    // choix plutôt que de forcer la descente automatiquement. Avant, E en
+    // véhicule appelait TOUJOURS interactVehicle() (qui fait descendre), donc
+    // faire le plein était en fait impossible — refuelVehicle() exige d'être
+    // dans le véhicule, mais on en était déjà sorti avant de pouvoir l'appeler.
+    if (this.inVehicle && this.vehicle) {
+      const servicePoi = City.pois.find(p => (p.type === 'station_essence' || p.type === 'garage') && UTIL.dist(p, this.vehicle) < 4);
+      if (servicePoi) {
+        const label = servicePoi.type === 'station_essence' ? '⛽ Faire le plein / recharger' : '🅿️ Se garer ici';
+        if (typeof ensureMenuOpen === 'function') ensureMenuOpen(); else el('menuOverlay').style.display = 'flex';
+        el('menuTitle').textContent = servicePoi.name;
+        const items = [
+          { id: 'service', title: label, desc: 'Rester au volant.' },
+          { id: 'exit', title: '🚪 Descendre du véhicule', desc: '' },
+        ];
+        renderMenu(items, (sel) => { closeMenu(); if (sel.id === 'service') this.enterPOI(servicePoi); else this.interactVehicle(); });
+        announce(`${servicePoi.name} à proximité. Restez au volant pour utiliser le service, ou descendez.`, 'assertive');
+        return;
+      }
+    }
     if (this.inVehicle) return this.interactVehicle();
     // On rassemble TOUT ce avec quoi on peut interagir à portée (joueurs, PNJ,
     // bâtiments, maisons, véhicules, mine, gang, objets au sol). S'il n'y a
@@ -2400,7 +2444,7 @@ const Game = {
     });
   },
   enterPOI(poi) {
-    if (poi.type === 'magasin' || poi.type === 'restaurant' || poi.type === 'pharmacie' || poi.type === 'vetements') { this.openShop(poi); }
+    if (poi.type === 'magasin' || poi.type === 'restaurant' || poi.type === 'pharmacie' || poi.type === 'vetements' || poi.type === 'quincaillerie' || poi.type === 'electronique') { this.openShop(poi); }
     else if (poi.type === 'armurerie') { this.openShop(poi); }
     else if (poi.type === 'marche_noir') { this.openShop(poi); }
     else if (poi.type === 'marche_noir_lointain') {
@@ -4686,7 +4730,7 @@ const Game = {
     announce('Conduite automatique : dites un lieu, par exemple hôpital, police, banque, magasin, armurerie, aéroport, héliport, port, mine.', 'polite');
   },
   help() {
-    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+G arrêter le guidage, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
+    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+G arrêter le guidage, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
   },
 
   // Save / load
