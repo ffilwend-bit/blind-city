@@ -1158,7 +1158,20 @@ Game.openVehicleMenu = function() {
     if (!v) return announce('Aucun véhicule à proximité.', 'assertive');
     return this.openVehicleInfo(v);
   }
-  this.openVehicleInfo(this.vehicle);
+  // Au volant : proposer aussi le mode de conduite (auto/manuel guidé/libre),
+  // à la demande seulement — il ne s'ouvre plus tout seul en montant.
+  if (typeof ensureMenuOpen === 'function') ensureMenuOpen();
+  el('menuTitle').textContent = `Véhicule : ${this.vehicle.name}`;
+  const items = [
+    { id: 'info', title: 'ℹ️ Infos du véhicule', desc: 'Puissance, essence, état, portes, passagers.' },
+    { id: 'drivemode', title: '🧭 Mode de conduite', desc: 'Choisir conduite automatique, manuelle guidée, ou revenir à la conduite libre.' },
+  ];
+  el('menuOverlay').style.display = 'flex';
+  renderMenu(items, (sel) => {
+    closeMenu();
+    if (sel.id === 'info') this.openVehicleInfo(this.vehicle);
+    else if (sel.id === 'drivemode') this.openDriveModeMenu(this.vehicle);
+  });
 };
 Game.openVehicleInfo = function(v) {
   const cls = VEHICLE_CATALOG[v.type];

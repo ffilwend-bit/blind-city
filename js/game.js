@@ -659,18 +659,17 @@ const Game = {
       setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
     }
     this.vehicle = v; this.inVehicle = true; this.altitude = v.altitude || 0; this.floor = 0;
+    // On conduit TOUT DE SUITE avec les flèches, librement, sans qu'aucun menu
+    // ne s'impose : c'était la principale source de confusion (« impossible
+    // d'avancer sans choisir de destination d'abord »). Pour un guidage vers
+    // un lieu précis, le téléphone (Lieux utiles / Carte, bouton 🧭) reste
+    // disponible à tout moment, sans jamais bloquer la conduite libre.
     if (cls?.human) announce(`Vous enfourchez ${v.name}. Flèches pour pédaler et tourner, espace pour freiner.`, 'assertive');
     else if (cls?.doors === 0) announce(`Vous enfourchez ${v.name}. Flèches pour accélérer et tourner, espace pour freiner.`, 'assertive'); // moto / scooter / quad : on accélère, on ne pédale pas
-    else announce(`Vous montez au volant de ${v.name}. Flèches pour conduire, espace pour freiner, M pour conduite auto.`, 'assertive');
+    else announce(`Vous montez au volant de ${v.name}. Flèches pour conduire, espace pour freiner.`, 'assertive');
     if (this.activeMission && this.activeMission.type === 'convoyage' && this.activeMission.vehicleId === v.id && !this.deliveryState) this.startVehicleDelivery(this.activeMission);
     this._vehProg = null; // réinitialise le suivi de progression
     updateHud();
-    // Menu de conduite (automatique / manuel guidé / libre) — sauf en pleine
-    // mission de convoyage (déroulé propre) et sauf pour le VÉHICULE-ÉCOLE, qui
-    // a son propre guidage d'examen : on va droit à la conduite manuelle.
-    if (!v.examVehicle && !(this.activeMission && this.activeMission.type === 'convoyage')) {
-      setTimeout(() => { if (this.inVehicle && this.vehicle === v) this.openDriveModeMenu(v); }, 500);
-    }
   },
   enterAsPassengerSeat(v, driver) {
     // Un chauffeur réel conduit : on le suit en direct (position du chauffeur).

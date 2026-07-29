@@ -576,7 +576,11 @@ Game.tickDrivingExam = function() {
     }
   }
   const target = es.waypoints[es.current];
-  if (UTIL.dist(this.vehicle, target) < 4) {
+  // Rayon d'arrivée élargi selon la vitesse actuelle : à pleine vitesse le
+  // véhicule parcourt largement plus de 4 cases entre deux vérifications,
+  // et le franchissait sans jamais être détecté « arrivé ».
+  const arrivalRadius = Math.max(4, Math.abs(this.vehicle.speed) * 10);
+  if (UTIL.dist(this.vehicle, target) < arrivalRadius) {
     es.current++;
     if (es.current >= es.waypoints.length) {
       this.licenses.driving = true;
@@ -685,7 +689,10 @@ Game.tickFlightExam = function() {
     }
   }
   const target = es.waypoints[es.current];
-  const closeEnough = UTIL.dist(this.vehicle, target) < 4;
+  // Même correctif que l'examen de conduite : rayon élargi selon la vitesse
+  // actuelle, sinon l'appareil dépasse le point sans jamais être détecté.
+  const arrivalRadius = Math.max(4, Math.abs(this.vehicle.speed) * 10);
+  const closeEnough = UTIL.dist(this.vehicle, target) < arrivalRadius;
   const altitudeOk = target.altitude === 0 ? this.vehicle.altitude < 3 : this.vehicle.altitude >= target.altitude - 8;
   if (closeEnough && altitudeOk) {
     es.current++;

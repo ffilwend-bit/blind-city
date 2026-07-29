@@ -1471,8 +1471,13 @@ function startGame(seed) {
     setInterval(() => Game.vendorTick(), 2000);
     setInterval(() => Game.refreshTargetValidity(), 1500);
     setInterval(() => Game.tickUnconscious(), 5000);
-    setInterval(() => Game.tickDrivingExam(), 1000);
-    setInterval(() => Game.tickFlightExam(), 1000);
+    // Vérifié seulement 1x/seconde avant : à pleine vitesse un véhicule
+    // traverse largement plus que le rayon d'arrivée (4 cases) entre deux
+    // vérifications, donc il dépassait le point sans jamais être détecté
+    // « arrivé » — d'où le guidage qui répétait sans fin qu'on ne progresse
+    // pas. Vérifié bien plus souvent maintenant.
+    setInterval(() => Game.tickDrivingExam(), 150);
+    setInterval(() => Game.tickFlightExam(), 150);
   } catch (e) { console.error('Mise en place des intervalles en échec :', e); }
   gameLoop();
 }
