@@ -428,7 +428,7 @@ const City = {
 
   generateMines() {
     for (let i = 0; i < CONFIG.MINING_SITES; i++) {
-      const d = this.districts.find(x => x.type === 'mine') || this.districts[8];
+      const d = this.districts.find(x => x.type === 'mine') || this.districts[0];
       const pos = this.findFree(d.x1 + 5, d.y1 + 5, d.x2 - 5, d.y2 - 5);
       this.setTile(pos.x, pos.y, 'mine');
       for (let r = 0; r < 3; r++) this.setTile(pos.x + r, pos.y + r, 'mine');
@@ -440,10 +440,10 @@ const City = {
   generateGangs() {
     const names = ['Les Loups Rouges', 'Mains Noires', 'Cartel du Sud', 'Vipères Bleues', 'Requins de la Nuit'];
     for (let i = 0; i < CONFIG.GANG_COUNT; i++) {
-      const d = this.districts.find(x => x.type === 'ghetto') || this.districts[9];
+      const d = this.districts.find(x => x.type === 'ghetto') || this.districts[0];
       const pos = this.findFree(d.x1 + 3, d.y1 + 3, d.x2 - 3, d.y2 - 3);
       this.setTile(pos.x, pos.y, 'gang_hideout');
-      this.gangs.push({ id: 'gang_' + i, name: names[i], x: pos.x, y: pos.y, power: UTIL.randInt(20, 80), relation: -20, members: UTIL.randInt(3, 8) });
+      this.gangs.push({ id: 'gang_' + i, name: names[i % names.length], x: pos.x, y: pos.y, power: UTIL.randInt(20, 80), relation: -20, members: UTIL.randInt(3, 8) });
     }
   },
 

@@ -1601,6 +1601,7 @@ const Game = {
     updateHud();
   },
   shoot() {
+    if (this.cooldown) return; // cadence de l'arme : this.cooldown était défini mais jamais vérifié, la cadence n'était jamais appliquée
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
     if (this.isCuffed) return announce('Vous êtes menotté(e), impossible d\'agir.', 'polite');
     if (!this.weaponOut || !this.weapon) return announce('Sortez d\'abord une arme.', 'assertive');
@@ -2321,7 +2322,10 @@ const Game = {
     }
     if (npc.job === 'commercant' || npc.job === 'vendeur') this.openShop(npc);
     if (npc.job === 'mecanicien') this.repairVehicle();
-    if (npc.job === 'medecin') { this.heal(30); this.money -= 5000; announce('Soins médicaux : 5 000 FCFA.', 'polite'); }
+    if (npc.job === 'medecin') {
+      if (this.money < 5000) return announce('Soins médicaux : 5 000 FCFA. Fonds insuffisants.', 'assertive');
+      this.heal(30); this.money -= 5000; announce('Soins médicaux : 5 000 FCFA.', 'polite');
+    }
   },
   describeOutfit() {
     const o = this.outfit;
@@ -2767,7 +2771,6 @@ const Game = {
     if (it.q <= 0) return announce('Rupture de stock.', 'assertive');
     this.money -= it.price; it.q--;
     const bought = { ...it, q: 1 };
-    delete bought.q; bought.q = 1;
     this.addItem(bought);
     Audio.cash();
     announce(`Vous achetez ${it.name} pour ${UTIL.formatMoney(it.price)}.`, 'assertive');
@@ -3245,6 +3248,7 @@ const Game = {
   },
   executeExplosiveHeist(bank) {
     const grenade = this.inventory.find(i => i.category === 'explosif');
+    if (!grenade) return announce('Il vous faut une grenade pour faire sauter ce coffre. Le marché noir en vend.', 'assertive');
     this.removeItem(grenade.id, 1);
     this.heistState = { forced: true, alarmed: false, hostage: false, bank, explosive: true };
     announce('Vous placez la charge et reculez...', 'assertive');
@@ -3401,7 +3405,7 @@ const Game = {
         health: 100, relation: -100, money: UTIL.randInt(2000, 15000), inCar: false,
         dialogue: ['Dégage de mon territoire !', 'Vous n\'auriez pas dû venir ici.', 'On va vous faire regretter ça !'],
         home: { x: gang.x, y: gang.y }, hostile: true,
-        weapon: UTIL.pick(pool), gender_: gender, outfit: generateNPCAppearance(job),
+        weapon: UTIL.pick(pool), outfit: generateNPCAppearance(job),
       };
       City.npcs.push(npc);
       npcIds.push(npc.id);

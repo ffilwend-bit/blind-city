@@ -132,7 +132,7 @@ function generateShopCatalog() {
       catalog.push({ id: id('lun', catalog.length), name: `${l} ${c}`, category: 'accessoire', price: UTIL.randInt(5000, 95000), size: 0.4, legal: true, desc: `${l} de couleur ${c}.` });
     }
   }
-  const bijoux = ['bague','collier','bracelet','montre','boucles d\'oreilles','pendentif','chaîne',' gourmette'];
+  const bijoux = ['bague','collier','bracelet','montre','boucles d\'oreilles','pendentif','chaîne','gourmette'];
   const matiere = ['argent','or','acier','cuivre','plastique','bois','tissu','céramique'];
   for (let b of bijoux) {
     for (let m of matiere) {

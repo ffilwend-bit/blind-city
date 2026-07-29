@@ -147,24 +147,6 @@ const Phone = {
       a.innerHTML = '<h3>🚗 Garage App</h3><div id="garageAppList"></div><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
       this.renderGarageApp();
     }
-    if (name === 'map') {
-      a.innerHTML = '<h3>🗺️ Carte</h3><p style="color:var(--muted);font-size:0.85rem;">Votre position : ' + Game.getDistrictName() + '</p><ul class="contact-list" id="phoneMapList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
-      const ul = el('phoneMapList');
-      // TOUS les lieux de la ville, du plus proche au plus loin (avant : 12
-      // seulement). Chaque lieu offre le guidage à pied (qui contourne les murs)
-      // et la conduite automatique.
-      const mapPois = City.pois.map(p => ({ p, d: UTIL.dist(p, Game) })).sort((a, b) => a.d - b.d).map(o => o.p);
-      mapPois.forEach(p => {
-        const dist = Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE);
-        const dir = UTIL.bearing(p.x - Game.x, p.y - Game.y);
-        const li = document.createElement('li');
-        li.innerHTML = `<span>${p.name} (${dist} m, ${dir})</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers ${p.name}, ${dist} mètres, direction ${dir}">🚶</button><button class="phone-btn" data-drive aria-label="Conduite automatique vers ${p.name}, ${dist} mètres">🧭</button>`;
-        li.querySelector('[data-walk]').addEventListener('click', () => { Game.setGuidance({ name: p.name, x: p.x, y: p.y }); Phone.closePhone(); });
-        li.querySelector('[data-drive]').addEventListener('click', () => { Game.setAutoDrive(p.type, p.name); Phone.closePhone(); });
-        ul.appendChild(li);
-      });
-      this._makeListAccessible(ul, `Carte : ${mapPois.length} lieux dans toute la ville, du plus proche au plus loin. Balayez d'un doigt pour parcourir, double tapez pour vous faire guider à pied ou en voiture.`);
-    }
     if (name === 'missions') {
       Game.openMissions();
       Phone.renderHome();
@@ -254,27 +236,8 @@ const Phone = {
       });
       if (places.length) this._makeListAccessible(ul, `Mes lieux : ${places.length} enregistré${places.length > 1 ? 's' : ''}. Balayez d'un doigt pour parcourir, double tapez pour vous faire guider ou supprimer.`);
     }
-    if (name === 'citymap') {
-      a.innerHTML = `<h3>🗺️ Carte de la ville</h3><p style="color:var(--muted);font-size:0.75rem;">Ville de ${City.W * CONFIG.METERS_PER_TILE} m sur ${City.H * CONFIG.METERS_PER_TILE} m, ${City.districts.length} quartiers.</p><ul class="contact-list" id="phoneCityMapList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>`;
-      const ul = el('phoneCityMapList');
-      const here = City.getDistrictAt(Game.x, Game.y);
-      City.districts.forEach(d => {
-        const cx = (d.x1 + d.x2) / 2, cy = (d.y1 + d.y2) / 2;
-        const li = document.createElement('li');
-        if (d.name === here.name) {
-          li.innerHTML = `<span>📍 ${d.name} (vous êtes ici)</span>`;
-        } else {
-          const dir = UTIL.bearing(cx - Game.x, cy - Game.y);
-          const dist = Math.round(UTIL.dist({ x: cx, y: cy }, Game) * CONFIG.METERS_PER_TILE);
-          li.innerHTML = `<span>${d.name} — vers le ${dir}, ${dist} m</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers le quartier ${d.name}, vers le ${dir}, ${dist} mètres">🚶</button>`;
-          li.querySelector('[data-walk]').addEventListener('click', () => { Game.setGuidance({ name: d.name, x: cx, y: cy }); Phone.closePhone(); });
-        }
-        ul.appendChild(li);
-      });
-      this._makeListAccessible(ul, `Carte de la ville. Vous êtes dans ${here.name}. Balayez d'un doigt vers la gauche ou la droite pour parcourir les quartiers ; double tapez pour vous faire guider à pied vers l'un d'eux.`);
-    }
     if (name === 'jobs') {
-      a.innerHTML = '<h3>🛡️ Métiers</h3><p style="color:var(--muted);font-size:0.8rem;">Métier actuel : <strong>' + Roles.list[Roles.current].name + '</strong></p><ul class="contact-list" id="phoneJobsList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
+      a.innerHTML = '<h3>🛡️ Métiers</h3><p style="color:var(--muted);font-size:0.8rem;">Métier actuel : <strong>' + (Roles.list[Roles.current]?.name || Roles.current) + '</strong></p><ul class="contact-list" id="phoneJobsList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
       const ul = el('phoneJobsList');
       Object.entries(Roles.list).forEach(([k, v]) => {
         const li = document.createElement('li'); li.innerHTML = `<span>${v.name}${v.free ? '' : ' (validation requise)'}</span><button class="phone-btn">Postuler</button>`;
