@@ -6,7 +6,7 @@ const Game = {
   weapons: [], weapon: null, weaponOut: false, ammo: {}, ammoReserve: {},
   lockedTarget: null, scannedTargets: [], aimPart: 'torse',
   activeMission: null, completedMissions: [],
-  ownedHouses: [], ownedWarehouses: [], savedPlaces: [], ownsTablet: false,
+  ownedHouses: [], ownedWarehouses: [], savedPlaces: [], ownsTablet: false, plantations: [],
   phones: [], activePhoneIndex: 0,
   wanted: 0, policeAwareness: 0,
   keys: new Set(), lastMoved: 0,
@@ -1862,7 +1862,7 @@ const Game = {
   },
   // Entrer dans un bâtiment via sa porte (annonce + son), puis ouvrir le lieu.
   enterBuilding(poi) {
-    const noDoor = ['station_essence', 'mine', 'aeroport', 'heliport', 'port'];
+    const noDoor = ['station_essence', 'mine', 'aeroport', 'heliport', 'port', 'terrain_agricole'];
     if (!noDoor.includes(poi.type)) this.announceEnterBuilding(poi.name, 'porte', poi);
     this.enterPOI(poi);
   },
@@ -2057,8 +2057,6 @@ const Game = {
     }
     // Piscine (maison de standing) : E pour se baigner directement.
     if (it.room === 'piscine') return this.diveInWater();
-    // Jardin : E pour planter des graines, ou récolter si c'est prêt.
-    if (it.room === 'jardin') return this.tendGarden();
     // Un meuble sous les pieds OU juste à côté : on l'utilise directement.
     const obj = this._objectNear(it.ix, it.iy);
     if (obj) return this.interactFurniture(obj);
@@ -2404,6 +2402,7 @@ const Game = {
     else if (poi.type === 'mine') { const mine = City.miningSites.find(m => m.x === poi.x && m.y === poi.y); if (mine) { if (!this.miningMachine) announce(`Site minier. Ressource : ${mine.resource}. Achetez une machine d'extraction (750 000 FCFA, touche Ctrl+M) pour un bien meilleur rendement.`, 'polite'); this.mine(mine); } }
     else if (poi.type === 'entrepot') { this.openWarehouse(poi); }
     else if (poi.type === 'garage') { this.openPublicParking(poi); }
+    else if (poi.type === 'terrain_agricole') { this.tendFarm(poi); }
     else if (poi.type === 'animalerie') { if (typeof GuideDog !== 'undefined') GuideDog.openPetShopMenu(); }
     else if (poi.type === 'veterinaire') { if (typeof GuideDog !== 'undefined') GuideDog.openVetMenu(); }
     else if (poi.type === 'qg_extreme') {
@@ -2675,6 +2674,48 @@ const Game = {
       announce(`Parking public : ${poi.name}. Vous n'avez pas encore de véhicule à y garer.`, 'polite');
     }
   },
+  // Terrain agricole : culture de drogue sur plusieurs jours RÉELS, y compris
+  // hors ligne (basé sur une vraie date de plantation, pas sur un minuteur de
+  // jeu) — pas à la maison, il faut se déplacer jusqu'à un terrain rural.
+  MAX_FARM_PLOTS: 3,
+  FARM_GROW_MS: 3 * 24 * 60 * 60 * 1000, // 3 jours réels avant récolte
+  tendFarm(poi) {
+    this.plantations = this.plantations || [];
+    const now = Date.now();
+    const ready = this.plantations.filter(p => now - p.plantedAt >= p.durationMs);
+    if (ready.length) {
+      let totalQty = 0; const names = new Set();
+      ready.forEach(p => {
+        const drug = DRUG_CATALOG.find(d => d.id === p.drugId);
+        const qty = UTIL.randInt(4, 10);
+        this.addItem({ ...drug, q: qty });
+        totalQty += qty; names.add(drug?.name || 'plants');
+      });
+      this.plantations = this.plantations.filter(p => !ready.includes(p));
+      announce(`Récolte à ${poi.name} : ${totalQty} ${Array.from(names).join(', ')} ! C'est illégal, évitez de vous faire remarquer.`, 'assertive');
+      updateHud();
+      if (UTIL.chance(0.15)) this.reportCrimeToPolice('culture_drogue', poi.name);
+      return;
+    }
+    const seed = this.inventory.find(i => i.id === 'graines_herbe');
+    const hasCapacity = this.plantations.length < this.MAX_FARM_PLOTS;
+    if (hasCapacity && seed) {
+      this.removeItem('graines_herbe', 1);
+      this.plantations.push({ id: 'plot_' + now, drugId: 'herbe', plantedAt: now, durationMs: this.FARM_GROW_MS });
+      announce(`Vous préparez une parcelle à ${poi.name} et semez des graines de chanvre. Revenez dans environ 3 jours pour la récolte — la pousse continue même hors ligne.`, 'assertive');
+      updateHud();
+      return;
+    }
+    if (this.plantations.length) {
+      const next = this.plantations.slice().sort((a, b) => (a.plantedAt + a.durationMs) - (b.plantedAt + b.durationMs))[0];
+      const remainMs = next.durationMs - (now - next.plantedAt);
+      const days = Math.max(1, Math.ceil(remainMs / 86400000));
+      const full = !hasCapacity ? ` Vous avez déjà ${this.MAX_FARM_PLOTS} parcelles (maximum).` : '';
+      announce(`${this.plantations.length} parcelle(s) en cours de pousse.${full} La prochaine récolte sera prête dans environ ${days} jour(s).`, 'polite');
+      return;
+    }
+    announce('Vous n\'avez pas de graines à planter. Achetez-en au marché noir.', 'assertive');
+  },
   aircraftMenu(poi) {
     const types = poi.type === 'heliport' ? ['helico'] : ['avion'];
     const list = City.vehicles.filter(v => types.includes(v.type) && !v.owner);
@@ -2905,34 +2946,6 @@ const Game = {
   // Système d'eau : plonger fait basculer entre nager en surface (pas dans
   // l'eau) et nager sous l'eau (immersion). Boire ne fonctionne que dans
   // l'eau, et réduit vraiment la soif.
-  // Jardin de la maison : planter des graines (achetées au marché noir), puis
-  // revenir plus tard récolter. Illégal comme toute détention de stupéfiant :
-  // la récolte a une chance d'alerter la police, comme d'autres actes illégaux.
-  tendGarden() {
-    const house = this.interior && this.interior.ref;
-    if (!house) return announce('Aucun jardin ici.', 'assertive');
-    if (house.plantation) {
-      const elapsed = Date.now() - house.plantation.startedAt;
-      const drug = DRUG_CATALOG.find(d => d.id === house.plantation.drugId);
-      if (elapsed >= house.plantation.durationMs) {
-        const qty = UTIL.randInt(3, 8);
-        this.addItem({ ...drug, q: qty });
-        announce(`Récolte : ${qty} ${drug?.name || 'plants'} ! C'est illégal, évitez de vous faire remarquer.`, 'assertive');
-        house.plantation = null;
-        updateHud();
-        if (UTIL.chance(0.15)) this.reportCrimeToPolice('culture_drogue', house.name);
-      } else {
-        const remainMin = Math.max(1, Math.ceil((house.plantation.durationMs - elapsed) / 60000));
-        announce(`Vos plants de ${drug?.name.toLowerCase() || 'chanvre'} poussent encore. Environ ${remainMin} minute(s) avant la récolte.`, 'polite');
-      }
-      return;
-    }
-    const seed = this.inventory.find(i => i.id === 'graines_herbe');
-    if (!seed) return announce('Vous n\'avez pas de graines à planter. Achetez-en au marché noir.', 'assertive');
-    this.removeItem('graines_herbe', 1);
-    house.plantation = { drugId: 'herbe', startedAt: Date.now(), durationMs: 6 * 60 * 1000 };
-    announce('Vous plantez des graines de chanvre dans le jardin. Revenez dans environ 6 minutes pour la récolte.', 'assertive');
-  },
   diveInWater() {
     if (this.inVehicle) return announce('Descendez d\'abord du véhicule.', 'assertive');
     if (!this.inWater) return announce('Il n\'y a pas d\'eau ici pour plonger.', 'assertive');
@@ -4644,6 +4657,10 @@ const Game = {
       // n'existeraient simplement plus après un rechargement.
       ownedVehicleData: this.ownedVehicles.map(id => City.vehicles.find(v => v.id === id)).filter(Boolean),
       ownedHouses: this.ownedHouses, ownedWarehouses: this.ownedWarehouses, wanted: this.wanted,
+      // Terrain agricole : basé sur de vraies dates (plantedAt), donc la
+      // pousse continue même hors ligne — doit impérativement survivre à la
+      // déconnexion, d'où la présence ici comme le reste des biens possédés.
+      plantations: this.plantations,
       completedMissions: this.completedMissions, activeMissionId: this.activeMission?.id || null,
       role: this.role, policeRank: this.policeRank, licenses: this.licenses, skills: this.skills,
       will: this.will, tickets: this.tickets, invoices: this.invoices,

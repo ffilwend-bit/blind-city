@@ -15,7 +15,6 @@ const INTERIOR_TYPES = {
       { name: 'salon', x: 0, y: 2, w: 4, h: 3 },
       { name: 'cuisine', x: 4, y: 2, w: 3, h: 3 },
       { name: 'chambre', x: 3, y: 0, w: 4, h: 2 },
-      { name: 'jardin', x: 7, y: 2, w: 3, h: 3 }, // petit jardin : culture de plants (Game.plantSeeds/harvestPlants)
     ],
   },
   maison_luxe: {
@@ -27,7 +26,6 @@ const INTERIOR_TYPES = {
       { name: 'chambre principale', x: 3, y: 0, w: 5, h: 2 },
       { name: 'bureau', x: 5, y: 5, w: 3, h: 3 },
       { name: 'piscine', x: 8, y: 2, w: 3, h: 3 }, // maison de standing : bassin où l'on peut se baigner (Game.diveInWater)
-      { name: 'jardin', x: 8, y: 5, w: 3, h: 3 }, // jardin : culture de plants (Game.plantSeeds/harvestPlants)
     ],
   },
 };
@@ -363,6 +361,10 @@ const City = {
     add('Garage de Kongoussi', 'garage', 'Kongoussi', 1);
     add('Restaurant de Kongoussi', 'restaurant', 'Kongoussi', 1);
     add('Pharmacie de Kongoussi', 'pharmacie', 'Kongoussi', 1);
+    // Terrain agricole : là où l'on prépare une parcelle et sème des graines
+    // (achetées au marché noir) pour cultiver de la drogue — zone rurale,
+    // volontairement pas chez soi.
+    add('Terrain agricole de Kongoussi', 'terrain_agricole', 'Kongoussi', 2);
     // Populate shop stocks
     for (const p of this.pois) this.assignPOIStock(p);
   },
@@ -372,16 +374,21 @@ const City = {
   assignPOIStock(p) {
     if (p.type === 'magasin') p.stock = this.generateStock('food+general', 40);
     else if (p.type === 'armurerie') p.stock = this.generateStock('legal_weapons', 15);
-    else if (p.type === 'marche_noir') p.stock = [...this.generateStock('illegal_weapons', 25), { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier, même un uniforme de policier caché dessous.' }, { id: 'graines_herbe', name: 'Graines de chanvre', category: 'graine', price: 20000, q: 99, legal: false, desc: 'À planter dans le jardin de votre maison pour cultiver de l\'herbe. Illégal : la récolte attire parfois l\'attention de la police.' }];
-    else if (p.type === 'marche_noir_lointain') p.stock = [...this.generateStock('illegal_weapons', 35), { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier.' }, { id: 'graines_herbe', name: 'Graines de chanvre', category: 'graine', price: 20000, q: 99, legal: false, desc: 'À planter dans le jardin de votre maison pour cultiver de l\'herbe. Illégal : la récolte attire parfois l\'attention de la police.' }];
+    else if (p.type === 'marche_noir') p.stock = [...this.generateStock('illegal_weapons', 25),
+      { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier, même un uniforme de policier caché dessous.' },
+      { id: 'graines_herbe', name: 'Graines de chanvre', category: 'graine', price: 20000, q: 99, legal: false, desc: 'À semer sur un terrain agricole (zones rurales) pour cultiver de l\'herbe. Illégal : la récolte attire parfois l\'attention de la police.' },
+      { id: 'menottes', name: 'Menottes', category: 'outil', price: 9000, q: 99, legal: false, desc: 'Pour immobiliser une cible (menotter/démenotter, touche U). Les forces de l\'ordre en sont déjà équipées d\'office ; les civils doivent se les procurer ici.' },
+    ];
+    else if (p.type === 'marche_noir_lointain') p.stock = [...this.generateStock('illegal_weapons', 35),
+      { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier.' },
+      { id: 'graines_herbe', name: 'Graines de chanvre', category: 'graine', price: 20000, q: 99, legal: false, desc: 'À semer sur un terrain agricole (zones rurales) pour cultiver de l\'herbe. Illégal : la récolte attire parfois l\'attention de la police.' },
+      { id: 'menottes', name: 'Menottes', category: 'outil', price: 9000, q: 99, legal: false, desc: 'Pour immobiliser une cible (menotter/démenotter, touche U). Les forces de l\'ordre en sont déjà équipées d\'office ; les civils doivent se les procurer ici.' },
+    ];
     else if (p.type === 'pharmacie') p.stock = this.generateStock('medical', 20);
     else if (p.type === 'restaurant') p.stock = this.generateStock('food', 25);
     else if (p.type === 'vetements') p.stock = this.generateStock('clothes', 30);
     else if (p.type === 'concessionnaire') p.stock = [];
-    else if (p.type === 'police') p.stock = [
-      { id: 'uniforme_police', name: 'Uniforme de police', category: 'vetement_police', price: 15000, q: 99, legal: true, desc: 'Tenue officielle, réservée aux policiers en service. Reconnaissable par tous, décrite comme telle.' },
-      { id: 'menottes', name: 'Menottes', category: 'outil', price: 9000, q: 99, legal: true, desc: 'Pour immobiliser une cible menottée. Touche U pour menotter/démenotter une cible verrouillée à portée.' },
-    ];
+    else if (p.type === 'police') p.stock = [{ id: 'uniforme_police', name: 'Uniforme de police', category: 'vetement_police', price: 15000, q: 99, legal: true, desc: 'Tenue officielle, réservée aux policiers en service. Reconnaissable par tous, décrite comme telle.' }];
   },
 
   generateStock(kind, count) {
