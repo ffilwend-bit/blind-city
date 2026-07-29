@@ -80,11 +80,11 @@ const Phone = {
       const ul = el('phoneContactList');
       // Vrais joueurs connectés en premier (les seuls à vraiment décrocher ou non)
       Array.from(Net.remotePlayers.values()).forEach(p => {
-        const li = document.createElement('li'); li.innerHTML = `<span>${p.firstName} ${p.lastName} <span class="badge badge-citoyen">joueur réel</span></span><button class="phone-btn">📞</button>`;
+        const li = document.createElement('li'); li.innerHTML = `<span>${escapeHtml(p.firstName)} ${escapeHtml(p.lastName)} <span class="badge badge-citoyen">joueur réel</span></span><button class="phone-btn">📞</button>`;
         li.querySelector('button').addEventListener('click', () => this.call({ name: `${p.firstName} ${p.lastName}`, isPlayer: true, id: p.id })); ul.appendChild(li);
       });
       this.contacts.forEach(c => {
-        const li = document.createElement('li'); li.innerHTML = `<span>${c.name} <span class="badge badge-${c.role === 'police' ? 'police' : c.role === 'medecin' ? 'medecin' : c.role === 'meca' ? 'meca' : 'citoyen'}">${c.role}</span></span><button class="phone-btn">📞</button>`;
+        const li = document.createElement('li'); li.innerHTML = `<span>${escapeHtml(c.name)} <span class="badge badge-${c.role === 'police' ? 'police' : c.role === 'medecin' ? 'medecin' : c.role === 'meca' ? 'meca' : 'citoyen'}">${escapeHtml(c.role)}</span></span><button class="phone-btn">📞</button>`;
         li.querySelector('button').addEventListener('click', () => this.call(c)); ul.appendChild(li);
       });
       // Contacts ENREGISTRÉS par le joueur (le prénom/nom qu'il a donné à chaque
@@ -93,7 +93,7 @@ const Phone = {
         const online = c.username ? Array.from(Net.remotePlayers.values()).find(p => p.accountUsername === c.username) : null;
         const statut = online ? 'en ligne' : (c.number ? c.number : 'contact');
         const li = document.createElement('li');
-        li.innerHTML = `<span>${c.label} <span class="badge badge-citoyen">${statut}</span></span><button class="phone-btn" aria-label="Appeler ${c.label}">📞</button>`;
+        li.innerHTML = `<span>${escapeHtml(c.label)} <span class="badge badge-citoyen">${escapeHtml(statut)}</span></span><button class="phone-btn" aria-label="Appeler ${escapeHtml(c.label)}">📞</button>`;
         li.querySelector('button').addEventListener('click', () => this.callSavedContact(c));
         ul.appendChild(li);
       });

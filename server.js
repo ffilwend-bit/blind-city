@@ -902,6 +902,7 @@ wss.on('connection', (ws, req) => {
     else if (msg.type === 'call_answer') {
       const call = calls.get(msg.callId);
       if (!call || call.status !== 'ringing') return;
+      if (call.callerId !== id && call.targetId !== id) return; // pas un participant de cet appel
       clearTimeout(call.timeout); call.status = 'active';
       const caller = players.get(call.callerId);
       if (caller) send(caller.ws, { type: 'call_answered', callId: call.callId, byId: id, byName: `${player.firstName} ${player.lastName}` });
@@ -911,6 +912,7 @@ wss.on('connection', (ws, req) => {
     else if (msg.type === 'call_decline') {
       const call = calls.get(msg.callId);
       if (!call) return;
+      if (call.callerId !== id && call.targetId !== id) return; // pas un participant de cet appel
       clearTimeout(call.timeout); calls.delete(call.callId);
       const caller = players.get(call.callerId);
       if (caller) send(caller.ws, { type: 'call_declined', callId: call.callId });
@@ -919,6 +921,7 @@ wss.on('connection', (ws, req) => {
     else if (msg.type === 'call_end') {
       const call = calls.get(msg.callId);
       if (!call) return;
+      if (call.callerId !== id && call.targetId !== id) return; // pas un participant de cet appel
       clearTimeout(call.timeout); calls.delete(call.callId);
       const other = players.get(call.callerId === id ? call.targetId : call.callerId);
       if (other) send(other.ws, { type: 'call_ended', callId: call.callId });
@@ -927,6 +930,7 @@ wss.on('connection', (ws, req) => {
     else if (msg.type === 'call_message') {
       const call = calls.get(msg.callId);
       if (!call || call.status !== 'active') return;
+      if (call.callerId !== id && call.targetId !== id) return; // pas un participant de cet appel
       const other = players.get(call.callerId === id ? call.targetId : call.callerId);
       if (other) send(other.ws, { type: 'call_message', callId: call.callId, fromId: id, fromName: safeName(msg.fromLabel, `${player.firstName} ${player.lastName}`, 40), text: safeName(msg.text, '', 300) });
     }
@@ -1005,6 +1009,7 @@ wss.on('connection', (ws, req) => {
       if (!player.staffRole) { send(ws, { type: 'staff_error', text: 'Modification de la ville réservée au staff.' }); return; }
       const edit = { op: msg.op, payload: msg.payload };
       staffData.cityEdits.push(edit);
+      if (staffData.cityEdits.length > 500) staffData.cityEdits.splice(0, staffData.cityEdits.length - 500);
       saveStaffData();
       broadcastStaffLog(`${player.firstName} ${player.lastName} a modifié la ville : ${msg.op}.`);
       for (const p of players.values()) send(p.ws, { type: 'city_edit', op: edit.op, payload: edit.payload });
@@ -1066,6 +1071,11 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     players.delete(id);
     jobRequests.delete(id);
+    // Si ce joueur portait quelqu'un, le libérer : sinon la victime restait
+    // bloquée « en cours de portage » pour toujours (le porteur n'existe plus).
+    for (const p of players.values()) {
+      if (p.carriedBy === id) { p.carriedBy = null; send(p.ws, { type: 'you_are_released', byName: `${player.firstName} ${player.lastName}`, atHospital: false }); }
+    }
     for (const [callId, call] of calls.entries()) {
       if (call.callerId === id || call.targetId === id) {
         clearTimeout(call.timeout);

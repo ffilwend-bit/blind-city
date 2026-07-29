@@ -104,6 +104,12 @@ const UTIL = {
 
 // UI helpers
 function el(id) { return document.getElementById(id); }
+// Échappe le texte inséré via innerHTML (noms de joueurs, messages réseau,
+// contacts...) : sans ça, un joueur nommé par ex. "<img src=x onerror=...>"
+// casse l'affichage voire exécute du HTML/JS chez les autres joueurs.
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 function log(msg, type = 'system') {
   const logEl = el('log');
   const p = document.createElement('p'); p.className = type; p.textContent = msg;

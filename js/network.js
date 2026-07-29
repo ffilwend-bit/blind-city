@@ -37,7 +37,7 @@ const Net = {
       let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
       if (msg.type === 'welcome' && !settled) {
         settled = true; clearTimeout(timeout);
-        this.connected = true; this.id = msg.id;
+        this.connected = true; this.id = msg.id; this.wasBanned = false;
         (msg.players || []).forEach(p => this.remotePlayers.set(p.id, p));
         this.pendingCityEdits = msg.cityEdits || [];
         this.pendingWorldEdits = msg.worldEdits || [];
@@ -285,7 +285,9 @@ const Net = {
       const remote = Net.remotePlayers.get(msg.fromId);
       Game.myContacts = Game.myContacts || [];
       const entry = { number: msg.number || null, username: remote?.accountUsername || null, label: msg.label };
-      const i = msg.number ? Game.myContacts.findIndex(c => c.number === msg.number) : -1;
+      // Sans numéro (msg.number absent), on dédoublonne par nom de compte : sinon
+      // chaque message d'un même contact sans numéro créait un nouveau doublon.
+      const i = Game.myContacts.findIndex(c => (msg.number && c.number === msg.number) || (!msg.number && entry.username && c.username === entry.username));
       if (i !== -1) Game.myContacts[i] = entry; else Game.myContacts.push(entry);
       Phone.contacts = Phone.contacts || [];
       if (msg.number && !Phone.contacts.some(c => c.number === msg.number)) Phone.contacts.push({ id: 'recv_' + msg.number, name: msg.label, number: msg.number, role: 'citoyen' });

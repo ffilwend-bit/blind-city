@@ -89,7 +89,16 @@ const Audio = {
     if (!this.engine.osc) return;
     const t = this.ctx.currentTime;
     this.engine.gain.gain.setTargetAtTime(0, t, 0.2);
-    setTimeout(() => { try { this.engine.osc.stop(); this.engine.osc.disconnect(); } catch(e){} this.engine.osc = null; }, 400);
+    setTimeout(() => {
+      // Déconnecte TOUTE la chaîne, pas seulement l'oscillateur : sinon
+      // gain/filter/pan restaient connectés au master indéfiniment, et une
+      // nouvelle chaîne se recréait à chaque relance (fuite de nœuds audio).
+      const { osc, gain, filter, pan } = this.engine;
+      try { osc.stop(); } catch (e) {}
+      [osc, gain, filter, pan].forEach(n => { try { n && n.disconnect(); } catch (e) {} });
+      this.engine.osc = null; this.engine.gain = null; this.engine.filter = null; this.engine.pan = null;
+      this.engine.active = false;
+    }, 400);
   },
   // Simulate road ambience using filtered noise loops for nearby traffic axes
   updateRoadAmbience(x, y, city) {
@@ -133,7 +142,14 @@ const Audio = {
       if (this.road.pan) this.road.pan.pan.setTargetAtTime(bestPan, t, 0.2);
     } else if (this.road.src) {
       this.road.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.3);
-      setTimeout(() => { try { this.road.src.stop(); } catch(e){} this.road.src = null; }, 400);
+      setTimeout(() => {
+        // Déconnecte toute la chaîne (pas seulement src) : sinon gain/filter/pan
+        // restaient connectés au master indéfiniment à chaque cycle (fuite).
+        const { src, gain, filter, pan } = this.road;
+        try { src.stop(); } catch (e) {}
+        [src, gain, filter, pan].forEach(n => { try { n && n.disconnect(); } catch (e) {} });
+        this.road.src = null; this.road.gain = null; this.road.filter = null; this.road.pan = null;
+      }, 400);
     }
   },
   footstep(surface = 'asphalt') {
@@ -148,7 +164,9 @@ const Audio = {
     const t = this.ctx.currentTime;
     const o1 = this.ctx.createOscillator(); o1.type = 'sawtooth'; o1.frequency.setValueAtTime(600, t); o1.frequency.linearRampToValueAtTime(900, t + 0.4); o1.frequency.linearRampToValueAtTime(600, t + 0.8);
     const o2 = this.ctx.createOscillator(); o2.type = 'square'; o2.frequency.setValueAtTime(700, t); o2.frequency.linearRampToValueAtTime(1000, t + 0.4); o2.frequency.linearRampToValueAtTime(700, t + 0.8);
-    const g = this.ctx.createGain(); g.gain.setValueAtTime(vol * 0.3, t); g.gain.exponentialRampToValueAtTime(0.01, t + 0.85);
+    // exponentialRampToValueAtTime plante si la valeur de DÉPART est 0 (pas
+    // seulement la cible) : on clampe donc à un minimum non nul plutôt qu'à 0.
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(Math.max(0.0001, vol * 0.3), t); g.gain.exponentialRampToValueAtTime(0.01, t + 0.85);
     o1.connect(g); o2.connect(g); g.connect(this.master);
     o1.start(t); o2.start(t); o1.stop(t + 0.85); o2.stop(t + 0.85);
   },

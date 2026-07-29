@@ -225,7 +225,7 @@ function renderMenu(items, handler) {
   }
   items.forEach((it, i) => {
     const card = document.createElement('div'); card.className = 'menu-card'; card.tabIndex = 0; card.setAttribute('role', 'button');
-    card.innerHTML = `<h4>${it.title}</h4><p>${it.desc}</p>`;
+    card.innerHTML = `<h4>${escapeHtml(it.title)}</h4><p>${escapeHtml(it.desc)}</p>`;
     card.addEventListener('click', () => handler(it));
     card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(it); } });
     c.appendChild(card);
@@ -234,7 +234,7 @@ function renderMenu(items, handler) {
   if (MenuNav.stack.length > 1) {
     const prevTitle = MenuNav.stack[MenuNav.stack.length - 2].title;
     const back = document.createElement('div'); back.className = 'menu-card menu-card-back'; back.tabIndex = 0; back.setAttribute('role', 'button');
-    back.innerHTML = `<h4>↩️ Retour</h4><p>Revenir au menu précédent${prevTitle ? ' : ' + prevTitle : ''}.</p>`;
+    back.innerHTML = `<h4>↩️ Retour</h4><p>Revenir au menu précédent${prevTitle ? ' : ' + escapeHtml(prevTitle) : ''}.</p>`;
     back.addEventListener('click', menuGoBack);
     back.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); menuGoBack(); } });
     c.appendChild(back);
