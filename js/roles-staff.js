@@ -579,7 +579,7 @@ Game.tickDrivingExam = function() {
   // Rayon d'arrivée élargi selon la vitesse actuelle : à pleine vitesse le
   // véhicule parcourt largement plus de 4 cases entre deux vérifications,
   // et le franchissait sans jamais être détecté « arrivé ».
-  const arrivalRadius = Math.max(4, Math.abs(this.vehicle.speed) * 10);
+  const arrivalRadius = Math.max(4, Math.abs(this.vehicle.speed) * this.MOVE_SCALE * 20);
   if (UTIL.dist(this.vehicle, target) < arrivalRadius) {
     es.current++;
     if (es.current >= es.waypoints.length) {
@@ -691,7 +691,7 @@ Game.tickFlightExam = function() {
   const target = es.waypoints[es.current];
   // Même correctif que l'examen de conduite : rayon élargi selon la vitesse
   // actuelle, sinon l'appareil dépasse le point sans jamais être détecté.
-  const arrivalRadius = Math.max(4, Math.abs(this.vehicle.speed) * 10);
+  const arrivalRadius = Math.max(4, Math.abs(this.vehicle.speed) * this.MOVE_SCALE * 20);
   const closeEnough = UTIL.dist(this.vehicle, target) < arrivalRadius;
   const altitudeOk = target.altitude === 0 ? this.vehicle.altitude < 3 : this.vehicle.altitude >= target.altitude - 8;
   if (closeEnough && altitudeOk) {
@@ -774,7 +774,13 @@ Game.openShopDialog = function(poi) {
     list.appendChild(div);
   });
   el('shopDialog').style.display = 'flex';
-  announce(`${poi.name} ouvert. ${this.shopContext.stock.length} articles disponibles.`, 'polite');
+  // Sans focus automatique, le dialogue s'affichait mais restait invisible/
+  // inaccessible au clavier (aucun élément focalisé pour le lire ou naviguer
+  // avec Tab) : c'est ce qui donnait l'impression qu'on ne pouvait pas voir
+  // le menu de la carte.
+  const firstItem = list.querySelector('.shop-item');
+  if (firstItem) setTimeout(() => firstItem.focus(), 30);
+  announce(`${poi.name} ouvert. ${this.shopContext.stock.length} articles disponibles. Utilisez Tab pour parcourir, Entrée pour acheter.`, 'polite');
 };
 Game.buyFromDialog = function(index) {
   const it = this.shopContext.stock[index]; if (!it) return;

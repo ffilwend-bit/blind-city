@@ -2,6 +2,11 @@ const Game = {
   x: 120, y: 120, altitude: 0, floor: 0, heading: 0, health: 100, maxHealth: 100,
   money: 100000, bank: 0, dirtyMoney: 0, handsUp: false, hunger: 50, thirst: 50, energy: 100,
   inVehicle: false, vehicle: null, ownedVehicles: [], driveAssist: true,
+  // Facteur d'échelle appliqué au déplacement RÉEL des véhicules (voir
+  // driveVehicle) : sans lui, à 60 images/seconde, une berline à pleine
+  // vitesse roulait à l'équivalent d'environ 900 km/h — bien trop vite pour
+  // qu'un guidage vocal (rythmé en secondes) puisse suivre.
+  MOVE_SCALE: 1 / 12,
   inventory: [], backpack: false, belt: false, holster: null,
   weapons: [], weapon: null, weaponOut: false, ammo: {}, ammoReserve: {},
   lockedTarget: null, scannedTargets: [], aimPart: 'torse',
@@ -223,7 +228,13 @@ const Game = {
     // Garder le SIGNE de la vitesse : positif = avance dans le cap, négatif =
     // recule (déplacement inverse du cap). Avant, step était toujours positif
     // (valeur absolue), donc la marche arrière avançait quand même.
-    const step = v.speed;
+    // v.speed (vitesse "logique", pour les sons/dégâts/ratios) n'est PAS mise à
+    // l'échelle ici : seul le déplacement PHYSIQUE réel l'est, via MOVE_SCALE.
+    // Sans ça, à 60 images/seconde une berline à pleine vitesse roulait à
+    // l'équivalent de ~900 km/h : bien trop vite pour qu'un guidage vocal
+    // (rythmé en secondes) puisse suivre — d'où le blocage à l'auto-école et
+    // le zigzag ("tournez à droite" puis "à gauche" après avoir dépassé le cap).
+    const step = v.speed * this.MOVE_SCALE;
     const dir = v.heading;
     const ndx = dir === 2 ? step : dir === 6 ? -step : 0;
     const ndy = dir === 4 ? step : dir === 0 ? -step : 0;
