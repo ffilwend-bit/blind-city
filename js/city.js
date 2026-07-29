@@ -375,7 +375,10 @@ const City = {
     else if (p.type === 'restaurant') p.stock = this.generateStock('food', 25);
     else if (p.type === 'vetements') p.stock = this.generateStock('clothes', 30);
     else if (p.type === 'concessionnaire') p.stock = [];
-    else if (p.type === 'police') p.stock = [{ id: 'uniforme_police', name: 'Uniforme de police', category: 'vetement_police', price: 15000, q: 99, legal: true, desc: 'Tenue officielle, réservée aux policiers en service. Reconnaissable par tous, décrite comme telle.' }];
+    else if (p.type === 'police') p.stock = [
+      { id: 'uniforme_police', name: 'Uniforme de police', category: 'vetement_police', price: 15000, q: 99, legal: true, desc: 'Tenue officielle, réservée aux policiers en service. Reconnaissable par tous, décrite comme telle.' },
+      { id: 'menottes', name: 'Menottes', category: 'outil', price: 9000, q: 99, legal: true, desc: 'Pour immobiliser une cible menottée. Touche U pour menotter/démenotter une cible verrouillée à portée.' },
+    ];
   },
 
   generateStock(kind, count) {

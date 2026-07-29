@@ -601,7 +601,7 @@ Game.openFlightSchool = function() {
   const items = [
     { id: 'tuto', title: '🎙️ Tutoriel vocal', desc: 'Rappel des commandes de vol avant de vous lancer.' },
     { id: 'theorie', title: this.flightTheoryPassed ? '✅ Théorie déjà validée' : '📖 Examen théorique (règles de vol)', desc: this.flightTheoryPassed ? 'Vous pouvez passer à la pratique.' : 'Obligatoire avant l\'examen pratique.' },
-    { id: 'exam', title: this.flightTheoryPassed ? '📋 Passer l\'examen pratique (35 000 FCFA)' : '🔒 Examen pratique (verrouillé)', desc: this.flightTheoryPassed ? 'Un circuit aérien avec prise d\'altitude, à parcourir sans collision.' : 'Réussissez d\'abord la théorie.' },
+    { id: 'exam', title: this.flightTheoryPassed ? '📋 Passer l\'examen pratique (35 000 FCFA)' : '🔒 Examen pratique (verrouillé)', desc: this.flightTheoryPassed ? 'Un circuit aérien en hélicoptère-école (plein d\'essence fourni), avec prise d\'altitude, à parcourir sans collision. Le permis obtenu vaut aussi pour les avions.' : 'Réussissez d\'abord la théorie.' },
   ];
   renderMenu(items, (sel) => {
     closeMenu();
@@ -612,7 +612,7 @@ Game.openFlightSchool = function() {
   });
 };
 Game.flightTutorial = function() {
-  announce('Tutoriel de pilotage : montez à bord d\'un avion ou d\'un hélicoptère, flèches pour avancer et tourner comme au sol. Maj pour prendre de l\'altitude, Ctrl pour descendre. Ne redescendez jamais brutalement à zéro en plein vol : un atterrissage se fait progressivement. Une collision compte contre vous à l\'examen. Quand vous êtes prêt, revenez à l\'école de pilotage pour la théorie puis la pratique.', 'assertive');
+  announce('Tutoriel de pilotage : un seul permis de pilotage vous permet de piloter aussi bien un avion qu\'un hélicoptère, tous deux se commandent pareil. Montez à bord, flèches pour avancer et tourner comme au sol. Maj pour prendre de l\'altitude, Ctrl pour descendre. Ne redescendez jamais brutalement à zéro en plein vol : un atterrissage se fait progressivement. Vérifiez le niveau d\'essence avant de décoller : sans essence, l\'appareil n\'avance quasiment plus. Une collision compte contre vous à l\'examen, qui se déroule en hélicoptère (mais valide le permis pour les deux types d\'appareil). Quand vous êtes prêt, revenez à l\'école de pilotage pour la théorie puis la pratique.', 'assertive');
 };
 Game.startFlightTheoryExam = function() {
   const questions = [

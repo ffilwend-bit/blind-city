@@ -203,6 +203,7 @@ Game.giveItem = function(itemId, targetName, qty) {
   if (!it) return announce('Objet non trouvé.', 'assertive');
   const target = targetName ? City.npcs.find(n => n.name.toLowerCase().includes(targetName.toLowerCase())) : this.lockedTarget;
   if (!target) return announce('Aucun destinataire. Verrouillez une cible (changer de cible) avant de donner un objet.', 'assertive');
+  if (UTIL.dist(target, this) > 3) return announce(`Trop loin de ${target.name} pour lui donner un objet. Approchez-vous.`, 'assertive');
   const available = it.q || 1;
   if (qty === undefined && available > 1) {
     QtyPicker.open(`Donner ${it.name} à ${target.name}`, available, (n) => this.giveItem(itemId, targetName, n));
@@ -249,6 +250,7 @@ Game.giveAmmo = function(ammoType, qty, target) {
   if (available <= 0) return announce(`Vous n'avez pas de ${name.toLowerCase()} en réserve.`, 'assertive');
   target = target || this.getLiveTarget();
   if (!target) return announce('Aucun destinataire. Verrouillez une cible ou choisissez un joueur réel proche.', 'assertive');
+  if (UTIL.dist(target, this) > 3) return announce(`Trop loin de ${target.name} pour lui donner des munitions. Approchez-vous.`, 'assertive');
   qty = Math.min(Math.max(1, Math.floor(qty) || 1), available);
   this.ammoReserve[ammoType] -= qty;
   if (target.isPlayer) {

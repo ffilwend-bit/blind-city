@@ -1394,6 +1394,14 @@ const Game = {
       const d = UTIL.dist(p, this);
       if (d < bd) { bd = d; best = p; }
     });
+    // Les maisons à étages (City.houses, séparées des POI) doivent aussi
+    // compter : sinon Shift+E répondait toujours « vous n'êtes pas dans un
+    // immeuble » chez soi dans une maison à étages.
+    (City.houses || []).forEach(h => {
+      if ((h.floors || 1) <= 1) return;
+      const d = UTIL.dist(h, this);
+      if (d < bd) { bd = d; best = h; }
+    });
     return best;
   },
   // Monte (+1) ou descend (−1) d'un étage dans le bâtiment courant.
@@ -1864,11 +1872,20 @@ const Game = {
     if (this.interior) return this.exitInterior();
     if (this.inVehicle) return announce('Descendez du véhicule pour entrer dans un lieu.', 'assertive');
     if (this.indoors) {
-      const name = this.indoors.name;
-      this.indoors = null;
-      this.doorCue();
-      announce(`Vous sortez de ${name}. Vous êtes de nouveau dehors.`, 'assertive');
-      return;
+      // Si on s'est éloigné du lieu sans avoir formellement refait
+      // Ctrl+Alt+E pour en sortir (parti à pied vers un autre lieu), on
+      // considère qu'on est déjà dehors : sinon Ctrl+Alt+E annonçait
+      // toujours « vous sortez de [l'ANCIEN lieu] » au lieu de faire entrer
+      // dans le nouveau lieu où l'on se trouve réellement.
+      if (this.indoors.ref && UTIL.dist(this.indoors.ref, this) > 4) {
+        this.indoors = null;
+      } else {
+        const name = this.indoors.name;
+        this.indoors = null;
+        this.doorCue();
+        announce(`Vous sortez de ${name}. Vous êtes de nouveau dehors.`, 'assertive');
+        return;
+      }
     }
     // Chercher un lieu (bâtiment ou maison) à portée pour y entrer.
     const poi = City.pois.map(p => ({ p, d: UTIL.dist(p, this) })).filter(o => o.d < 4).sort((a, b) => a.d - b.d)[0];
@@ -2372,6 +2389,7 @@ const Game = {
     else if (poi.type === 'aeroport' || poi.type === 'heliport') { this.aircraftMenu(poi); }
     else if (poi.type === 'mine') { const mine = City.miningSites.find(m => m.x === poi.x && m.y === poi.y); if (mine) { if (!this.miningMachine) announce(`Site minier. Ressource : ${mine.resource}. Achetez une machine d'extraction (750 000 FCFA, touche Ctrl+M) pour un bien meilleur rendement.`, 'polite'); this.mine(mine); } }
     else if (poi.type === 'entrepot') { this.openWarehouse(poi); }
+    else if (poi.type === 'garage') { this.openPublicParking(poi); }
     else if (poi.type === 'animalerie') { if (typeof GuideDog !== 'undefined') GuideDog.openPetShopMenu(); }
     else if (poi.type === 'veterinaire') { if (typeof GuideDog !== 'undefined') GuideDog.openVetMenu(); }
     else if (poi.type === 'qg_extreme') {
@@ -2629,12 +2647,27 @@ const Game = {
   bank() {
     announce(`Solde bancaire : ${UTIL.formatMoney(this.money)}. Les banques gèrent vos fonds.`, 'polite');
   },
+  // Parking public (lieu « garage » sur la carte) : vos véhicules restent
+  // toujours exactement où vous les laissez (aucun besoin d'un endroit
+  // précis pour ça) — ce lieu sert surtout de repère RP dans la ville, et
+  // rappelle qu'on peut faire venir un véhicule possédé n'importe où via
+  // Garage sur le téléphone (touche O), y compris chez soi.
+  openPublicParking(poi) {
+    if (this.inVehicle && this.vehicle) {
+      announce(`Parking public : ${poi.name}. ${this.vehicle.name} peut rester garé ici en toute sécurité — descendez puis rappelez-le n'importe où plus tard via Garage sur votre téléphone (touche O).`, 'assertive');
+    } else if (this.ownedVehicles.length) {
+      announce(`Parking public : ${poi.name}. Vos véhicules restent où vous les laissez, chez vous comme ici ; utilisez Garage sur votre téléphone (touche O) pour en rappeler un à votre position actuelle.`, 'polite');
+    } else {
+      announce(`Parking public : ${poi.name}. Vous n'avez pas encore de véhicule à y garer.`, 'polite');
+    }
+  },
   aircraftMenu(poi) {
     const types = poi.type === 'heliport' ? ['helico'] : ['avion'];
     const list = City.vehicles.filter(v => types.includes(v.type) && !v.owner);
     if (!list.length) return announce('Aucun appareil disponible.', 'assertive');
     const v = list[0]; v.x = poi.x; v.y = poi.y + 2; v.locked = false;
-    announce(`${v.name} prêt sur le tarmac.`, 'assertive');
+    v.fuel = 1; // Prêt à voler : sinon un appareil ambiant à court d'essence donnait l'impression que les commandes ne répondaient pas.
+    announce(`${v.name} prêt sur le tarmac, plein d'essence fait.`, 'assertive');
   },
   openWarehouse(poi) {
     if (!this.ownedWarehouses.includes(poi.id)) {

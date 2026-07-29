@@ -703,13 +703,18 @@ const Computer = {
     ];
     this.bankAccounts = [{ iban: 'CI-12345', balance: Game.bank, owner: 'Joueur' }];
     this.log('Système démarré. CITY_OS v2.1');
+    announce('Ordinateur allumé, CITY_OS. Tapez une commande puis Entrée ou Exécuter. Tapez help pour la liste des commandes.', 'assertive');
     const input = el('computerInput'); if (input) focusTextInput(input);
   },
-  close() { this.open = false; el('computerOverlay').style.display = 'none'; document.activeElement?.blur(); },
+  close() { this.open = false; el('computerOverlay').style.display = 'none'; document.activeElement?.blur(); announce('Ordinateur éteint.', 'polite'); },
   log(msg) { this.logs.unshift(`[${new Date().toLocaleTimeString()}] ${msg}`); if (this.logs.length > 30) this.logs.pop(); },
   runCommand(cmd) {
     const term = el('computerTerminal');
-    const out = (t) => term.textContent += '\n' + t;
+    // Le terminal n'est qu'un texte affiché : sans annonce vocale, un joueur
+    // non-voyant tape une commande, valide, et n'a AUCUN retour perceptible
+    // (« j'appuie sur valider, rien ne se passe »). On annonce donc chaque
+    // résultat en plus de l'afficher.
+    const out = (t) => { term.textContent += '\n' + t; announce(t, 'assertive'); };
     if (!cmd.trim()) return;
     this.log('> ' + cmd);
     const c = cmd.toLowerCase().trim();
@@ -738,6 +743,7 @@ const Computer = {
       out('Scan réseau... ' + (UTIL.chance(0.4) ? 'Vulnérabilité trouvée !' : 'Aucune vulnérabilité.'));
     } else if (c === 'clear') {
       term.textContent = 'CITY_OS v2.1';
+      announce('Terminal effacé.', 'polite');
     } else if (c === 'exit') {
       this.close();
     } else {
@@ -747,28 +753,36 @@ const Computer = {
   },
   hackBank() {
     const term = el('computerTerminal');
-    if (Game.wanted > 60) { term.textContent += '\nAlerte police : trop recherché.'; return; }
-    if (this.hacked.has('banque')) { term.textContent += '\nBanque déjà piratée.'; return; }
+    if (Game.wanted > 60) { term.textContent += '\nAlerte police : trop recherché.'; announce('Alerte police : trop recherché pour pirater la banque.', 'assertive'); return; }
+    if (this.hacked.has('banque')) { term.textContent += '\nBanque déjà piratée.'; announce('Banque déjà piratée.', 'polite'); return; }
     const amount = UTIL.randInt(50000, 200000);
     Game.money += amount; this.hacked.add('banque'); this.log('Banque piratée : +' + amount);
     term.textContent += '\nPiratage en cours...\n' + 'Succès ! Vous transférez ' + UTIL.formatMoney(amount) + ' FCFA.';
+    announce(`Piratage réussi ! Vous transférez ${UTIL.formatMoney(amount)}.`, 'assertive');
     Game.wanted += 30; Audio.cash(); alertUser('Piratage détecté. Niveau de recherche augmenté.');
     Game.reportCrimeToPolice('braquage_banque', 'Banque centrale');
+    updateHud();
   },
   hackSafe() {
     const term = el('computerTerminal');
     const safe = Game.ownedHouses.map(id => City.houses.find(h => h.id === id)).find(h => h && h.safe && !h.safe.opened);
-    if (!safe) { term.textContent += '\nAucun coffre-fort piratable.'; return; }
+    if (!safe) { term.textContent += '\nAucun coffre-fort piratable.'; announce('Aucun coffre-fort piratable.', 'assertive'); return; }
     const amount = UTIL.randInt(10000, 80000);
     Game.money += amount; safe.safe.opened = true; this.log('Coffre piraté : +' + amount);
     term.textContent += '\nCoffre ouvert ! ' + UTIL.formatMoney(amount) + ' récupérés.'; Audio.cash();
+    announce(`Coffre-fort ouvert ! ${UTIL.formatMoney(amount)} récupérés.`, 'assertive');
+    updateHud();
   },
   renderMenu(cmd) {
     if (cmd === 'files') this.runCommand('files');
     if (cmd === 'network') this.runCommand('network');
     if (cmd === 'hack') this.runCommand('hack banque');
     if (cmd === 'bank') this.runCommand('bank');
-    if (cmd === 'logs') { el('computerTerminal').textContent = 'Logs système :\n' + this.logs.slice(0, 15).join('\n'); }
+    if (cmd === 'logs') {
+      const txt = this.logs.length ? this.logs.slice(0, 15).join('. ') : 'Aucun log.';
+      el('computerTerminal').textContent = 'Logs système :\n' + this.logs.slice(0, 15).join('\n');
+      announce('Logs système : ' + txt, 'assertive');
+    }
     if (cmd === 'help') this.runCommand('help');
     el('computerInput').focus();
   },
