@@ -452,6 +452,12 @@ document.addEventListener('keydown', (e) => {
   if (physicalKeyboardDetected || !isTouchDevice) return; // sur un vrai ordinateur, inutile de "détecter" un clavier qu'on sait déjà présent
   // On ignore Tab/Entrée/Espace qui peuvent provenir d'un clavier virtuel de lecteur d'écran
   if (['Tab', 'Enter', ' '].includes(e.key)) return;
+  // Taper une lettre au clavier virtuel d'un téléphone (avec VoiceOver/TalkBack
+  // actif) déclenche aussi de vrais événements keydown — typiquement en
+  // écrivant son identifiant de connexion. Sans cette vérification, l'annonce
+  // ci-dessous se déclenchait à la première lettre tapée et parlait par-dessus
+  // le retour vocal du lecteur d'écran pendant la saisie.
+  if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
   physicalKeyboardDetected = true;
   announce('Clavier détecté. Toutes les commandes Windows sont disponibles.', 'polite');
 }, { once: false });
