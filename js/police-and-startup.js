@@ -341,66 +341,114 @@ Game.pickUpOneItem = function(groundItem) {
 // Coffre du véhicule : déposer un objet de son inventaire dedans, ou en
 // récupérer un. Le champ vehicle.inventory existait déjà sur chaque
 // véhicule mais n'était jusqu'ici jamais utilisé nulle part.
-Game.storeInTrunk = function(itemId, qty) {
-  if (!this.inVehicle || !this.vehicle) return announce('Montez d\'abord dans un véhicule.', 'assertive');
+// Le coffre visé est soit le véhicule où l'on est, soit un véhicule proche
+// (le sien, ou celui de quelqu'un d'autre s'il est déverrouillé) passé en
+// paramètre — voir Game.openVehicleMenu, branche "à côté d'un véhicule".
+Game.storeInTrunk = function(itemId, qty, targetVehicle) {
+  const v = targetVehicle || this.vehicle;
+  if (!v) return announce('Montez d\'abord dans un véhicule, ou approchez-vous d\'un véhicule déverrouillé.', 'assertive');
   const it = this.inventory.find(i => i.id === itemId);
   if (!it) return announce('Objet non trouvé.', 'assertive');
   const available = it.q || 1;
   if (qty === undefined && available > 1) {
-    QtyPicker.open(`Déposer ${it.name} dans le coffre`, available, (n) => this.storeInTrunk(itemId, n));
+    QtyPicker.open(`Déposer ${it.name} dans le coffre`, available, (n) => this.storeInTrunk(itemId, n, v));
     return;
   }
   qty = Math.min(Math.max(1, Math.floor(qty) || 1), available);
-  this.vehicle.inventory = this.vehicle.inventory || [];
+  v.inventory = v.inventory || [];
   this.removeItem(itemId, qty);
-  const existing = this.vehicle.inventory.find(i => i.id === it.id);
-  if (existing) existing.q = (existing.q || 1) + qty; else this.vehicle.inventory.push({ ...it, q: qty });
-  announce(`Vous rangez ${qty > 1 ? qty + ' ' : ''}${it.name} dans le coffre.`, 'polite');
+  const existing = v.inventory.find(i => i.id === it.id);
+  if (existing) existing.q = (existing.q || 1) + qty; else v.inventory.push({ ...it, q: qty });
+  announce(`Vous rangez ${qty > 1 ? qty + ' ' : ''}${it.name} dans le coffre${v !== this.vehicle ? ' de ' + v.name : ''}.`, 'polite');
   updateHud();
 };
-Game.retrieveFromTrunk = function(itemId, qty) {
-  if (!this.inVehicle || !this.vehicle) return announce('Montez d\'abord dans un véhicule.', 'assertive');
-  const it = (this.vehicle.inventory || []).find(i => i.id === itemId);
+Game.retrieveFromTrunk = function(itemId, qty, targetVehicle) {
+  const v = targetVehicle || this.vehicle;
+  if (!v) return announce('Montez d\'abord dans un véhicule, ou approchez-vous d\'un véhicule déverrouillé.', 'assertive');
+  const it = (v.inventory || []).find(i => i.id === itemId);
   if (!it) return announce('Objet introuvable dans le coffre.', 'assertive');
   const available = it.q || 1;
   if (qty === undefined && available > 1) {
-    QtyPicker.open(`Récupérer ${it.name} du coffre`, available, (n) => this.retrieveFromTrunk(itemId, n));
+    QtyPicker.open(`Récupérer ${it.name} du coffre`, available, (n) => this.retrieveFromTrunk(itemId, n, v));
     return;
   }
   qty = Math.min(Math.max(1, Math.floor(qty) || 1), available);
-  it.q -= qty; if (it.q <= 0) this.vehicle.inventory = this.vehicle.inventory.filter(i => i !== it);
+  it.q -= qty; if (it.q <= 0) v.inventory = v.inventory.filter(i => i !== it);
   this.addItem({ ...it, q: qty });
-  announce(`Vous récupérez ${qty > 1 ? qty + ' ' : ''}${it.name} du coffre.`, 'assertive');
+  announce(`Vous récupérez ${qty > 1 ? qty + ' ' : ''}${it.name} du coffre${v !== this.vehicle ? ' de ' + v.name : ''}.`, 'assertive');
   updateHud();
 };
-Game.openTrunkMenu = function() {
-  if (!this.inVehicle || !this.vehicle) return announce('Montez d\'abord dans un véhicule pour accéder au coffre.', 'assertive');
-  el('menuTitle').textContent = 'Coffre du véhicule';
+Game.openTrunkMenu = function(targetVehicle) {
+  const v = targetVehicle || this.vehicle;
+  if (!v) return announce('Montez d\'abord dans un véhicule, ou approchez-vous d\'un véhicule déverrouillé, pour accéder au coffre.', 'assertive');
+  el('menuTitle').textContent = `Coffre${v !== this.vehicle ? ' de ' + v.name : ' du véhicule'}`;
   const items = [
-    { id: 'store', title: '📦 Déposer un objet', desc: 'Ranger un objet de votre inventaire dans le coffre.' },
-    { id: 'retrieve', title: '🎒 Récupérer un objet', desc: `Reprendre un objet du coffre (${(this.vehicle.inventory || []).length} objet(s) dedans).` },
+    { id: 'store', title: '📦 Déposer des objets', desc: 'Cocher un ou plusieurs objets de votre inventaire à ranger dans le coffre.' },
+    { id: 'retrieve', title: '🎒 Récupérer des objets', desc: `Cocher un ou plusieurs objets à reprendre (${(v.inventory || []).length} objet(s) dedans).` },
   ];
   el('menuOverlay').style.display = 'flex';
   renderMenu(items, (sel) => {
     closeMenu();
-    if (sel.id === 'store') this.openTrunkStoreMenu();
-    else this.openTrunkRetrieveMenu();
+    if (sel.id === 'store') this.openTrunkStoreMenu(v);
+    else this.openTrunkRetrieveMenu(v);
   });
 };
-Game.openTrunkStoreMenu = function() {
+// Menu à cases à cocher : on peut sélectionner plusieurs objets avant de
+// confirmer, plutôt que de devoir répéter l'opération un par un.
+Game.openTrunkStoreMenu = function(targetVehicle) {
+  const v = targetVehicle || this.vehicle;
   if (!this.inventory.length) return announce('Votre inventaire est vide.', 'assertive');
-  el('menuTitle').textContent = 'Déposer dans le coffre';
-  const items = this.inventory.map(it => ({ id: it.id, title: `${it.name}${it.q > 1 ? ' ×' + it.q : ''}`, desc: '' }));
-  el('menuOverlay').style.display = 'flex';
-  renderMenu(items, (sel) => { closeMenu(); this.storeInTrunk(sel.id); });
+  const selected = new Set();
+  const build = () => {
+    el('menuTitle').textContent = 'Déposer dans le coffre';
+    const items = this.inventory.map(it => ({
+      id: it.id,
+      title: `${selected.has(it.id) ? '☑' : '☐'} ${it.name}${it.q > 1 ? ' ×' + it.q : ''}`,
+      desc: selected.has(it.id) ? 'Sélectionné — appuyez pour retirer de la sélection.' : 'Appuyez pour cocher.',
+    }));
+    items.push({ id: '__confirm', title: `✅ Déposer ${selected.size ? `(${selected.size})` : ''}`.trim(), desc: selected.size ? 'Confirmer le dépôt des objets cochés.' : 'Cochez au moins un objet avant de valider.' });
+    el('menuOverlay').style.display = 'flex';
+    renderMenu(items, (sel) => {
+      if (sel.id === '__confirm') {
+        closeMenu();
+        if (!selected.size) return announce('Aucun objet coché.', 'assertive');
+        const ids = Array.from(selected);
+        ids.forEach(id => { const it = this.inventory.find(i => i.id === id); if (it) this.storeInTrunk(id, it.q || 1, v); });
+        return;
+      }
+      if (selected.has(sel.id)) selected.delete(sel.id); else selected.add(sel.id);
+      build();
+    });
+  };
+  build();
 };
-Game.openTrunkRetrieveMenu = function() {
-  const inv = this.vehicle.inventory || [];
+Game.openTrunkRetrieveMenu = function(targetVehicle) {
+  const v = targetVehicle || this.vehicle;
+  const inv = (v && v.inventory) || [];
   if (!inv.length) return announce('Le coffre est vide.', 'assertive');
-  el('menuTitle').textContent = 'Récupérer du coffre';
-  const items = inv.map(it => ({ id: it.id, title: `${it.name}${it.q > 1 ? ' ×' + it.q : ''}`, desc: '' }));
-  el('menuOverlay').style.display = 'flex';
-  renderMenu(items, (sel) => { closeMenu(); this.retrieveFromTrunk(sel.id); });
+  const selected = new Set();
+  const build = () => {
+    el('menuTitle').textContent = 'Récupérer du coffre';
+    const items = inv.map(it => ({
+      id: it.id,
+      title: `${selected.has(it.id) ? '☑' : '☐'} ${it.name}${it.q > 1 ? ' ×' + it.q : ''}`,
+      desc: selected.has(it.id) ? 'Sélectionné — appuyez pour retirer de la sélection.' : 'Appuyez pour cocher.',
+    }));
+    items.push({ id: '__confirm', title: `✅ Récupérer ${selected.size ? `(${selected.size})` : ''}`.trim(), desc: selected.size ? 'Confirmer la récupération des objets cochés.' : 'Cochez au moins un objet avant de valider.' });
+    el('menuOverlay').style.display = 'flex';
+    renderMenu(items, (sel) => {
+      if (sel.id === '__confirm') {
+        closeMenu();
+        if (!selected.size) return announce('Aucun objet coché.', 'assertive');
+        const ids = Array.from(selected);
+        ids.forEach(id => { const it = inv.find(i => i.id === id); if (it) this.retrieveFromTrunk(id, it.q || 1, v); });
+        return;
+      }
+      if (selected.has(sel.id)) selected.delete(sel.id); else selected.add(sel.id);
+      build();
+    });
+  };
+  build();
 };
 
 // Payer en liquide, main à la main : marche pour un PNJ (transfert local,
@@ -1003,6 +1051,29 @@ Game.estimateHouse = function() {
   const ownerLabel = house.owner ? (this.ownedHouses.includes(house.id) ? 'vous-même' : 'déjà vendue à quelqu\'un d\'autre') : 'à vendre, aucun propriétaire';
   announce(`Estimation de ${house.name} : ${UTIL.formatMoney(house.price)}, ${house.floors} étage(s), capacité de stockage ${house.capacity}. Propriétaire : ${ownerLabel}.`, 'assertive');
 };
+// Annuaire des adresses : lit City.houses en direct, donc toute maison
+// ajoutée plus tard (croissance de la ville, admin) apparaît automatiquement
+// sans rien à mettre à jour ici.
+Game.houseAddress = function(h) {
+  const d = City.getDistrictAt(h.x, h.y);
+  return `${h.name}, quartier ${d.name}`;
+};
+Game.openHouseDirectory = function() {
+  const houses = City.houses.slice().sort((a, b) => Game.houseAddress(a).localeCompare(Game.houseAddress(b)));
+  el('menuTitle').textContent = 'Adresses des maisons';
+  const items = houses.map(h => {
+    const ownerLabel = h.owner ? (this.ownedHouses.includes(h.id) ? 'à vous' : 'occupée') : 'libre, à vendre';
+    const dist = Math.round(UTIL.dist(h, this) * CONFIG.METERS_PER_TILE);
+    const bearing = UTIL.bearing(h.x - this.x, h.y - this.y);
+    return { id: h.id, title: `${this.houseAddress(h)} — ${ownerLabel}`, desc: `${UTIL.formatMoney(h.price)}, ${dist} m, vers le ${bearing}.` };
+  });
+  el('menuOverlay').style.display = 'flex';
+  renderMenu(items, (sel) => {
+    closeMenu();
+    const h = houses.find(hh => hh.id === sel.id);
+    if (h) this.setGuidance({ name: this.houseAddress(h), x: h.x, y: h.y });
+  });
+};
 Game.sellHouseToBuyer = function() {
   const house = this.findNearbyHouse();
   if (!house) return announce('Aucune maison à proximité à vendre.', 'assertive');
@@ -1155,9 +1226,27 @@ Game.openMinerMenu = function() {
 
 Game.openVehicleMenu = function() {
   if (!this.inVehicle || !this.vehicle) {
-    const v = City.vehicles.find(v => UTIL.dist(v, this) < 4);
+    const v = City.vehicles.filter(v => UTIL.dist(v, this) < 4).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
     if (!v) return announce('Aucun véhicule à proximité.', 'assertive');
-    return this.openVehicleInfo(v);
+    // À côté d'un véhicule (le vôtre ou celui de quelqu'un d'autre) sans y être
+    // monté : on peut consulter ses infos, et accéder à son coffre s'il est
+    // déverrouillé ou si c'est le vôtre.
+    el('menuTitle').textContent = `Véhicule : ${v.name}`;
+    const accessible = !v.locked || v.owner === 'player';
+    const items = [
+      { id: 'info', title: 'ℹ️ Infos du véhicule', desc: 'Puissance, essence, état, portes, passagers.' },
+      { id: 'trunk', title: '📦 Coffre', desc: accessible ? 'Déposer ou récupérer des objets.' : 'Véhicule verrouillé : coffre inaccessible.' },
+    ];
+    el('menuOverlay').style.display = 'flex';
+    renderMenu(items, (sel) => {
+      closeMenu();
+      if (sel.id === 'info') this.openVehicleInfo(v);
+      else if (sel.id === 'trunk') {
+        if (!accessible) return announce('Ce véhicule est verrouillé, impossible d\'accéder au coffre.', 'assertive');
+        this.openTrunkMenu(v);
+      }
+    });
+    return;
   }
   // Au volant : proposer aussi le mode de conduite (auto/manuel guidé/libre),
   // à la demande seulement — il ne s'ouvre plus tout seul en montant.
@@ -1309,6 +1398,17 @@ Game.searchSelf = function() {
   announce(`Vos poches : ${items}. Volume ${vol.toFixed(1)} / ${cap}.`, 'polite');
 };
 
+// Identifier le propriétaire d'un véhicule (le sien, ou le plus proche à
+// portée) : utile pour contrôler un stationnement suspect ou un véhicule
+// impliqué dans un délit.
+Game.lookupVehicleOwner = function() {
+  if (!Roles.hasPerm('cni')) return announce('Réservé à la police.', 'assertive');
+  const v = (this.inVehicle && this.vehicle) || City.vehicles.filter(vv => UTIL.dist(vv, this) < 6).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+  if (!v) return announce('Aucun véhicule à proximité à identifier.', 'assertive');
+  if (!v.owner) return announce(`${v.name} : aucun propriétaire enregistré (véhicule public, PNJ, ou volé).`, 'assertive');
+  const label = v.ownerName || (this.ownedVehicles.includes(v.id) ? `${this.player.firstName} ${this.player.lastName}` : 'identité non communiquée');
+  announce(`${v.name} appartient à : ${label}.`, 'assertive');
+};
 Game.openPoliceMenu = function() {
   if (!Roles.hasPerm('cni')) return announce('Réservé à la police.', 'assertive');
   el('menuTitle').textContent = 'Menu police';
@@ -1319,6 +1419,7 @@ Game.openPoliceMenu = function() {
     { id: 'cameras', title: '📹 Caméras de surveillance', desc: 'Lister les caméras les plus proches et leur distance.' },
     { id: 'goto_alert', title: '🚨 Se rendre à la dernière alerte', desc: this.lastCrimeAlert ? `${this.lastCrimeAlert.name}, guidage GPS.` : 'Aucune alerte reçue pour l\'instant.' },
     { id: 'impound', title: '🚛 Mettre en fourrière', desc: 'Un véhicule non-possédé à proximité (8 cases).' },
+    { id: 'vehicle_owner', title: '🔎 Propriétaire d\'un véhicule', desc: 'Identifier le propriétaire du véhicule où vous êtes, ou le plus proche.' },
     { id: 'tank', title: '🪖 Réquisitionner un char d\'assaut', desc: 'Très cher, un seul à la fois.' },
     { id: 'invoice', title: '🧾 Facturer un client', desc: 'Envoyer une facture (frais divers) à un joueur réel proche.' },
     { id: 'cell', title: '🔒 Mettre en cellule / Libérer', desc: 'Cible verrouillée, menottée ou neutralisée — uniquement dans les cellules du commissariat.' },
@@ -1332,6 +1433,7 @@ Game.openPoliceMenu = function() {
     else if (sel.id === 'cameras') { closeMenu(); Game.cameraControl(); }
     else if (sel.id === 'goto_alert') { closeMenu(); Game.goToLastCrimeAlert(); }
     else if (sel.id === 'impound') { closeMenu(); Game.impoundVehicle(); }
+    else if (sel.id === 'vehicle_owner') { closeMenu(); Game.lookupVehicleOwner(); }
     else if (sel.id === 'tank') { closeMenu(); Game.requisitionTank(); }
     else if (sel.id === 'invoice') Game.openInvoiceMenu();
     else if (sel.id === 'cell') { closeMenu(); Game.toggleJail(); }

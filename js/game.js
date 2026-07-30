@@ -716,14 +716,26 @@ const Game = {
       // (Ctrl+L) : sinon le verrouillage n'avait aucun effet réel pour lui,
       // impossible de vraiment vérifier qu'il est bien verrouillé.
       if (this.ownedVehicles.includes(v.id)) return announce(`${v.name} est verrouillé. Déverrouillez-le d'abord (Ctrl+L).`, 'assertive');
+      const forceCls = VEHICLE_CATALOG[v.type];
+      // Un aéronef a un verrouillage bien plus solide (impossible de le forcer
+      // à la volée comme une portière de voiture) ; un véhicule haut de gamme
+      // est aussi mieux protégé. Avant, 12 secondes suffisaient pour N'IMPORTE
+      // quel véhicule, avion ou hélicoptère compris : le vol était trivial.
+      let forceMs = 25000, forceLabel = 'La portière a cédé';
+      if (forceCls?.flies) { forceMs = 120000; forceLabel = 'Le verrouillage a fini par céder'; }
+      else if (forceCls?.price >= 8000000) { forceMs = 60000; forceLabel = 'La portière a fini par céder'; }
+      else if (forceCls?.type === 'poids lourd') { forceMs = 40000; }
       Audio.beep(0, 700);
-      AccessibleConfirm.open(`${v.name} est verrouillé`, 'Forcer la portière ? Cela déclenchera l\'alarme antivol et attirera l\'attention.', (force) => {
+      const forceWarning = forceCls?.flies
+        ? 'Forcer le verrouillage ? C\'est très long sur un aéronef, ça déclenchera l\'alarme et attirera l\'attention pendant tout ce temps.'
+        : 'Forcer la portière ? Cela déclenchera l\'alarme antivol et attirera l\'attention pendant tout ce temps.';
+      AccessibleConfirm.open(`${v.name} est verrouillé`, forceWarning, (force) => {
         if (!force) return announce('Véhicule verrouillé.', 'assertive');
         AudioLib.playOnce('sfx_alarme_antivol');
         Game.reportCrimeToPolice('vol_vehicule', v.name);
         this.wanted = Math.min(100, this.wanted + 15);
-        announce('Vous forcez la portière ! L\'alarme antivol retentit une fois : la police est alertée.', 'assertive');
-        setTimeout(() => { v.locked = false; announce('La portière a cédé, vous pouvez monter.', 'polite'); }, 12000);
+        announce(`Vous forcez ${forceCls?.flies ? 'le verrouillage' : 'la portière'} ! L'alarme antivol retentit : la police est alertée. Ça va prendre du temps.`, 'assertive');
+        setTimeout(() => { v.locked = false; announce(`${forceLabel}, vous pouvez monter.`, 'polite'); }, forceMs);
       });
       return;
     }
@@ -746,6 +758,11 @@ const Game = {
     else if (cls?.doors === 0) announce(`Vous enfourchez ${v.name}. Flèche haut pour démarrer le moteur, puis accélérer et tourner, espace pour freiner.`, 'assertive'); // moto / scooter / quad : on accélère, on ne pédale pas
     else announce(`Vous montez au volant de ${v.name}. Flèche haut pour démarrer le moteur${cls?.flies ? ' et le laisser se stabiliser' : ''}, puis conduire. Espace pour freiner.`, 'assertive');
     if (this.activeMission && this.activeMission.type === 'convoyage' && this.activeMission.vehicleId === v.id && !this.deliveryState) this.startVehicleDelivery(this.activeMission);
+    // Le taxi PNJ qu'on a fait venir (Ctrl+X) n'a pas de chauffeur : contrairement
+    // aux autres véhicules, on promet explicitement "dites un lieu" en l'appelant
+    // — il faut donc bien proposer le choix de destination à la montée, pas
+    // laisser le joueur chercher ça de son côté dans le téléphone.
+    if (v.type === 'taxi' && !v.owner) setTimeout(() => this.autoDriveMenu(), 400);
     this._vehProg = null; // réinitialise le suivi de progression
     updateHud();
   },
@@ -783,6 +800,30 @@ const Game = {
     AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 });
     setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
     announce(`Vous montez comme passager avec ${this.ridingWith.name}${driver.vehicleName ? ', dans ' + driver.vehicleName : ''}. Vous suivez le trajet. Appuyez sur Interagir pour descendre.`, 'assertive');
+    // Avant, aucun moyen d'indiquer où l'on veut aller ni de faire suivre un
+    // message reçu (par exemple une adresse) au chauffeur une fois monté.
+    setTimeout(() => this.openTaxiPassengerMenu(driver), 900);
+  },
+  openTaxiPassengerMenu(driver) {
+    if (!this.ridingWith || this.ridingWith.id !== driver.id) return; // déjà descendu entre-temps
+    el('menuTitle').textContent = 'Avec le chauffeur';
+    const items = [
+      { id: 'dest', title: '🗣️ Indiquer une destination', desc: 'Envoyer un message au chauffeur pour lui dire où aller.' },
+      { id: 'forward', title: '📩 Transmettre un message reçu', desc: 'Faire suivre un message récent (par exemple une adresse) au chauffeur.' },
+      { id: 'skip', title: '↩️ Rien pour l\'instant', desc: '' },
+    ];
+    el('menuOverlay').style.display = 'flex';
+    renderMenu(items, (sel) => {
+      closeMenu();
+      if (sel.id === 'dest') {
+        AccessibleTextPrompt.open('Destination', 'Où voulez-vous aller ?', '', (text) => {
+          if (!text) return;
+          Net.smsSend(driver.id, `Destination souhaitée : ${text}`, (res) => { if (!res.ok) announce(res.reason || 'Message non envoyé.', 'assertive'); else announce('Destination transmise au chauffeur.', 'polite'); });
+        });
+      } else if (sel.id === 'forward') {
+        Phone.pickReceivedMessage(driver.id, `${driver.firstName} ${driver.lastName}`);
+      }
+    });
   },
   leavePassengerSeat() {
     if (!this.ridingWith) return;
@@ -1013,6 +1054,8 @@ const Game = {
     parts.push(`argent en poche : ${UTIL.formatMoney(this.money)}`);
     if (this.bank) parts.push(`en banque : ${UTIL.formatMoney(this.bank)}`);
     if (this.dirtyMoney) parts.push(`argent sale : ${UTIL.formatMoney(this.dirtyMoney)}`);
+    parts.push(this.hasHelmet ? 'casque blindé porté' : 'pas de casque blindé');
+    parts.push(this.hasVest ? 'gilet blindé porté' : 'pas de gilet blindé');
     if (this.inVehicle && this.vehicle) {
       const cls = VEHICLE_CATALOG[this.vehicle.type];
       if (!cls.human) parts.push(`${cls.electric ? 'batterie' : 'essence'} ${Math.round(this.vehicle.fuel * 100)}%`);
@@ -2609,7 +2652,7 @@ const Game = {
     else if (poi.type === 'concessionnaire') { this.openVehicleShop(poi); }
     else if (poi.type === 'police') { this.openPoliceStation(poi); }
     else if (poi.type === 'hopital') { this.heal(100); announce('Vous êtes soigné à l\'hôpital.', 'assertive'); }
-    else if (poi.type === 'banque') { if (this.activeMission && this.activeMission.type === 'heist' && !this.heistState) this.beginBankHeist(); else this.bank(); }
+    else if (poi.type === 'banque') { if (this.activeMission && this.activeMission.type === 'heist' && !this.heistState) this.beginBankHeist(); else this.useBankCounter(); }
     else if (poi.type === 'station_essence') { this.refuelVehicle(poi); }
     else if (poi.type === 'atelier') { this.enterWorkshop(poi); }
     else if (poi.type === 'prison') { this.openPrison(poi); }
@@ -2887,8 +2930,8 @@ const Game = {
     announce(`${poi.name} : ${v.name} réparé, état 100%, pour ${UTIL.formatMoney(cost)}.`, 'assertive');
     updateHud();
   },
-  bank() {
-    announce(`Solde bancaire : ${UTIL.formatMoney(this.money)}. Les banques gèrent vos fonds.`, 'polite');
+  useBankCounter() {
+    announce(`Solde bancaire : ${UTIL.formatMoney(this.bank)}. Liquide en poche : ${UTIL.formatMoney(this.money)}. Utilisez l'appli Banque du téléphone pour déposer, retirer ou blanchir.`, 'polite');
   },
   // Parking public (lieu « garage » sur la carte) : vos véhicules restent
   // toujours exactement où vous les laissez. Seuls les 3 parkings PRINCIPAUX
@@ -3134,7 +3177,26 @@ const Game = {
   // Verrouiller/déverrouiller son propre véhicule : possible dedans, ou juste à
   // côté d'un véhicule qu'on possède. Diffusé aux autres joueurs (vehicle_lock).
   toggleVehicleLock() {
-    let v = this.inVehicle ? this.vehicle : City.vehicles.find(veh => veh.owner === 'player' && UTIL.dist(veh, this) < 3);
+    if (this.inVehicle) return this.applyVehicleLockToggle(this.vehicle);
+    const nearby = City.vehicles.filter(veh => veh.owner === 'player' && UTIL.dist(veh, this) < 3);
+    if (!nearby.length) return announce('Aucun véhicule à vous à portée.', 'assertive');
+    if (nearby.length === 1) return this.applyVehicleLockToggle(nearby[0]);
+    // Plusieurs véhicules à vous à portée : on demande lequel plutôt que de
+    // deviner (verrouillait/déverrouillait le mauvais véhicule au hasard).
+    el('menuTitle').textContent = 'Quel véhicule ?';
+    const items = nearby.map(v => {
+      const dist = Math.round(UTIL.dist(v, this) * CONFIG.METERS_PER_TILE);
+      const bearing = UTIL.bearing(v.x - this.x, v.y - this.y);
+      return { id: v.id, title: `${v.name} — ${v.locked ? 'verrouillé' : 'déverrouillé'}`, desc: `${dist} m, vers le ${bearing}.` };
+    });
+    el('menuOverlay').style.display = 'flex';
+    renderMenu(items, (sel) => {
+      closeMenu();
+      const v = nearby.find(vv => vv.id === sel.id);
+      if (v) this.applyVehicleLockToggle(v);
+    });
+  },
+  applyVehicleLockToggle(v) {
     if (!v) return announce('Aucun véhicule à vous à portée.', 'assertive');
     if (v.owner !== 'player') return announce('Ce véhicule ne vous appartient pas.', 'assertive');
     v.locked = !v.locked;
@@ -3229,7 +3291,7 @@ const Game = {
     }
     if (this.money < v.price) return announce('Fonds insuffisants.', 'assertive');
     this.money -= v.price; Audio.cash();
-    const nv = { id: 'owned_' + Date.now(), type: v.id, name: v.name, x: this.x + 1, y: this.y + 1, fuel: 1, hp: 100, locked: false, owner: 'player', inventory: [], auto: false, altitude: 0, speed: 0, heading: 0, autoDest: null, price: v.price, trunk: v.trunk };
+    const nv = { id: 'owned_' + Date.now(), type: v.id, name: v.name, x: this.x + 1, y: this.y + 1, fuel: 1, hp: 100, locked: false, owner: 'player', ownerName: `${this.player.firstName} ${this.player.lastName}`, inventory: [], auto: false, altitude: 0, speed: 0, heading: 0, autoDest: null, price: v.price, trunk: v.trunk };
     City.vehicles.push(nv); this.ownedVehicles.push(nv.id);
     sendWorldEdit('vehicle_create', nv);
     announce(`Vous achetez un ${v.name}.`, 'assertive'); updateHud();
@@ -3369,21 +3431,41 @@ const Game = {
     if (m.type === 'recel_vehicule') return this.tickRecelVehicule(m);
     const d = UTIL.dist({ x: this.x, y: this.y }, m);
     if (d < 5) {
-      // Certaines missions sont clairement illégales : elles paient en argent
-      // sale. Les autres (livraison, taxi, secours, réparation...) sont des jobs
-      // légaux payés normalement — avant, TOUTES créditaient de l'argent sale et
-      // étaient annoncées comme « illicites », ce qui était faux.
+      // Ces types (police, mine, trade, medical, air, hunt, taxi, fishing...)
+      // n'ont pas de mini-jeu dédié : avant, arriver au point suffisait à
+      // empocher la récompense instantanément, sans le moindre risque — trop
+      // simple. On exige maintenant de rester sur place le temps de "mener la
+      // mission à bien" (proportionnel au danger annoncé), en s'exposant à une
+      // alerte police pendant ce temps pour les missions illégales ; s'éloigner
+      // annule la progression.
+      if (!this.genericMissionState || this.genericMissionState.missionId !== m.id) {
+        const dwellMs = Math.max(6000, Math.min(30000, (m.danger || 20) * 250));
+        this.genericMissionState = { missionId: m.id, startedAt: Date.now(), dwellMs, alarmed: false };
+        announce(`Vous êtes sur place pour « ${m.title} ». Restez ${Math.round(dwellMs / 1000)} secondes sans partir pour mener la mission à bien.`, 'assertive');
+        return;
+      }
+      const gs = this.genericMissionState;
       const illegalTypes = ['trade', 'hunt', 'contrebande', 'gofast', 'recel_vehicule', 'braquage_superette', 'depot_armes_gang', 'planque_gardee'];
       const illegal = illegalTypes.includes(m.type);
+      if (illegal && !gs.alarmed && UTIL.chance(0.02)) {
+        gs.alarmed = true;
+        Game.reportCrimeToPolice(m.type, m.title);
+      }
+      if (Date.now() - gs.startedAt < gs.dwellMs) return;
+      this.genericMissionState = null;
       if (illegal) this.dirtyMoney += m.reward; else this.money += m.reward;
       Audio.cash(); m.completed = true; m.active = false; this.activeMission = null; this.completedMissions.push(m.id);
       // Le guidage GPS pointait vers ce point : on le coupe pour ne pas continuer
       // à guider vers une mission déjà terminée.
       this.guidanceTarget = null; this.guidanceAxis = null;
       RPJournal.log('Mission', `Mission accomplie : ${m.title}, ${UTIL.formatMoney(m.reward)}.`, illegal ? 'alert' : 'info');
-      announce(`Vous êtes arrivé au point de mission. Mission accomplie ! Vous gagnez ${UTIL.formatMoney(m.reward)}${illegal ? ' d\'argent sale' : ''}.`, 'assertive');
+      announce(`Mission accomplie ! Vous gagnez ${UTIL.formatMoney(m.reward)}${illegal ? ' d\'argent sale' : ''}.`, 'assertive');
       updateHud();
     } else {
+      if (this.genericMissionState && this.genericMissionState.missionId === m.id) {
+        this.genericMissionState = null;
+        announce('Vous vous êtes trop éloigné : reprenez depuis le point de mission.', 'polite');
+      }
       // Rappel de distance limité à une fois toutes les 4 secondes : la boucle de
       // jeu appelle checkMission à chaque image, on ne veut pas dépendre du
       // hasard « la voix est occupée » pour ne pas répéter en continu.
@@ -4876,10 +4958,36 @@ const Game = {
   },
   compass() { announce(`Cap actuel : ${UTIL.cardinals[this.heading]}.`, 'polite'); },
 
+  // Avant, ce menu se contentait d'ANNONCER "dites un lieu" sans jamais rien
+  // capter en retour : aucune destination n'était réellement sélectionnable,
+  // ce qui rendait la conduite automatique inaccessible depuis ce menu (le
+  // même problème touchait le taxi : "monter, mais aucun menu de destination").
   autoDriveMenu() {
     if (!this.inVehicle || !this.vehicle) return announce('Montez d\'abord dans un véhicule.', 'assertive');
-    const dests = ['hôpital','police','banque','magasin','armurerie','concessionnaire','aéroport','héliport','port','mine','maison'];
-    announce('Conduite automatique : dites un lieu, par exemple hôpital, police, banque, magasin, armurerie, aéroport, héliport, port, mine.', 'polite');
+    const dests = [
+      { type: 'hopital', label: 'Hôpital' }, { type: 'police', label: 'Police' }, { type: 'banque', label: 'Banque' },
+      { type: 'magasin', label: 'Magasin' }, { type: 'armurerie', label: 'Armurerie' }, { type: 'concessionnaire', label: 'Concessionnaire' },
+      { type: 'aeroport', label: 'Aéroport' }, { type: 'heliport', label: 'Héliport' }, { type: 'port', label: 'Port' }, { type: 'mine', label: 'Mine' },
+    ];
+    el('menuTitle').textContent = 'Conduite automatique : destination';
+    const items = dests.map(d => {
+      const nearest = City.pois.filter(p => p.type === d.type).map(p => ({ ...p, dist: UTIL.dist(p, this) })).sort((a, b) => a.dist - b.dist)[0];
+      return { id: d.type, title: nearest ? `${d.label} — ${nearest.name}` : d.label, desc: nearest ? `${Math.round(nearest.dist * CONFIG.METERS_PER_TILE)} m.` : 'Aucun trouvé dans la ville.' };
+    });
+    if (this.ownedHouses.length) items.push({ id: 'maison', title: '🏠 Ma maison', desc: 'Direction votre maison possédée la plus proche.' });
+    items.push({ id: 'custom', title: '🔍 Autre lieu (rechercher par nom)', desc: 'Saisir le nom d\'un lieu, d\'une boutique ou d\'un quartier.' });
+    el('menuOverlay').style.display = 'flex';
+    renderMenu(items, (sel) => {
+      closeMenu();
+      if (sel.id === 'custom') {
+        AccessibleTextPrompt.open('Destination', 'Nom du lieu, de la boutique ou du quartier.', '', (name) => { if (name) this.setAutoDrive(null, name); });
+      } else if (sel.id === 'maison') {
+        const h = this.ownedHouses.map(hid => City.houses.find(hh => hh.id === hid)).filter(Boolean).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+        if (!h) return announce('Aucune maison possédée trouvée.', 'assertive');
+        this.vehicle.auto = true; this.vehicle.autoDest = { x: h.x, y: h.y, name: h.name };
+        announce(`Conduite automatique vers ${h.name}.`, 'polite');
+      } else this.setAutoDrive(sel.id, null);
+    });
   },
   help() {
     announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+G arrêter le guidage, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
@@ -5115,13 +5223,15 @@ const Game = {
       { id: 'computer', title: '💻 Ordinateur (outil de piratage)', desc: 'Terminal de piratage : banque, coffres, systèmes.' },
       { id: 'market', title: '🛒 Market (livraison par drone)', desc: 'Achetez un article, un drone vous le livre où que vous soyez.' },
     ];
+    el('menuOverlay').style.display = 'flex';
     renderMenu(items, (sel) => {
       closeMenu();
       if (sel.id === 'phone') Phone.openAs('phone');
       else if (sel.id === 'tablet') {
         if (!this.ownsTablet) {
           AccessibleConfirm.open('Vous ne possédez pas de tablette', 'L\'acheter maintenant pour 60 000 FCFA ?', (bought) => {
-            if (bought) this.buyTablet(); else announce('Achetez une tablette pour l\'avoir sur vous.', 'assertive');
+            if (bought) { this.buyTablet(); if (this.ownsTablet) Phone.openAs('tablet'); }
+            else announce('Achetez une tablette pour l\'avoir sur vous.', 'assertive');
           });
         } else Phone.openAs('tablet');
       }

@@ -237,6 +237,25 @@ const Phone = {
       });
       if (places.length) this._makeListAccessible(ul, `Mes lieux : ${places.length} enregistré${places.length > 1 ? 's' : ''}. Balayez d'un doigt pour parcourir, double tapez pour vous faire guider ou supprimer.`);
     }
+    if (name === 'houses') {
+      a.innerHTML = '<h3>🏠 Adresses des maisons</h3><ul class="contact-list" id="phoneHousesList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
+      const ul = el('phoneHousesList');
+      // Lit City.houses en direct : toute maison ajoutée plus tard (croissance
+      // de la ville, admin) apparaît ici sans rien à mettre à jour.
+      const houses = City.houses.slice().sort((a, b) => Game.houseAddress(a).localeCompare(Game.houseAddress(b)));
+      if (!houses.length) ul.innerHTML = '<p style="color:var(--muted);font-size:0.8rem;">Aucune maison recensée.</p>';
+      houses.forEach(h => {
+        const ownerLabel = h.owner ? (Game.ownedHouses.includes(h.id) ? 'à vous' : 'occupée') : 'libre, à vendre';
+        const dist = Math.round(UTIL.dist(h, Game) * CONFIG.METERS_PER_TILE);
+        const dir = UTIL.bearing(h.x - Game.x, h.y - Game.y);
+        const addr = Game.houseAddress(h);
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${addr} — ${ownerLabel} (${dist} m, ${dir})</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers ${addr}, ${dist} mètres, direction ${dir}">🚶</button>`;
+        li.querySelector('[data-walk]').addEventListener('click', () => { Game.setGuidance({ name: addr, x: h.x, y: h.y }); Phone.closePhone(); });
+        ul.appendChild(li);
+      });
+      if (houses.length) this._makeListAccessible(ul, `Adresses des maisons : ${houses.length} recensée${houses.length > 1 ? 's' : ''}. Balayez d'un doigt pour parcourir, double tapez pour vous faire guider.`);
+    }
     if (name === 'jobs') {
       a.innerHTML = '<h3>🛡️ Métiers</h3><p style="color:var(--muted);font-size:0.8rem;">Métier actuel : <strong>' + (Roles.list[Roles.current]?.name || Roles.current) + '</strong></p><ul class="contact-list" id="phoneJobsList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
       const ul = el('phoneJobsList');
@@ -363,9 +382,47 @@ const Phone = {
   renderMessages() {
     const div = el('phoneMsgList'); if (!div) return; div.innerHTML = '';
     if (!this.messages.length) div.innerHTML = '<p style="color:var(--muted);font-size:0.8rem;">Aucun message.</p>';
+    // Les messages reçus (fromId présent) ont un bouton pour les transférer à
+    // un autre joueur — avant, impossible de faire suivre un message reçu.
     this.messages.slice(-20).forEach(m => {
       const p = document.createElement('div'); p.style.cssText = 'background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:8px;margin-bottom:6px;font-size:0.8rem;';
-      p.innerHTML = `<strong>${m.from}</strong> <span style="color:var(--muted);font-size:0.7rem;">${m.time}</span><br>${m.text}`; div.appendChild(p);
+      p.innerHTML = `<strong>${m.from}</strong> <span style="color:var(--muted);font-size:0.7rem;">${m.time}</span><br>${m.text}` + (m.fromId ? '<br><button class="phone-btn" data-fwd aria-label="Transférer le message de ' + m.from + '" style="margin-top:4px;">↪️ Transférer</button>' : '');
+      if (m.fromId) p.querySelector('[data-fwd]').addEventListener('click', () => this.pickForwardTarget(m));
+      div.appendChild(p);
+    });
+  },
+  // Sens inverse : le destinataire est déjà connu (ex. le chauffeur de taxi),
+  // on choisit plutôt PARMI les messages reçus récemment lequel transférer.
+  pickReceivedMessage(targetId, targetName) {
+    const received = this.messages.filter(m => m.fromId).slice(-15).reverse();
+    if (!received.length) return announce('Aucun message reçu récemment à transférer.', 'assertive');
+    el('menuTitle').textContent = 'Transférer un message';
+    const items = received.map((m, i) => ({ id: String(i), title: `De ${m.from} : ${m.text}`, desc: m.time || '' }));
+    el('menuOverlay').style.display = 'flex';
+    renderMenu(items, (sel) => {
+      closeMenu();
+      const m = received[parseInt(sel.id, 10)];
+      if (!m) return;
+      Net.smsSend(targetId, `[Transféré de ${m.from}] ${m.text}`, (res) => {
+        if (!res.ok) announce(res.reason || 'Message non transféré.', 'assertive');
+        else announce(`Message de ${m.from} transféré à ${targetName}.`, 'polite');
+      });
+    });
+  },
+  pickForwardTarget(m) {
+    const realPlayers = Array.from(Net.remotePlayers.values());
+    if (!realPlayers.length) return announce('Aucun joueur réel connecté pour transférer.', 'assertive');
+    el('menuTitle').textContent = 'Transférer à qui ?';
+    const items = realPlayers.map(p => ({ id: p.id, title: `${p.firstName} ${p.lastName}`, desc: 'Joueur réel connecté.' }));
+    el('menuOverlay').style.display = 'flex';
+    renderMenu(items, (sel) => {
+      closeMenu();
+      const p = realPlayers.find(pp => pp.id === sel.id);
+      if (!p) return;
+      Net.smsSend(p.id, `[Transféré de ${m.from}] ${m.text}`, (res) => {
+        if (!res.ok) announce(res.reason || 'Message non transféré.', 'assertive');
+        else announce(`Message transféré à ${p.firstName} ${p.lastName}.`, 'polite');
+      });
     });
   },
   sendMessage() {

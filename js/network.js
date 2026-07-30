@@ -172,7 +172,7 @@ const Net = {
         if (accepted) {
           Game.money -= msg.price;
           const cls = VEHICLE_CATALOG[msg.vehicleType];
-          const nv = { id: 'owned_' + Date.now(), type: msg.vehicleType, name: msg.vehicleName, x: Game.x + 1, y: Game.y + 1, fuel: 1, hp: 100, locked: false, owner: 'player', inventory: [], auto: false, altitude: 0, speed: 0, heading: 0, autoDest: null, price: msg.price, trunk: cls?.trunk };
+          const nv = { id: 'owned_' + Date.now(), type: msg.vehicleType, name: msg.vehicleName, x: Game.x + 1, y: Game.y + 1, fuel: 1, hp: 100, locked: false, owner: 'player', ownerName: `${Game.player.firstName} ${Game.player.lastName}`, inventory: [], auto: false, altitude: 0, speed: 0, heading: 0, autoDest: null, price: msg.price, trunk: cls?.trunk };
           City.vehicles.push(nv); Game.ownedVehicles.push(nv.id);
           sendWorldEdit('vehicle_create', nv);
           announce(`Vous achetez ${msg.vehicleName} pour ${UTIL.formatMoney(msg.price)}.`, 'assertive');
