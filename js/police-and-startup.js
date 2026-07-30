@@ -847,6 +847,8 @@ Game.payBill = function(index) {
   if (this.bank < bill.amount) return announce(`Facture de ${UTIL.formatMoney(bill.amount)} : solde bancaire insuffisant (${UTIL.formatMoney(this.bank)} disponible). Déposez d'abord de l'argent à la banque.`, 'assertive');
   this.bank -= bill.amount;
   this.pendingBills.splice(index, 1);
+  const histEntry = this.finesHistory.find(f => f.type === 'facture' && f.id === bill.id);
+  if (histEntry) { histEntry.paid = true; histEntry.paidAt = Date.now(); }
   Audio.cash();
   announce(`Facture de ${UTIL.formatMoney(bill.amount)} payée à ${bill.from} par virement bancaire.`, 'assertive');
   if (Net.connected && bill.fromId) Net.send({ type: 'invoice_paid', targetId: bill.fromId, amount: bill.amount });
@@ -1329,7 +1331,11 @@ Game.payTickets = function() {
   if (!Game.tickets.length) return announce('Aucun PV à payer.', 'polite');
   const total = Game.tickets.reduce((a, t) => a + t.amount, 0);
   if (this.money < total) return announce(`PV total : ${UTIL.formatMoney(total)}. Fonds insuffisants.`, 'assertive');
-  this.money -= total; this.tickets = [];
+  this.money -= total;
+  const paidIds = new Set(this.tickets.map(t => t.id));
+  const now = Date.now();
+  this.finesHistory.forEach(f => { if (f.type === 'pv' && paidIds.has(f.id)) { f.paid = true; f.paidAt = now; } });
+  this.tickets = [];
   announce(`PV payés : ${UTIL.formatMoney(total)}.`, 'assertive');
 };
 Game.refuelVehicle = function(poi) {
@@ -1429,6 +1435,7 @@ Game.openPoliceMenu = function() {
     { id: 'impound', title: '🚛 Mettre en fourrière', desc: 'Un véhicule non-possédé à proximité (8 cases).' },
     { id: 'vehicle_owner', title: '🔎 Propriétaire d\'un véhicule', desc: 'Identifier le propriétaire du véhicule où vous êtes, ou le plus proche.' },
     { id: 'vehicle_search', title: '🚓 Fouiller un véhicule', desc: 'Le véhicule déverrouillé le plus proche : voir et saisir le contenu du coffre.' },
+    { id: 'criminal_record', title: '📁 Consulter un casier judiciaire', desc: 'Demande au joueur réel le plus proche (5 cases) : délits, récidive, peines purgées.' },
     { id: 'tank', title: '🪖 Réquisitionner un char d\'assaut', desc: 'Très cher, un seul à la fois.' },
     { id: 'invoice', title: '🧾 Facturer un client', desc: 'Envoyer une facture (frais divers) à un joueur réel proche.' },
     { id: 'cell', title: '🔒 Mettre en cellule / Libérer', desc: 'Cible verrouillée, menottée ou neutralisée — uniquement dans les cellules du commissariat.' },
@@ -1444,6 +1451,7 @@ Game.openPoliceMenu = function() {
     else if (sel.id === 'impound') { closeMenu(); Game.impoundVehicle(); }
     else if (sel.id === 'vehicle_owner') { closeMenu(); Game.lookupVehicleOwner(); }
     else if (sel.id === 'vehicle_search') { closeMenu(); Game.searchVehicle(); }
+    else if (sel.id === 'criminal_record') { closeMenu(); Game.lookupPlayerCriminalRecord(); }
     else if (sel.id === 'tank') { closeMenu(); Game.requisitionTank(); }
     else if (sel.id === 'invoice') Game.openInvoiceMenu();
     else if (sel.id === 'cell') { closeMenu(); Game.toggleJail(); }
@@ -1618,6 +1626,54 @@ function openVehicleSearchMenu(v) {
     });
   });
 }
+// Résumé du casier judiciaire (délits par type + récidive + temps purgé),
+// envoyé à un policier qui consulte à distance, ou affiché à soi-même.
+Game.summarizeCriminalRecord = function() {
+  const record = this.criminalRecord || [];
+  const crimes = record.filter(r => r.kind !== 'incarceration');
+  const counts = {};
+  crimes.forEach(r => { counts[r.kind] = (counts[r.kind] || 0) + 1; });
+  const incarcerations = record.filter(r => r.kind === 'incarceration');
+  return {
+    playerName: `${this.player.firstName} ${this.player.lastName}`,
+    totalCrimes: crimes.length,
+    byType: Object.entries(counts).map(([kind, count]) => ({ kind, label: CRIME_LABELS[kind] || kind, count })),
+    incarcerationsCount: incarcerations.length,
+    totalJailMs: incarcerations.reduce((s, r) => s + (r.durationMs || 0), 0),
+    wanted: Math.round(this.wanted || 0),
+  };
+};
+Game._pendingRecordLookup = null;
+Game.showCriminalRecord = function(fromId, data) {
+  const pending = this._pendingRecordLookup;
+  const name = (pending && fromId && pending.targetId === fromId) ? pending.targetName : data.playerName;
+  this._pendingRecordLookup = null;
+  el('menuTitle').textContent = `Casier judiciaire — ${name}`;
+  const items = [
+    { id: 'total', title: `📋 ${data.totalCrimes} délit(s) signalé(s)`, desc: data.totalCrimes ? 'Détail par type ci-dessous.' : 'Aucun délit enregistré.' },
+  ];
+  data.byType.forEach(t => items.push({ id: 'type_' + t.kind, title: `${t.label} : ${t.count}×`, desc: t.count > 1 ? 'Récidive.' : 'Premier signalement.' }));
+  items.push({ id: 'jail', title: `🔒 ${data.incarcerationsCount} incarcération(s)`, desc: data.totalJailMs ? `Temps total purgé : ${Math.round(data.totalJailMs / 60000)} minute(s).` : 'Jamais incarcéré(e).' });
+  items.push({ id: 'wanted', title: `🚨 Niveau de recherche actuel : ${data.wanted}%`, desc: '' });
+  el('menuOverlay').style.display = 'flex';
+  renderMenu(items, () => closeMenu());
+};
+// Consultation de son propre casier (téléphone).
+Game.openCriminalRecord = function() {
+  const data = this.summarizeCriminalRecord();
+  data.playerName = 'vous-même';
+  this.showCriminalRecord(null, data);
+};
+// Contrôle policier : demande le casier d'un joueur réel proche.
+Game.lookupPlayerCriminalRecord = function() {
+  if (!Roles.hasPerm('cni')) return announce('Réservé à la police.', 'assertive');
+  if (!Net.connected) return announce('Nécessite une connexion au serveur.', 'assertive');
+  const nearby = Array.from(Net.remotePlayers.entries()).map(([pid, p]) => ({ id: pid, p, d: UTIL.dist(p, this) })).filter(x => x.d < 5).sort((a, b) => a.d - b.d)[0];
+  if (!nearby) return announce('Aucun joueur réel à proximité à contrôler.', 'assertive');
+  this._pendingRecordLookup = { targetId: nearby.id, targetName: `${nearby.p.firstName} ${nearby.p.lastName}` };
+  Net.send({ type: 'criminal_record_request', targetId: nearby.id });
+  announce(`Demande de consultation du casier envoyée à ${nearby.p.firstName} ${nearby.p.lastName}...`, 'polite');
+};
 Game.searchTarget = function() {
   const lockedLive = this.lockedTarget && !this.lockedTarget.isPlayer ? this.getLiveTarget() : null;
   const npcTarget = lockedLive || City.npcs.filter(n => !n.dead && UTIL.dist(n, this) < 3).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0]

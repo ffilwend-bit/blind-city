@@ -758,6 +758,34 @@ const City = {
     for (const d of this.districts) if (x >= d.x1 && x <= d.x2 && y >= d.y1 && y <= d.y2) return d;
     return { name: 'Périphérie', type: 'peripherie' };
   },
+
+  // ===== Économie de quartier réactive aux actions du joueur =====
+  // "heat" monte avec les délits commis dans le quartier (les gens se
+  // méfient, les commerces se couvrent) ; "saturation" monte quand on y
+  // vend trop souvent au même endroit (le marché s'inonde). Les deux
+  // redescendent lentement avec le temps réel — un effet durable, mais pas
+  // permanent. Ce n'était auparavant qu'une table fixe par quartier, sans
+  // aucun lien avec ce que le joueur y fait vraiment.
+  districtEconomy: {},
+  getDistrictEconomy(name) {
+    this.districtEconomy[name] = this.districtEconomy[name] || { heat: 0, saturation: 0, lastDecay: Date.now() };
+    const e = this.districtEconomy[name];
+    const elapsedMin = (Date.now() - e.lastDecay) / 60000;
+    if (elapsedMin > 0.01) {
+      e.heat = Math.max(0, e.heat - elapsedMin);
+      e.saturation = Math.max(0, e.saturation - elapsedMin * 2); // la saturation se résorbe plus vite qu'une réputation criminelle
+      e.lastDecay = Date.now();
+    }
+    return e;
+  },
+  recordCrimeInDistrict(name) {
+    const e = this.getDistrictEconomy(name);
+    e.heat = Math.min(50, e.heat + 8);
+  },
+  recordSaleInDistrict(name) {
+    const e = this.getDistrictEconomy(name);
+    e.saturation = Math.min(50, e.saturation + 6);
+  },
 };
 
 /* ============================================================

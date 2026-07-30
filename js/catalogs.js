@@ -1,3 +1,8 @@
+// Libellés lisibles des types de délits (utilisés pour les alertes police en
+// direct ET pour le casier judiciaire — un type non listé ici garde son nom
+// brut, ex. un type de mission illégale).
+const CRIME_LABELS = { vol_vehicule: 'Vol de véhicule', braquage_banque: 'Braquage de banque', coups_de_feu: 'Coups de feu', explosion: 'Explosion / grenade', conduite_dangereuse: 'Conduite dangereuse', intrusion: 'Intrusion détectée', vol_main_armee: 'Vol à main armée' };
+
 const VEHICLE_CATALOG = {
   velo: { name: 'Vélo', label: 'vélo', type: '2 roues', baseFreq: 28, mult: 12, wave: 'sine', maxSpeed: 0.55, accel: 0.09, brake: 0.06, turn: 1.0, offroad: 0.3, flies: false, wheels: 2, price: 300000, trunk: 8, seats: 1, doors: 0, noLicense: true, human: true },
   tricycle: { name: 'Tricycle', label: 'tricycle 3 roues', type: '3 roues', baseFreq: 50, mult: 30, wave: 'sawtooth', maxSpeed: 0.75, accel: 0.05, brake: 0.07, turn: 0.9, offroad: 0.4, flies: false, wheels: 3, price: 600000, trunk: 14, seats: 1, doors: 0 },

@@ -152,10 +152,12 @@ const Audio = {
       }, 400);
     }
   },
-  footstep(surface = 'asphalt') {
+  // heavy = true : porte un gilet pare-balles, le poids de l'équipement
+  // s'entend (pas plus sourds et plus lents), sans changer de fichier son.
+  footstep(surface = 'asphalt', heavy = false) {
     const group = FOOTSTEP_GROUPS[surface] || FOOTSTEP_GROUPS.concrete;
     const key = UTIL.pick(group);
-    AudioLib.playOnce(key, { volume: 0.5 });
+    AudioLib.playOnce(key, { volume: heavy ? 0.65 : 0.5, rate: heavy ? 0.82 : 1 });
     return key; // permet de relayer le même pas aux autres joueurs (audio partagé)
   },
   screech(pan = 0) { this.noise({ duration: 0.25, gain: 0.22, pan, filterFreq: 2500, attack: 0.01, release: 0.2 }); },
@@ -177,6 +179,18 @@ const Audio = {
   },
   shellDrop(pan = 0) { this.tone({ freq: 1200 + Math.random() * 400, type: 'sine', duration: 0.07, gain: 0.05, pan, attack: 0.005, release: 0.06 }); },
   impact(pan = 0) { this.noise({ duration: 0.1, gain: 0.15, pan, filterFreq: 600, attack: 0.005, release: 0.06 }); },
+  // Le joueur encaisse un coup : protected = casque (tête) ou gilet (corps) a
+  // absorbé le choc -> son sourd et étouffé (grave, filtré bas) ; sinon, impact
+  // net et douloureux (plus aigu, sans filtrage grave).
+  playerHit(protectedHit = false, pan = 0) {
+    if (protectedHit) {
+      this.noise({ duration: 0.12, gain: 0.22, pan, filterFreq: 220, attack: 0.005, release: 0.1 });
+      this.tone({ freq: 90, type: 'sine', duration: 0.1, gain: 0.12, pan, attack: 0.005, release: 0.08 });
+    } else {
+      this.noise({ duration: 0.16, gain: 0.3, pan, filterFreq: 1400, attack: 0.003, release: 0.14 });
+      this.tone({ freq: 320, type: 'sawtooth', duration: 0.14, gain: 0.16, pan, attack: 0.003, release: 0.1 });
+    }
+  },
   beep(pan = 0, freq = 880) { this.tone({ freq, type: 'square', duration: 0.12, gain: 0.08, pan, attack: 0.005, release: 0.05 }); },
   click(pan = 0) { this.tone({ freq: 1400, type: 'sine', duration: 0.04, gain: 0.06, pan, attack: 0.005, release: 0.03 }); },
   cash(pan = 0) { this.tone({ freq: 1200, type: 'sine', duration: 0.12, gain: 0.1, pan, attack: 0.005, release: 0.05 }); setTimeout(() => this.tone({ freq: 1600, type: 'sine', duration: 0.12, gain: 0.1, pan, attack: 0.005, release: 0.05 }), 100); },
@@ -897,6 +911,7 @@ const AudioLib = {
     const a = new (window.Audio)(src);
     a.preload = 'auto';
     a.loop = false; a.volume = opts.volume !== undefined ? opts.volume : 1;
+    if (opts.rate) a.playbackRate = opts.rate; // ex. pas plus lourds/graves sous un gilet blindé
     // On garde une référence vive tant que ça joue : un élément Audio créé puis
     // jamais gardé nulle part ailleurs (cas de la plupart des appels "tir et
     // oublie" dans ce jeu) peut sinon être coupé en plein milieu par le

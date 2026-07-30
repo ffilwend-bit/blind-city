@@ -18,6 +18,14 @@ const Game = {
   lastAnnounce: 0,
   skills: { repair: 0, heal: 0, driving: 0, hacking: 0 },
   carriedPlayer: null, will: null, tickets: [], invoices: [],
+  // Historique complet des PV et factures (payés ET en attente), consultable
+  // dans le téléphone — contrairement à `tickets`/`pendingBills` qui ne
+  // contiennent que ce qui reste à payer et disparaissent une fois réglés.
+  finesHistory: [],
+  // Casier judiciaire : chaque délit signalé (voir reportCrimeToPolice) et
+  // chaque incarcération purgée, horodatés — persiste au delà du niveau de
+  // recherche (wanted), qui lui redescend et ne garde aucune trace.
+  criminalRecord: [], jailedAt: null,
   player: { firstName: 'Joueur', lastName: 'Anonyme', gender: 'homme', registered: false },
   outfit: { haut: null, bas: null, chaussures: null, couleurHaut: null, couleurBas: null, couleurChaussures: null, coiffure: null, lunettes: null, isPolice: false, masque: false, accessoires: [] },
   miningMachine: false,
@@ -135,7 +143,7 @@ const Game = {
     this._moveAccum = (this._moveAccum || 0) + speed;
     if (this._moveAccum < 1) {
       // Pas glissant : bruit de pas, mais la case n'est pas encore franchie.
-      Audio.footstep(surface);
+      Audio.footstep(surface, this.hasVest);
       return;
     }
     this._moveAccum -= 1;
@@ -168,7 +176,7 @@ const Game = {
     }
     this._syncFloorOnMove();
     if (!(surface === 'water' && this.underwater)) {
-      const stepKey = Audio.footstep(surface);
+      const stepKey = Audio.footstep(surface, this.hasVest);
       // Pas audibles par les joueurs proches (spatialisés chez eux).
       if (Net.connected && stepKey) Net.emitSound(stepKey, { vol: 0.35 });
     }
@@ -631,11 +639,17 @@ const Game = {
     return m.authorizedIds.includes(myId);
   },
   reportCrimeToPolice(kind, detail) {
+    // Toujours, même hors ligne : ce qu'on vient de faire reste inscrit à son
+    // propre casier judiciaire (contrairement au niveau de recherche, qui lui
+    // redescend avec le temps sans laisser de trace).
+    this.criminalRecord.push({ kind, detail, time: Date.now() });
+    // Répercute aussi sur l'économie locale : les gens se méfient et les
+    // commerces se couvrent davantage dans un quartier où ça braque souvent.
+    City.recordCrimeInDistrict(City.getDistrictAt(this.x, this.y).name);
     if (Net.connected) Net.send({ type: 'crime_report', kind, detail });
   },
   onCrimeAlert(kind, detail, x, y) {
-    const labels = { vol_vehicule: 'Vol de véhicule', braquage_banque: 'Braquage de banque', coups_de_feu: 'Coups de feu', explosion: 'Explosion / grenade', conduite_dangereuse: 'Conduite dangereuse', intrusion: 'Intrusion détectée', vol_main_armee: 'Vol à main armée' };
-    const label = labels[kind] || 'Signalement';
+    const label = CRIME_LABELS[kind] || 'Signalement';
     const bearing = UTIL.bearing(x - this.x, y - this.y);
     const dist = Math.round(UTIL.dist({ x, y }, this) * CONFIG.METERS_PER_TILE);
     this.lastCrimeAlert = { x, y, name: detail || label };
@@ -2012,8 +2026,16 @@ const Game = {
   takeDamage(amount, opts = {}) {
     // Le gilet pare-balles réduit les dégâts d'un tir au corps (pas à la
     // tête — c'est le casque qui protège ça — ni d'une explosion).
-    if (this.hasVest && !opts.headshot && !opts.explosion) amount = Math.round(amount * 0.65);
+    const vestAbsorbs = this.hasVest && !opts.headshot && !opts.explosion;
+    if (vestAbsorbs) amount = Math.round(amount * 0.65);
     this.health = Math.max(0, this.health - amount); updateHud();
+    // Retour sonore de l'impact : on ignore l'usure passive (faim/soif, très
+    // faibles montants) pour ne jouer un son que lors d'un vrai coup/explosion.
+    // Casque/gilet qui absorbent le choc -> son étouffé plutôt qu'invisible.
+    if (amount >= 1 && window.Audio && Audio.playerHit) {
+      const protectedHit = (opts.headshot && this.hasHelmet) || vestAbsorbs;
+      Audio.playerHit(protectedHit);
+    }
     // Suivi des dégâts récents (15 dernières secondes) pour repérer une vraie
     // hémorragie massive : beaucoup trop d'impacts en peu de temps, pas juste
     // quelques balles.
@@ -3044,12 +3066,17 @@ const Game = {
     const it = ctx.stock[index - 1];
     if (!it) return announce('Article non trouvé.', 'assertive');
     qty = Math.min(Math.max(1, Math.floor(qty) || 1), it.q);
-    const total = it.price * qty;
+    // Un commerce dans un quartier où ça braque souvent se couvre en
+    // augmentant ses prix (jusqu'à +25% si le quartier est très "chaud").
+    const districtName = ctx.poi ? City.getDistrictAt(ctx.poi.x, ctx.poi.y).name : null;
+    const surcharge = districtName ? Math.min(0.25, City.getDistrictEconomy(districtName).heat / 200) : 0;
+    const unitPrice = Math.round(it.price * (1 + surcharge));
+    const total = unitPrice * qty;
     if (this.money < total) return announce(`Pas assez d'argent pour ${qty} ${it.name} (${UTIL.formatMoney(total)}).`, 'assertive');
     this.money -= total; it.q -= qty;
     this.addItem({ ...it, q: qty });
     Audio.cash();
-    announce(`Vous achetez ${qty > 1 ? qty + ' ' : ''}${it.name} pour ${UTIL.formatMoney(total)}.`, 'assertive');
+    announce(`Vous achetez ${qty > 1 ? qty + ' ' : ''}${it.name} pour ${UTIL.formatMoney(total)}${surcharge > 0.02 ? ' (majoration locale liée à l\'insécurité)' : ''}.`, 'assertive');
     updateHud();
   },
   sellItem() {
@@ -3069,11 +3096,27 @@ const Game = {
     // c'est de la revente informelle, on la fait pour le bénéfice, jamais à perte.
     // Plus le quartier est commerçant/animé, plus la marge et le budget sont élevés.
     const name = districtName || '';
-    if (/Gounghin/i.test(name)) return { mult: 1.6, budgetMin: 25000, budgetMax: 70000, label: 'forte' };
-    if (/Cissin/i.test(name)) return { mult: 1.4, budgetMin: 15000, budgetMax: 42000, label: 'moyenne' };
-    if (/Koulouba/i.test(name)) return { mult: 1.25, budgetMin: 10000, budgetMax: 26000, label: 'faible' };
-    if (/A[ée]roport/i.test(name)) return { mult: 1.15, budgetMin: 8000, budgetMax: 18000, label: 'très faible' };
-    return { mult: 1.35, budgetMin: 10000, budgetMax: 34000, label: 'ordinaire' };
+    let base;
+    if (/Gounghin/i.test(name)) base = { mult: 1.6, budgetMin: 25000, budgetMax: 70000, label: 'forte' };
+    else if (/Cissin/i.test(name)) base = { mult: 1.4, budgetMin: 15000, budgetMax: 42000, label: 'moyenne' };
+    else if (/Koulouba/i.test(name)) base = { mult: 1.25, budgetMin: 10000, budgetMax: 26000, label: 'faible' };
+    else if (/A[ée]roport/i.test(name)) base = { mult: 1.15, budgetMin: 8000, budgetMax: 18000, label: 'très faible' };
+    else base = { mult: 1.35, budgetMin: 10000, budgetMax: 34000, label: 'ordinaire' };
+    // Ajustement dynamique : marché saturé (trop de ventes récentes ici) ou
+    // méfiant (délits récents dans ce quartier) fait baisser prix et budget —
+    // ça bouge vraiment selon ce que le joueur y a fait récemment.
+    const econ = City.getDistrictEconomy(name);
+    const penalty = (econ.heat + econ.saturation) / 100;
+    if (penalty > 0.02) {
+      const factor = Math.max(0.5, 1 - penalty);
+      return {
+        mult: +(base.mult * factor).toFixed(2),
+        budgetMin: Math.round(base.budgetMin * factor),
+        budgetMax: Math.round(base.budgetMax * factor),
+        label: penalty > 0.25 ? `${base.label}, marché méfiant/saturé` : base.label,
+      };
+    }
+    return base;
   },
   // Vendre un objet de l'inventaire à un passant. On cherche un civil proche,
   // non hostile ; s'il a le budget (selon le quartier), il se dirige vers le
@@ -3119,6 +3162,7 @@ const Game = {
     this.money += deal.price;
     n.money = Math.max(0, (n.money || 0) - deal.price);
     this.removeItem(deal.itemId, deal.qty);
+    City.recordSaleInDistrict(City.getDistrictAt(this.x, this.y).name);
     Audio.cash();
     announce(`Vente conclue : ${deal.qty} ${deal.name} à ${n.name} pour ${UTIL.formatMoney(deal.price)}${profit > 0 ? `, bénéfice de ${UTIL.formatMoney(profit)}` : ''}.`, 'assertive');
     if (this.vendorMode && this.vendorMode.itemId === deal.itemId) { this.vendorMode.sales++; this.vendorMode.revenue += deal.price; }
@@ -5014,7 +5058,8 @@ const Game = {
       plantations: this.plantations,
       completedMissions: this.completedMissions, activeMissionId: this.activeMission?.id || null,
       role: this.role, policeRank: this.policeRank, licenses: this.licenses, skills: this.skills,
-      will: this.will, tickets: this.tickets, invoices: this.invoices,
+      will: this.will, tickets: this.tickets, invoices: this.invoices, finesHistory: this.finesHistory,
+      criminalRecord: this.criminalRecord, jailedAt: this.jailedAt,
       player: this.player, outfit: this.outfit, miningMachine: this.miningMachine, talkie: this.talkie, portableRadio: this.portableRadio,
       rolesCurrent: Roles.current, rolesRecruiters: Roles.recruiters, savedPlaces: this.savedPlaces, ownsTablet: this.ownsTablet,
       phones: this.phones, activePhoneIndex: this.activePhoneIndex, lastParkedVehicle: this.lastParkedVehicle, theoryPassed: this.theoryPassed, flightTheoryPassed: this.flightTheoryPassed, myContacts: this.myContacts,
@@ -5069,6 +5114,8 @@ const Game = {
       if (!Array.isArray(this.savedPlaces)) this.savedPlaces = [];
       if (!Array.isArray(this.myContacts)) this.myContacts = [];
       if (!Array.isArray(this.pendingBills)) this.pendingBills = [];
+      if (!Array.isArray(this.finesHistory)) this.finesHistory = [];
+      if (!Array.isArray(this.criminalRecord)) this.criminalRecord = [];
       if (!this.ammoReserve || typeof this.ammoReserve !== 'object') this.ammoReserve = {};
       if (!Array.isArray(this.completedMissions)) this.completedMissions = [];
       // Réinjecte les véhicules possédés (créés dynamiquement, donc absents

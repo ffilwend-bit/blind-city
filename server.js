@@ -1033,6 +1033,13 @@ wss.on('connection', (ws, req) => {
       send(ws, { type: 'staff_bans_list', bans: staffData.bans });
     }
 
+    else if (msg.type === 'criminal_record_request' || msg.type === 'criminal_record_data') {
+      // Consultation du casier judiciaire entre joueurs réels : simple relais,
+      // comme pour la fouille — aucune donnée n'est stockée côté serveur.
+      const target = players.get(msg.targetId);
+      if (!target) return;
+      send(target.ws, { type: msg.type, fromId: id, data: msg.data });
+    }
     else if (msg.type === 'search_request' || msg.type === 'search_data' || msg.type === 'loot_take') {
       // Fouille entre joueurs réels : ne fonctionne que si la cible a les mains
       // levées (vérifié aussi côté serveur pour éviter tout contournement).

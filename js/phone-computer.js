@@ -74,6 +74,7 @@ const Phone = {
     // le menu correspondant, au lieu d'une liste à part moins accessible.
     if (name === 'map' || name === 'citymap') { this.closePhone(); if (typeof openMapMenu === 'function') openMapMenu(); return; }
     if (name === 'places') { this.closePhone(); if (typeof openNearestMenu === 'function') openNearestMenu(); return; }
+    if (name === 'casier') { this.closePhone(); Game.openCriminalRecord(); return; }
     el('phoneHome').style.display = 'none'; el('phoneApp').style.display = 'block'; const a = el('phoneApp'); a.innerHTML = '';
     if (name === 'contacts') {
       a.innerHTML = '<h3>👥 Contacts</h3><ul class="contact-list" id="phoneContactList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
@@ -298,6 +299,22 @@ const Phone = {
       el('musicVolDown').addEventListener('click', () => { MusicPlayer.setVolume(MusicPlayer.volume - 0.1); refresh(); });
       const buyBtn = el('musicBuyRadio');
       if (buyBtn) buyBtn.addEventListener('click', () => { Game.buyPortableRadio(); this.renderApp('music'); });
+    }
+    if (name === 'fines') {
+      const totalUnpaid = Game.tickets.reduce((s, t) => s + t.amount, 0) + Game.pendingBills.reduce((s, b) => s + b.amount, 0);
+      a.innerHTML = `<h3>🧾 PV et factures</h3><p style="color:var(--muted);font-size:0.8rem;">${totalUnpaid > 0 ? `${UTIL.formatMoney(totalUnpaid)} en attente de paiement.` : 'Rien en attente.'}</p><ul class="contact-list" id="phoneFinesList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>`;
+      const ul = el('phoneFinesList');
+      const history = Game.finesHistory || [];
+      if (!history.length) ul.innerHTML = '<p style="color:var(--muted);font-size:0.8rem;">Aucun PV ni facture reçu pour l\'instant.</p>';
+      history.forEach(f => {
+        const d = new Date(f.time); const time = d.toLocaleDateString() + ' ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+        const label = f.type === 'pv' ? 'PV' : 'Facture';
+        const statut = f.paid ? '✅ Payé' : '⏳ En attente';
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${label} — ${UTIL.formatMoney(f.amount)} (${f.reason}), de ${f.from}, ${time} — ${statut}</span>`;
+        ul.appendChild(li);
+      });
+      if (history.length) this._makeListAccessible(ul, `PV et factures : ${history.length} au total. Balayez d'un doigt pour parcourir.`);
     }
     if (name === 'jobs') {
       a.innerHTML = '<h3>🛡️ Métiers</h3><p style="color:var(--muted);font-size:0.8rem;">Métier actuel : <strong>' + (Roles.list[Roles.current]?.name || Roles.current) + '</strong></p><ul class="contact-list" id="phoneJobsList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';

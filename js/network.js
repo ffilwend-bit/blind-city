@@ -98,6 +98,14 @@ const Net = {
       updateHud();
     } else if (msg.type === 'you_are_jailed') {
       Game.jailed = !!msg.jailed;
+      if (Game.jailed) {
+        Game.jailedAt = Date.now();
+      } else if (Game.jailedAt) {
+        // Peine purgée : inscrite au casier avec sa vraie durée, pour "peines
+        // purgées" — le niveau de recherche (wanted), lui, ne garde aucune trace.
+        Game.criminalRecord.push({ kind: 'incarceration', detail: 'Peine purgée en cellule', time: Date.now(), durationMs: Date.now() - Game.jailedAt });
+        Game.jailedAt = null;
+      }
       announce(msg.jailed ? `${msg.byName} vous enferme en cellule. Vous ne pouvez plus sortir tant qu'un policier ne vous libère pas.` : `${msg.byName} vous libère de votre cellule.`, 'assertive');
       updateHud();
     } else if (msg.type === 'money_received') {
@@ -115,12 +123,20 @@ const Net = {
       });
     } else if (msg.type === 'crime_alert') {
       Game.onCrimeAlert(msg.kind, msg.detail, msg.x, msg.y);
+    } else if (msg.type === 'criminal_record_request') {
+      // Un policier demande à consulter mon casier : je réponds avec un
+      // résumé (pas le détail brut, comme la fouille d'inventaire).
+      Net.send({ type: 'criminal_record_data', targetId: msg.fromId, data: Game.summarizeCriminalRecord() });
+    } else if (msg.type === 'criminal_record_data') {
+      Game.showCriminalRecord(msg.fromId, msg.data);
     } else if (msg.type === 'death_state') {
       // Liste partagée des défunts : à la morgue (en attente) et enterrés.
       City.morgue = msg.morgue || [];
       City.graves = msg.graves || [];
     } else if (msg.type === 'ticket_received') {
-      Game.tickets.push({ id: 'pv_' + Date.now(), amount: msg.amount, reason: msg.reason, time: Date.now(), from: msg.byName });
+      const ticketId = 'pv_' + Date.now();
+      Game.tickets.push({ id: ticketId, amount: msg.amount, reason: msg.reason, time: Date.now(), from: msg.byName });
+      Game.finesHistory.unshift({ type: 'pv', id: ticketId, amount: msg.amount, reason: msg.reason, from: msg.byName, time: Date.now(), paid: false, paidAt: null });
       announce(`${msg.byName} vous donne un PV pour ${msg.reason}. Montant : ${UTIL.formatMoney(msg.amount)}. Payez-le avec Ctrl+P.`, 'assertive');
       updateHud();
     } else if (msg.type === 'legal_negotiation') {
@@ -197,7 +213,9 @@ const Net = {
     } else if (msg.type === 'mechanic_accept') {
       announce(`${msg.byName} accepte votre dépannage et arrive.`, 'assertive');
     } else if (msg.type === 'invoice_received') {
-      Game.pendingBills.push({ from: msg.fromName, fromId: msg.fromId, amount: msg.amount, reason: msg.reason, time: Date.now() });
+      const billId = 'facture_' + Date.now();
+      Game.pendingBills.push({ id: billId, from: msg.fromName, fromId: msg.fromId, amount: msg.amount, reason: msg.reason, time: Date.now() });
+      Game.finesHistory.unshift({ type: 'facture', id: billId, amount: msg.amount, reason: msg.reason, from: msg.fromName, time: Date.now(), paid: false, paidAt: null });
       announce(`${msg.fromName} vous envoie une facture de ${UTIL.formatMoney(msg.amount)} pour ${msg.reason}. Consultez "Mes factures" dans le menu principal pour payer.`, 'assertive');
     } else if (msg.type === 'invoice_paid_notice') {
       Game.bank += msg.amount;
