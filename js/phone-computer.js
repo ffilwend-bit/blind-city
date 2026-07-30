@@ -75,6 +75,10 @@ const Phone = {
     if (name === 'map' || name === 'citymap') { this.closePhone(); if (typeof openMapMenu === 'function') openMapMenu(); return; }
     if (name === 'places') { this.closePhone(); if (typeof openNearestMenu === 'function') openNearestMenu(); return; }
     if (name === 'casier') { this.closePhone(); Game.openCriminalRecord(); return; }
+    if (name === 'houses') { this.closePhone(); Game.openHouseDirectory(); return; }
+    if (name === 'fines') { this.closePhone(); Game.openFinesHistoryMenu(); return; }
+    if (name === 'bank') { this.closePhone(); Game.openBankMenu(); return; }
+    if (name === 'jobs') { this.closePhone(); if (typeof openRoleMenu === 'function') openRoleMenu(); return; }
     el('phoneHome').style.display = 'none'; el('phoneApp').style.display = 'block'; const a = el('phoneApp'); a.innerHTML = '';
     if (name === 'contacts') {
       a.innerHTML = '<h3>👥 Contacts</h3><ul class="contact-list" id="phoneContactList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
@@ -167,18 +171,6 @@ const Phone = {
       a.innerHTML = html;
       announce(articles.length ? `${articles.length} info(s) publiée(s). La plus récente : ${articles[0].title}, par ${articles[0].author}.` : 'Aucune info publiée pour l\'instant.', 'polite');
     }
-    if (name === 'bank') {
-      a.innerHTML = '<h3>🏦 Banque</h3><p>Solde : <strong id="phoneBankBal">' + UTIL.formatMoney(Game.bank) + '</strong></p><p>Liquide : <strong id="phoneCashBal">' + UTIL.formatMoney(Game.money) + '</strong></p><p>Sale : <strong id="phoneDirtyBal">' + UTIL.formatMoney(Game.dirtyMoney) + '</strong></p><input type="number" id="phoneBankAmt" placeholder="Montant" aria-label="Montant en FCFA" style="width:100%;background:#11161e;border:1px solid var(--border);color:#fff;border-radius:8px;padding:8px;margin:6px 0;"><div style="display:flex;gap:6px;"><button class="phone-btn" id="phoneDeposit">Déposer</button><button class="phone-btn" id="phoneWithdraw">Retirer</button><button class="phone-btn" id="phoneLaunder">Blanchir</button></div><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
-      makeInputSpeakable(el('phoneBankAmt'), 'Montant en FCFA');
-      const refreshBank = () => {
-        el('phoneBankBal').textContent = UTIL.formatMoney(Game.bank);
-        el('phoneCashBal').textContent = UTIL.formatMoney(Game.money);
-        el('phoneDirtyBal').textContent = UTIL.formatMoney(Game.dirtyMoney);
-      };
-      el('phoneDeposit').addEventListener('click', () => { Game.bankDeposit(el('phoneBankAmt').value); refreshBank(); });
-      el('phoneWithdraw').addEventListener('click', () => { Game.bankWithdraw(el('phoneBankAmt').value); refreshBank(); });
-      el('phoneLaunder').addEventListener('click', () => { Game.launderMoney(el('phoneBankAmt').value); refreshBank(); });
-    }
     if (name === 'places') {
       a.innerHTML = '<h3>📍 Lieux utiles</h3><p style="color:var(--muted);font-size:0.75rem;">🚶 = me guider à pied, 🧭 = conduite auto.</p><ul class="contact-list" id="phonePlacesList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
       const ul = el('phonePlacesList');
@@ -238,25 +230,6 @@ const Phone = {
       });
       if (places.length) this._makeListAccessible(ul, `Mes lieux : ${places.length} enregistré${places.length > 1 ? 's' : ''}. Balayez d'un doigt pour parcourir, double tapez pour vous faire guider ou supprimer.`);
     }
-    if (name === 'houses') {
-      a.innerHTML = '<h3>🏠 Adresses des maisons</h3><ul class="contact-list" id="phoneHousesList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
-      const ul = el('phoneHousesList');
-      // Lit City.houses en direct : toute maison ajoutée plus tard (croissance
-      // de la ville, admin) apparaît ici sans rien à mettre à jour.
-      const houses = City.houses.slice().sort((a, b) => Game.houseAddress(a).localeCompare(Game.houseAddress(b)));
-      if (!houses.length) ul.innerHTML = '<p style="color:var(--muted);font-size:0.8rem;">Aucune maison recensée.</p>';
-      houses.forEach(h => {
-        const ownerLabel = h.owner ? (Game.ownedHouses.includes(h.id) ? 'à vous' : 'occupée') : 'libre, à vendre';
-        const dist = Math.round(UTIL.dist(h, Game) * CONFIG.METERS_PER_TILE);
-        const dir = UTIL.bearing(h.x - Game.x, h.y - Game.y);
-        const addr = Game.houseAddress(h);
-        const li = document.createElement('li');
-        li.innerHTML = `<span>${addr} — ${ownerLabel} (${dist} m, ${dir})</span><button class="phone-btn" data-walk aria-label="Me guider à pied vers ${addr}, ${dist} mètres, direction ${dir}">🚶</button>`;
-        li.querySelector('[data-walk]').addEventListener('click', () => { Game.setGuidance({ name: addr, x: h.x, y: h.y }); Phone.closePhone(); });
-        ul.appendChild(li);
-      });
-      if (houses.length) this._makeListAccessible(ul, `Adresses des maisons : ${houses.length} recensée${houses.length > 1 ? 's' : ''}. Balayez d'un doigt pour parcourir, double tapez pour vous faire guider.`);
-    }
     if (name === 'music') {
       a.innerHTML = `<h3>🎵 Musique</h3>
         <p id="musicNowPlaying" style="color:var(--muted);font-size:0.85rem;"></p>
@@ -299,30 +272,6 @@ const Phone = {
       el('musicVolDown').addEventListener('click', () => { MusicPlayer.setVolume(MusicPlayer.volume - 0.1); refresh(); });
       const buyBtn = el('musicBuyRadio');
       if (buyBtn) buyBtn.addEventListener('click', () => { Game.buyPortableRadio(); this.renderApp('music'); });
-    }
-    if (name === 'fines') {
-      const totalUnpaid = Game.tickets.reduce((s, t) => s + t.amount, 0) + Game.pendingBills.reduce((s, b) => s + b.amount, 0);
-      a.innerHTML = `<h3>🧾 PV et factures</h3><p style="color:var(--muted);font-size:0.8rem;">${totalUnpaid > 0 ? `${UTIL.formatMoney(totalUnpaid)} en attente de paiement.` : 'Rien en attente.'}</p><ul class="contact-list" id="phoneFinesList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>`;
-      const ul = el('phoneFinesList');
-      const history = Game.finesHistory || [];
-      if (!history.length) ul.innerHTML = '<p style="color:var(--muted);font-size:0.8rem;">Aucun PV ni facture reçu pour l\'instant.</p>';
-      history.forEach(f => {
-        const d = new Date(f.time); const time = d.toLocaleDateString() + ' ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
-        const label = f.type === 'pv' ? 'PV' : 'Facture';
-        const statut = f.paid ? '✅ Payé' : '⏳ En attente';
-        const li = document.createElement('li');
-        li.innerHTML = `<span>${label} — ${UTIL.formatMoney(f.amount)} (${f.reason}), de ${f.from}, ${time} — ${statut}</span>`;
-        ul.appendChild(li);
-      });
-      if (history.length) this._makeListAccessible(ul, `PV et factures : ${history.length} au total. Balayez d'un doigt pour parcourir.`);
-    }
-    if (name === 'jobs') {
-      a.innerHTML = '<h3>🛡️ Métiers</h3><p style="color:var(--muted);font-size:0.8rem;">Métier actuel : <strong>' + (Roles.list[Roles.current]?.name || Roles.current) + '</strong></p><ul class="contact-list" id="phoneJobsList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
-      const ul = el('phoneJobsList');
-      Object.entries(Roles.list).forEach(([k, v]) => {
-        const li = document.createElement('li'); li.innerHTML = `<span>${v.name}${v.free ? '' : ' (validation requise)'}</span><button class="phone-btn">Postuler</button>`;
-        li.querySelector('button').addEventListener('click', () => Roles.applyFor(k)); ul.appendChild(li);
-      });
     }
     if (name === 'talkie') {
       const t = Game.talkie;

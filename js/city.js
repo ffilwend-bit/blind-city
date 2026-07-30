@@ -391,11 +391,17 @@ const City = {
       { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier, même un uniforme de policier caché dessous.' },
       { id: 'graines_herbe', name: 'Graines de chanvre', category: 'graine', price: 20000, q: 99, legal: false, desc: 'À semer sur un terrain agricole (zones rurales) pour cultiver de l\'herbe. Illégal : la récolte attire parfois l\'attention de la police.' },
       { id: 'menottes', name: 'Menottes', category: 'outil', price: 9000, q: 99, legal: false, desc: 'Pour immobiliser une cible (menotter/démenotter, touche U). Les forces de l\'ordre en sont déjà équipées d\'office ; les civils doivent se les procurer ici.' },
+      // Casque/gilet blindé : retirés du menu principal, uniquement disponibles
+      // ici (protection lourde = marché noir, pas une simple boutique légale).
+      { id: 'casque_protection', name: 'Casque de protection', category: 'protection', price: 120000, q: 1, legal: false, special: 'helmet', desc: 'Protège d\'un tir ou d\'un coup à la tête, sinon mortel.' },
+      { id: 'gilet_pareballes', name: 'Gilet pare-balles', category: 'protection', price: 150000, q: 1, legal: false, special: 'vest', desc: 'Réduit les dégâts d\'un tir au corps.' },
     ];
     else if (p.type === 'marche_noir_lointain') p.stock = [...this.generateStock('illegal_weapons', 35),
       { id: 'cagoule', name: 'Cagoule', category: 'masque', price: 8000, q: 99, legal: false, desc: 'Cache votre visage : plus personne ne peut vous identifier ni deviner votre métier.' },
       { id: 'graines_herbe', name: 'Graines de chanvre', category: 'graine', price: 20000, q: 99, legal: false, desc: 'À semer sur un terrain agricole (zones rurales) pour cultiver de l\'herbe. Illégal : la récolte attire parfois l\'attention de la police.' },
       { id: 'menottes', name: 'Menottes', category: 'outil', price: 9000, q: 99, legal: false, desc: 'Pour immobiliser une cible (menotter/démenotter, touche U). Les forces de l\'ordre en sont déjà équipées d\'office ; les civils doivent se les procurer ici.' },
+      { id: 'casque_protection', name: 'Casque de protection', category: 'protection', price: 120000, q: 1, legal: false, special: 'helmet', desc: 'Protège d\'un tir ou d\'un coup à la tête, sinon mortel.' },
+      { id: 'gilet_pareballes', name: 'Gilet pare-balles', category: 'protection', price: 150000, q: 1, legal: false, special: 'vest', desc: 'Réduit les dégâts d\'un tir au corps.' },
     ];
     else if (p.type === 'pharmacie') p.stock = this.generateStock('medical', 20);
     else if (p.type === 'restaurant') p.stock = this.generateStock('food', 25);

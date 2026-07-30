@@ -251,7 +251,12 @@ const Game = {
     // même d'avoir fait le tour des 4 points, ce qui bloquait l'examen.
     const noFuelNeeded = cls.human || v.examVehicle;
     const accel = cls.accel || 0.06;
-    const targetSpeed = cls.maxSpeed * (noFuelNeeded || v.fuel > 0 ? 1 : 0.3);
+    // Boîte manuelle (motos et voitures sport) : la vitesse engagée (1 à 5)
+    // plafonne la vitesse atteignable, comme une vraie boîte à vitesses —
+    // avant, l'accélération était juste automatique jusqu'au maximum, sans
+    // aucune gestion de rapport pour ces véhicules pourtant sportifs.
+    const gearCap = cls.manualGearbox ? (this.GEAR_RATIOS[(v.gear || 1) - 1] || 1) : 1;
+    const targetSpeed = cls.maxSpeed * gearCap * (noFuelNeeded || v.fuel > 0 ? 1 : 0.3);
     const offroadFactor = (City.getTile(v.x, v.y) === 'route' || City.getTile(v.x, v.y) === 'rue') ? 1 : cls.offroad;
     const isReverse = (dx === 0 && dy === 0) ? false : this.isReverse(v.heading, dx, dy);
     if (dx === 0 && dy === 0) {
@@ -310,7 +315,22 @@ const Game = {
       ny = v.y + dirDelta.dy * adv;
     }
     if (cls.flies) {
-      v.altitude = Math.max(0, v.altitude + (Game.keys.has('shift') ? 2 : Game.keys.has('control') ? -2 : 0));
+      const climbRate = cls.climbRate || 2;
+      if (Game.keys.has('shift')) {
+        // Un hélicoptère (vtol) décolle et grimpe à la verticale, à l'arrêt.
+        // Un avion a besoin d'une vraie vitesse de piste avant de prendre de
+        // l'altitude — avant, les deux montaient pareil, sans distinction.
+        const minRatio = cls.vtol ? 0 : (cls.minTakeoffSpeedRatio || 0);
+        const speedRatio = Math.abs(v.speed) / (cls.maxSpeed || 1);
+        if (speedRatio < minRatio) {
+          const now = Date.now();
+          if (now - (v._lastTakeoffWarn || 0) > 3000) { v._lastTakeoffWarn = now; announce('Vitesse insuffisante pour décoller : accélérez d\'abord.', 'polite'); }
+        } else {
+          v.altitude = Math.max(0, v.altitude + climbRate);
+        }
+      } else if (Game.keys.has('control')) {
+        v.altitude = Math.max(0, v.altitude - climbRate);
+      }
       this.altitude = v.altitude;
     }
     // Un aéronef EN VOL (altitude > 0) survole les bâtiments : pas de collision
@@ -857,6 +877,20 @@ const Game = {
   // S'il est chez soi (maison possédée), il faut aller le chercher sur place,
   // ou demander son transfert vers un garage principal. Un aéronef n'est
   // jamais livré : uniquement récupérable là où il se trouve physiquement.
+  // Boîte manuelle : 5 rapports, chacun plafonnant la vitesse atteignable à
+  // une fraction du maximum du véhicule (comme une vraie boîte à vitesses).
+  GEAR_RATIOS: [0.3, 0.5, 0.7, 0.85, 1.0],
+  shiftGear(delta) {
+    if (!this.inVehicle || !this.vehicle) return announce('Montez d\'abord dans un véhicule.', 'assertive');
+    const v = this.vehicle; const cls = VEHICLE_CATALOG[v.type];
+    if (!cls.manualGearbox) return announce('Ce véhicule n\'a pas de boîte manuelle.', 'polite');
+    v.gear = v.gear || 1;
+    const next = UTIL.clamp(v.gear + delta, 1, this.GEAR_RATIOS.length);
+    if (next === v.gear) return announce(delta > 0 ? 'Déjà au rapport le plus haut.' : 'Déjà au point mort le plus bas.', 'polite');
+    v.gear = next;
+    Audio.click(); // clic mécanique bref pour l'embrayage/changement de vitesse
+    announce(`Vitesse ${v.gear} sur ${this.GEAR_RATIOS.length} engagée.`, 'polite');
+  },
   GARAGE_RADIUS: 5, // ~20 m : rayon de détection "garé à cet endroit"
   mainGarages() { return City.pois.filter(p => p.type === 'garage' && p.principal); },
   // Détermine où se trouve RÉELLEMENT un véhicule possédé.
@@ -1635,6 +1669,38 @@ const Game = {
   // bâtiment. Bornage à MAX_FLOOR_BONUS pour rester équilibré.
   MAX_FLOOR_BONUS: 0.4, // +40 % max (au-delà du 8e étage, plus de gain)
 
+  // Grimper sur un véhicule ou le toit d'une maison proche : meilleure vue,
+  // donc meilleure précision ET portée de tir effective (voir shoot()). Se
+  // redescend en bougeant (_syncFloorOnMove) ou en rappuyant sur la touche.
+  climbedOn: null,
+  toggleClimb() {
+    if (this.climbedOn) {
+      const name = this.climbedOn.name;
+      this.x = this.climbedOn.returnX; this.y = this.climbedOn.returnY;
+      this.climbedOn = null;
+      announce(`Vous redescendez de ${name}.`, 'assertive');
+      updateHud();
+      return;
+    }
+    if (this.inVehicle) return announce('Descendez d\'abord du véhicule.', 'assertive');
+    const v = City.vehicles.filter(vv => UTIL.dist(vv, this) < 2.5).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+    const h = (City.houses || []).filter(hh => UTIL.dist(hh, this) < 2.5).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+    const vd = v ? UTIL.dist(v, this) : Infinity;
+    const hd = h ? UTIL.dist(h, this) : Infinity;
+    if (!v && !h) return announce('Rien à proximité sur quoi grimper : approchez-vous d\'un véhicule ou d\'une maison.', 'assertive');
+    const returnX = this.x, returnY = this.y;
+    if (vd <= hd) {
+      this.climbedOn = { type: 'vehicle', name: v.name, x: v.x, y: v.y, returnX, returnY, level: 1 };
+      this.x = v.x; this.y = v.y;
+      announce(`Vous grimpez sur ${v.name}. Meilleure vue pour viser au loin.`, 'assertive');
+    } else {
+      const level = Math.max(1, h.floors || 1);
+      this.climbedOn = { type: 'house', name: h.name, x: h.x, y: h.y, returnX, returnY, level };
+      this.x = h.x; this.y = h.y;
+      announce(`Vous grimpez sur le toit de ${h.name}. Meilleure vue pour viser au loin.`, 'assertive');
+    }
+    updateHud();
+  },
   // Bâtiment à étages sur lequel se tient le joueur (rez-de-chaussée compris).
   getCurrentTallBuilding() {
     let best = null, bd = 2.5;
@@ -1675,6 +1741,13 @@ const Game = {
     if ((this.floor || 0) > 0 && !this.getCurrentTallBuilding()) {
       this.floor = 0;
       announce('Vous quittez le bâtiment. Retour au rez-de-chaussée.', 'polite');
+    }
+    // Grimpé sur un véhicule/toit : le moindre déplacement en fait descendre
+    // (comme sauter au sol), plutôt que de rester "collé" en l'air ailleurs.
+    if (this.climbedOn && (this.x !== this.climbedOn.x || this.y !== this.climbedOn.y)) {
+      const name = this.climbedOn.name;
+      this.climbedOn = null;
+      announce(`Vous redescendez de ${name}.`, 'polite');
     }
   },
 
@@ -1847,13 +1920,18 @@ const Game = {
     const live = this.getLiveTarget();
     const target = live ? { ...this.lockedTarget, ...live } : null;
     const range = target ? UTIL.dist(target, this) : 0;
-    // Avantage de hauteur : altitude (véhicule volant) OU étage (à pied).
+    // Avantage de hauteur : altitude (véhicule volant), étage, OU grimpé sur
+    // un véhicule/toit de maison (voir toggleClimb) — ce dernier étend aussi
+    // la PORTÉE effective (viser plus loin depuis un point haut), pas
+    // seulement la précision.
     const heightBonus = this.altitude > 0 ? Math.min(0.15, this.altitude * 0.01) : 0;
     const floorBonus = (!this.inVehicle && this.floor > 0) ? Math.min(this.MAX_FLOOR_BONUS, this.floor * 0.05) : 0;
+    const climbBonus = this.climbedOn ? Math.min(this.MAX_FLOOR_BONUS, (this.climbedOn.level || 1) * 0.08) : 0;
+    const effRange = this.climbedOn ? w.range * 1.6 : w.range;
     let acc = w.accuracy;
     if (this.aimPart === 'tete') acc *= 0.75; else if (this.aimPart === 'jambes') acc *= 0.85;
-    if (range > w.range) acc *= 0.3;
-    acc += heightBonus + floorBonus;
+    if (range > effRange) acc *= 0.3;
+    acc += heightBonus + floorBonus + climbBonus;
     this.ammo[w.ammoType]--;
     Audio.gunshot(w.name, 0);
     if (Net.connected) Net.emitSound('synth:gunshot', { vol: 0.95 }); // audible par les joueurs proches
@@ -1863,7 +1941,7 @@ const Game = {
       this._lastGunfireReport = Date.now();
       Game.reportCrimeToPolice('coups_de_feu', 'Coups de feu entendus');
     }
-    if (target && range <= w.range) {
+    if (target && range <= effRange) {
       if (Math.random() < acc) {
         let dmg = w.dmg * (this.aimPart === 'tete' ? 2 : this.aimPart === 'jambes' ? 0.6 : 1);
         if (target.isPlayer) {
@@ -2957,7 +3035,30 @@ const Game = {
     updateHud();
   },
   useBankCounter() {
-    announce(`Solde bancaire : ${UTIL.formatMoney(this.bank)}. Liquide en poche : ${UTIL.formatMoney(this.money)}. Utilisez l'appli Banque du téléphone pour déposer, retirer ou blanchir.`, 'polite');
+    this.openBankMenu();
+  },
+  // Menu bancaire accessible (comptoir ou téléphone) : cartes + saisie du
+  // montant via AccessibleTextPrompt, plutôt que des champs à l'intérieur de
+  // l'écran du téléphone (moins fiable au doigt/lecteur d'écran).
+  openBankMenu() {
+    el('menuTitle').textContent = 'Banque';
+    const items = [
+      { id: 'solde', title: `💰 Solde bancaire : ${UTIL.formatMoney(this.bank)}`, desc: `Liquide en poche : ${UTIL.formatMoney(this.money)}${this.dirtyMoney ? `, argent sale : ${UTIL.formatMoney(this.dirtyMoney)}` : ''}.` },
+      { id: 'deposit', title: '⬇️ Déposer', desc: 'Déposer du liquide sur le compte bancaire.' },
+      { id: 'withdraw', title: '⬆️ Retirer', desc: 'Retirer de l\'argent du compte vers le liquide.' },
+    ];
+    if (this.dirtyMoney > 0) items.push({ id: 'launder', title: '🧺 Blanchir de l\'argent sale', desc: `${UTIL.formatMoney(this.dirtyMoney)} d'argent sale à nettoyer (avec des frais).` });
+    el('menuOverlay').style.display = 'flex';
+    renderMenu(items, (sel) => {
+      closeMenu();
+      if (sel.id === 'deposit') {
+        AccessibleTextPrompt.open('Déposer', `Montant à déposer (liquide disponible : ${UTIL.formatMoney(this.money)}).`, '', (v) => { if (v) this.bankDeposit(v); });
+      } else if (sel.id === 'withdraw') {
+        AccessibleTextPrompt.open('Retirer', `Montant à retirer (solde : ${UTIL.formatMoney(this.bank)}).`, '', (v) => { if (v) this.bankWithdraw(v); });
+      } else if (sel.id === 'launder') {
+        AccessibleTextPrompt.open('Blanchir', `Montant à blanchir (argent sale : ${UTIL.formatMoney(this.dirtyMoney)}).`, '', (v) => { if (v) this.launderMoney(v); });
+      }
+    });
   },
   // Parking public (lieu « garage » sur la carte) : vos véhicules restent
   // toujours exactement où vous les laissez. Seuls les 3 parkings PRINCIPAUX
@@ -3065,6 +3166,9 @@ const Game = {
     const ctx = this.shopContext; if (!ctx) return announce('Ouvrez d\'abord un magasin.', 'assertive');
     const it = ctx.stock[index - 1];
     if (!it) return announce('Article non trouvé.', 'assertive');
+    // Casque/gilet : pas un objet d'inventaire classique, un état porté (booléen).
+    if (it.special === 'helmet') return this.buyHelmet();
+    if (it.special === 'vest') return this.buyVest();
     qty = Math.min(Math.max(1, Math.floor(qty) || 1), it.q);
     // Un commerce dans un quartier où ça braque souvent se couvre en
     // augmentant ses prix (jusqu'à +25% si le quartier est très "chaud").
@@ -5188,7 +5292,7 @@ const Game = {
   hasHelmet: false,
   buyHelmet() {
     if (this.hasHelmet) return announce('Vous portez déjà un casque de protection.', 'polite');
-    const price = 35000;
+    const price = 120000;
     if (this.money < price) return announce(`Casque de protection : ${UTIL.formatMoney(price)}. Fonds insuffisants.`, 'assertive');
     this.money -= price; this.hasHelmet = true;
     Audio.cash();
@@ -5198,7 +5302,7 @@ const Game = {
   hasVest: false,
   buyVest() {
     if (this.hasVest) return announce('Vous portez déjà un gilet pare-balles.', 'polite');
-    const price = 45000;
+    const price = 150000;
     if (this.money < price) return announce(`Gilet pare-balles : ${UTIL.formatMoney(price)}. Fonds insuffisants.`, 'assertive');
     this.money -= price; this.hasVest = true;
     Audio.cash();

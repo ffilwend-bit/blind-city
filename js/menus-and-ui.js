@@ -180,8 +180,6 @@ function openMainMenu() {
     { id: 'rptalk', title: '💬 Parler (RP)', desc: 'Dire un message audible par les joueurs réels proches de vous.' },
     { id: 'map', title: '🗺️ Carte', desc: 'Liste des lieux et navigation.' },
     { id: 'places', title: '📍 Lieux utiles', desc: 'Station-service la plus proche, boutique de vêtements, restaurant.' },
-    { id: 'helmet', title: '🪖 Acheter un casque', desc: 'Protection contre un tir ou un coup à la tête, sinon mortel.' },
-    { id: 'vest', title: '🦺 Acheter un gilet pare-balles', desc: 'Réduit les dégâts d\'un tir au corps.' },
     { id: 'burnerphone', title: '📱 Acheter un téléphone prépayé', desc: 'Un numéro de plus, renommable.' },
     { id: 'role', title: '🛡️ Métiers', desc: 'Demander un métier : police, médecin, garagiste, concessionnaire, agent immobilier, avocat, mineur...' },
     { id: 'outfit', title: '🧥 Ma tenue', desc: 'Ce que vous portez actuellement (haut, bas, chaussures, accessoires).' },
@@ -268,8 +266,6 @@ function handleMenuItem(it) {
   else if (it.id === 'outfit') { Game.customizeAppearance(); }
   else if (it.id === 'admin') { openAdminMenu(); }
   else if (it.id === 'save') { Game.save(); closeMenu(); }
-  else if (it.id === 'helmet') { Game.buyHelmet(); closeMenu(); }
-  else if (it.id === 'vest') { Game.buyVest(); closeMenu(); }
   else if (it.id === 'burnerphone') { Game.buyBurnerPhone(); closeMenu(); }
   else if (it.id === 'dive') { Game.diveInWater(); closeMenu(); }
   else if (it.id === 'myjob') { Game.openMyJobMenu(); }
@@ -294,6 +290,7 @@ function openShareGpsMenu() {
   });
 }
 function openRoleMenu() {
+  ensureMenuOpen();
   el('menuTitle').textContent = 'Métiers de la ville';
   const items = Object.entries(Roles.list).filter(([k, v]) => !v.hidden).map(([k, v]) => ({
     id: k, title: v.name,
@@ -1008,6 +1005,10 @@ function setupInput() {
       }
     }
     else if (key === 'pagedown') { if (Game.inVehicle && VEHICLE_CATALOG[Game.vehicle.type].flies) { Game.altitude = Math.max(0, Game.altitude - 5); Game.vehicle.altitude = Game.altitude; announce('Altitude ' + Math.round(Game.altitude) + ' m.', 'polite'); } }
+    // Boîte manuelle (motos et voitures sport uniquement) : point/slash pour
+    // monter/descendre de rapport, comme un embrayage.
+    else if (key === '.') Game.shiftGear(1);
+    else if (key === '/') Game.shiftGear(-1);
     // Verrouillage de cible 1 à 9. On lit e.code (Digit1.../Numpad1...) plutôt que
     // e.key : sur un clavier AZERTY, la rangée du haut sans Maj donne & é " ' ( etc.,
     // donc e.key n'était jamais "1".."9" et le ciblage ne marchait pas.

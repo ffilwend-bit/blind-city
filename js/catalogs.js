@@ -8,8 +8,8 @@ const VEHICLE_CATALOG = {
   tricycle: { name: 'Tricycle', label: 'tricycle 3 roues', type: '3 roues', baseFreq: 50, mult: 30, wave: 'sawtooth', maxSpeed: 0.75, accel: 0.05, brake: 0.07, turn: 0.9, offroad: 0.4, flies: false, wheels: 3, price: 600000, trunk: 14, seats: 1, doors: 0 },
   quad: { name: 'Quad', label: 'quad 4 roues', type: '4 roues', baseFreq: 60, mult: 38, wave: 'sawtooth', maxSpeed: 0.95, accel: 0.07, brake: 0.08, turn: 1.1, offroad: 0.95, flies: false, wheels: 4, price: 1000000, trunk: 18, seats: 1, doors: 0 },
   moto_125: { name: 'Moto 125cc', label: 'moto 125cc', type: 'moto', baseFreq: 70, mult: 50, wave: 'square', maxSpeed: 1.05, accel: 0.09, brake: 0.1, turn: 1.2, offroad: 0.55, flies: false, wheels: 2, price: 350000, trunk: 10, seats: 2, doors: 0 },
-  moto_600: { name: 'Moto 600cc', label: 'moto 600cc', type: 'moto', baseFreq: 85, mult: 62, wave: 'square', maxSpeed: 1.45, accel: 0.11, brake: 0.12, turn: 1.15, offroad: 0.5, flies: false, wheels: 2, price: 1200000, trunk: 10, seats: 2, doors: 0, sport: true },
-  moto_1000: { name: 'Moto 1000cc', label: 'moto 1000cc', type: 'moto', baseFreq: 100, mult: 72, wave: 'square', maxSpeed: 1.85, accel: 0.13, brake: 0.13, turn: 1.1, offroad: 0.45, flies: false, wheels: 2, price: 3500000, trunk: 10, seats: 2, doors: 0, sport: true },
+  moto_600: { name: 'Moto 600cc', label: 'moto 600cc', type: 'moto', baseFreq: 85, mult: 62, wave: 'square', maxSpeed: 1.45, accel: 0.11, brake: 0.12, turn: 1.15, offroad: 0.5, flies: false, wheels: 2, price: 1200000, trunk: 10, seats: 2, doors: 0, sport: true, manualGearbox: true },
+  moto_1000: { name: 'Moto 1000cc', label: 'moto 1000cc', type: 'moto', baseFreq: 100, mult: 72, wave: 'square', maxSpeed: 1.85, accel: 0.13, brake: 0.13, turn: 1.1, offroad: 0.45, flies: false, wheels: 2, price: 3500000, trunk: 10, seats: 2, doors: 0, sport: true, manualGearbox: true },
   scooter: { name: 'Scooter', label: 'scooter', type: '2 roues', baseFreq: 45, mult: 28, wave: 'sawtooth', maxSpeed: 0.8, accel: 0.06, brake: 0.08, turn: 1.0, offroad: 0.25, flies: false, wheels: 2, price: 250000, trunk: 8, seats: 2, doors: 0 },
   berline: { name: 'Berline', label: 'berline', type: 'voiture', baseFreq: 48, mult: 38, wave: 'sawtooth', maxSpeed: 1.05, accel: 0.07, brake: 0.1, turn: 0.95, offroad: 0.4, flies: false, wheels: 4, price: 6000000, trunk: 30, seats: 4, doors: 4 },
   suv: { name: 'SUV', label: 'SUV', type: 'voiture', baseFreq: 50, mult: 40, wave: 'sawtooth', maxSpeed: 1.1, accel: 0.08, brake: 0.1, turn: 0.9, offroad: 0.75, flies: false, wheels: 4, price: 9000000, trunk: 36, seats: 5, doors: 4 },
@@ -17,8 +17,8 @@ const VEHICLE_CATALOG = {
   electrique: { name: 'Voiture électrique', label: 'voiture électrique', type: 'voiture', baseFreq: 42, mult: 26, wave: 'sine', maxSpeed: 1.15, accel: 0.1, brake: 0.12, turn: 0.95, offroad: 0.35, flies: false, wheels: 4, price: 14000000, trunk: 28, seats: 4, doors: 4, electric: true },
   // Voitures de sport : vitesse et accélération élevées, tenue de route nerveuse,
   // mais peu de coffre et chères. Vendues au concessionnaire.
-  sport_gt: { name: 'Sport GT', label: 'sport GT', type: 'voiture', baseFreq: 60, mult: 55, wave: 'sawtooth', maxSpeed: 1.7, accel: 0.14, brake: 0.15, turn: 1.05, offroad: 0.25, flies: false, wheels: 4, price: 55000000, trunk: 18, seats: 2, doors: 2, sport: true },
-  hypercar: { name: 'Hypercar', label: 'hypercar', type: 'voiture', baseFreq: 72, mult: 68, wave: 'sawtooth', maxSpeed: 2.05, accel: 0.17, brake: 0.16, turn: 1.0, offroad: 0.2, flies: false, wheels: 4, price: 130000000, trunk: 12, seats: 2, doors: 2, sport: true },
+  sport_gt: { name: 'Sport GT', label: 'sport GT', type: 'voiture', baseFreq: 60, mult: 55, wave: 'sawtooth', maxSpeed: 1.7, accel: 0.14, brake: 0.15, turn: 1.05, offroad: 0.25, flies: false, wheels: 4, price: 55000000, trunk: 18, seats: 2, doors: 2, sport: true, manualGearbox: true },
+  hypercar: { name: 'Hypercar', label: 'hypercar', type: 'voiture', baseFreq: 72, mult: 68, wave: 'sawtooth', maxSpeed: 2.05, accel: 0.17, brake: 0.16, turn: 1.0, offroad: 0.2, flies: false, wheels: 4, price: 130000000, trunk: 12, seats: 2, doors: 2, sport: true, manualGearbox: true },
   taxi: { name: 'Taxi', label: 'taxi', type: 'voiture', baseFreq: 48, mult: 38, wave: 'sawtooth', maxSpeed: 1.0, accel: 0.07, brake: 0.1, turn: 0.95, offroad: 0.4, flies: false, wheels: 4, price: 5000000, trunk: 30, seats: 4, doors: 4 },
   police: { name: 'Voiture de police', label: 'voiture de police', type: 'voiture', baseFreq: 50, mult: 42, wave: 'sawtooth', maxSpeed: 1.35, accel: 0.1, brake: 0.13, turn: 0.95, offroad: 0.45, flies: false, wheels: 4, price: 11000000, trunk: 32, seats: 4, doors: 4 },
   moto_police: { name: 'Moto de police', label: 'moto de police', type: 'moto', baseFreq: 85, mult: 62, wave: 'square', maxSpeed: 1.55, accel: 0.12, brake: 0.13, turn: 1.15, offroad: 0.55, flies: false, wheels: 2, price: 1800000, trunk: 10, seats: 1, doors: 0, gouvernemental: true },
@@ -34,8 +34,14 @@ const VEHICLE_CATALOG = {
   // ou marché noir (offre rare, encore plus cher). Très résistant (armure),
   // lent, capable de tirer au canon.
   char: { name: 'Char d\'assaut', label: 'char d\'assaut', type: 'poids lourd', baseFreq: 26, mult: 16, wave: 'sawtooth', maxSpeed: 0.45, accel: 0.025, brake: 0.15, turn: 0.35, offroad: 1, flies: false, wheels: 0, price: 800000000, trunk: 15, seats: 3, doors: 1, armor: 0.85, restricted: true, gouvernemental: true },
-  helico: { name: 'Hélicoptère', label: 'hélicoptère', type: 'air', baseFreq: 88, mult: 68, wave: 'square', maxSpeed: 2.2, accel: 0.06, brake: 0.05, turn: 0.7, offroad: 1, flies: true, wheels: 0, price: 45000000, trunk: 24, seats: 4, doors: 2 },
-  avion: { name: 'Avion léger', label: 'avion', type: 'air', baseFreq: 115, mult: 85, wave: 'square', maxSpeed: 3.0, accel: 0.05, brake: 0.04, turn: 0.55, offroad: 1, flies: true, wheels: 3, price: 90000000, trunk: 30, seats: 2, doors: 2 },
+  // vtol (hélicoptère) : décollage et vol stationnaire à la verticale, sans
+  // vitesse minimale. Un avion (sans vtol) a besoin d'une vraie vitesse de
+  // piste avant de pouvoir prendre de l'altitude — voir driveVehicle().
+  // Puissance nettement différente : l'hélico monte plus vite (climbRate) et
+  // encaisse mieux à basse vitesse (accel), l'avion est bien plus rapide et
+  // monte plus lentement, comme un vrai avion léger face à un hélicoptère.
+  helico: { name: 'Hélicoptère', label: 'hélicoptère', type: 'air', baseFreq: 88, mult: 68, wave: 'square', maxSpeed: 2.2, accel: 0.06, brake: 0.05, turn: 0.7, offroad: 1, flies: true, vtol: true, climbRate: 2.6, wheels: 0, price: 65000000, trunk: 24, seats: 4, doors: 2 },
+  avion: { name: 'Avion léger', label: 'avion', type: 'air', baseFreq: 115, mult: 85, wave: 'square', maxSpeed: 3.0, accel: 0.05, brake: 0.04, turn: 0.55, offroad: 1, flies: true, climbRate: 1.4, minTakeoffSpeedRatio: 0.35, wheels: 3, price: 130000000, trunk: 30, seats: 2, doors: 2 },
 };
 
 const WEAPON_CATALOG = {

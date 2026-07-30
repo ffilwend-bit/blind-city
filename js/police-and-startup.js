@@ -70,6 +70,7 @@ function setupExtraInput() {
     else if (shift && alt && (key === 'f7' || e.code === 'F7')) { e.preventDefault(); if (typeof GuideDog !== 'undefined') GuideDog.rest(); }
     else if (ctrl && (['1','2','3','4','5','6','7','8','9'].includes(key))) { e.preventDefault(); Game.target(parseInt(key, 10)); }
     else if (alt && key === 'f') { e.preventDefault(); Game.searchSelf(); }
+    else if (alt && key === 'c') { e.preventDefault(); Game.toggleClimb(); }
     else if (alt && key === 'v') { e.preventDefault(); Game.openVehicleInfo(Game.vehicle || City.vehicles.find(v => UTIL.dist(v, Game) < 4)); }
     else if (alt && key === 'k') { e.preventDefault(); Convoy.locate(); } // repérage audio rapide du convoi
     else if (alt && key === 'm') { e.preventDefault(); AccessibleTextPrompt.open('Enregistrer un lieu', 'Nom du lieu à enregistrer ici.', '', (n) => { if (n) Game.savePlaceHere(n); }); }
@@ -830,6 +831,30 @@ Game.openInvoiceMenu = function() {
 // Factures reçues, à payer — le vrai trou que le système d'avant laissait :
 // une facture pouvait être "envoyée" sans que le destinataire ne la voie ni
 // ne puisse la régler.
+// Historique complet des PV et factures (payés ET en attente), en menu à
+// cartes accessible — l'appui direct sur une entrée en attente la paie.
+Game.openFinesHistoryMenu = function() {
+  const history = this.finesHistory || [];
+  el('menuTitle').textContent = 'PV et factures';
+  if (!history.length) {
+    el('menuOverlay').style.display = 'flex';
+    renderMenu([{ id: 'empty', title: 'Rien pour l\'instant', desc: 'Aucun PV ni facture reçu.' }], () => closeMenu());
+    return;
+  }
+  const items = history.map(f => {
+    const d = new Date(f.time); const time = d.toLocaleDateString() + ' ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+    const label = f.type === 'pv' ? 'PV' : 'Facture';
+    const statut = f.paid ? '✅ payé' : '⏳ en attente — appuyez pour payer';
+    return { id: f.id, title: `${label} — ${UTIL.formatMoney(f.amount)} (${f.reason})`, desc: `De ${f.from}, ${time} — ${statut}`, entry: f };
+  });
+  el('menuOverlay').style.display = 'flex';
+  renderMenu(items, (sel) => {
+    closeMenu();
+    if (sel.entry.paid) return;
+    if (sel.entry.type === 'pv') this.payTickets();
+    else { const idx = this.pendingBills.findIndex(b => b.id === sel.entry.id); if (idx !== -1) this.payBill(idx); }
+  });
+};
 Game.pendingBills = [];
 Game.openMyBills = function() {
   if (!this.pendingBills.length) return announce('Aucune facture en attente.', 'polite');
