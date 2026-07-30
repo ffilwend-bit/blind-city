@@ -1382,7 +1382,19 @@ function startGame(seed) {
   AudioLib.playOnce('son_intro_jeu', { volume: 0.6 });
   el('startOverlay').style.display = 'none';
   try {
-    UTIL.seedCity(seed || Date.now());
+    // Graine de ville PERSISTANTE en solo (pas de `seed` fourni — le
+    // multijoueur, lui, en reçoit toujours une du serveur et n'est pas
+    // concerné) : sans ça, une ville TOTALEMENT différente était générée à
+    // chaque lancement, donc les maisons possédées et les lieux enregistrés
+    // se retrouvaient à des positions différentes à chaque fois — impossible
+    // de jamais les retrouver. On en génère une la première fois, puis on la
+    // réutilise indéfiniment.
+    let citySeed = seed;
+    if (!citySeed) {
+      citySeed = parseInt(localStorage.getItem('blind_city_seed'), 10);
+      if (!citySeed) { citySeed = Date.now(); localStorage.setItem('blind_city_seed', String(citySeed)); }
+    }
+    UTIL.seedCity(citySeed);
     City.generate();
     UTIL.unseed();
     // Réapplique les agrandissements/quartiers/services déjà validés par le
