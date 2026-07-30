@@ -46,21 +46,14 @@ const Game = {
     if (this.ridingWith) return announce('Vous êtes passager. Appuyez sur Interagir pour descendre.', 'polite');
     if (this.inVehicle && this.vehicle) {
       const cls = VEHICLE_CATALOG[this.vehicle.type];
-      if (cls?.flies) {
-        // Un avion/hélico vole librement, pas sur une grille de rues : virage
-        // fin par 45° comme à pied (voir plus bas), pour viser un cap précis
-        // sans les paliers de 90° qui faisaient dépasser le cap voulu et
-        // provoquaient un zigzag ("tournez à droite" puis "à gauche" juste
-        // après, sans jamais se stabiliser).
-        this.vehicle.heading = ((this.vehicle.heading + delta) % 8 + 8) % 8; this.heading = this.vehicle.heading;
-      } else {
-        // Au volant d'un véhicule terrestre, on tourne par quarts (90°) : la
-        // conduite ne se fait que sur les 4 axes de la grille, quel que soit
-        // le pas demandé par la touche.
-        const vdelta = delta >= 0 ? 2 : -2;
-        this.vehicle.heading = ((this.vehicle.heading + vdelta) % 8 + 8) % 8; this.heading = this.vehicle.heading;
-        AudioLib.playOnce('clignotant_voiture', { volume: 0.35 });
-      }
+      // Même modèle qu'à pied désormais pour TOUS les véhicules (terrestres
+      // comme aériens) : virage fin par 45° à chaque appui. Avant, les
+      // véhicules terrestres tournaient par paliers de 90° forcés, ce qui
+      // faisait dépasser le cap voulu et provoquait le même zigzag que pour
+      // un avion ("tournez à droite" puis "à gauche" juste après, sans
+      // jamais se stabiliser) — la marche à pied n'a jamais eu ce problème.
+      this.vehicle.heading = ((this.vehicle.heading + delta) % 8 + 8) % 8; this.heading = this.vehicle.heading;
+      if (!cls?.flies) AudioLib.playOnce('clignotant_voiture', { volume: 0.35 });
     }
     // À pied, on tourne finement par huitièmes (45°) : flèche gauche/droite fait
     // pivoter un peu à la fois sur soi-même, pour viser un cap précis parmi les
@@ -225,12 +218,11 @@ const Game = {
       announce(cls.flies ? 'Moteur stabilisé : vous pouvez décoller.' : 'Moteur démarré.', 'assertive');
     }
     // dx,dy viennent toujours de headingToDelta(v.heading) (avancer) ou de son
-    // opposé (reculer) : re-déduire le cap à partir de dx,dy avec un mapping
-    // uniquement cardinal (comme ci-dessous) écraserait un cap DIAGONAL (avion
-    // en virage fin par 45°) en le ramenant au cap cardinal le plus proche.
-    // Pour un avion/hélico, le cap est déjà correct (posé par turn()) : inutile
-    // de le re-déduire ici.
-    if (!cls.flies && (dx !== 0 || dy !== 0)) v.heading = (dx > 0 ? 2 : dx < 0 ? 6 : dy > 0 ? 4 : dy < 0 ? 0 : v.heading);
+    // opposé (reculer) : le cap est déjà correct, posé par turn() — TOUS les
+    // véhicules tournent maintenant par 45° comme à pied (voir turn()), y
+    // compris sur des caps diagonaux. Le re-déduire ici à partir de dx,dy avec
+    // un mapping uniquement cardinal écraserait un cap diagonal en le
+    // ramenant au cap cardinal le plus proche : inutile, donc supprimé.
     const isBraking = (dx === 0 && dy === 0);
     // Freinage brutal : freinage engagé alors qu'on roulait vite, détecté une
     // seule fois au début du freinage (pas à chaque image tant qu'on freine).
@@ -325,9 +317,9 @@ const Game = {
       }
       v.speed = 0; Audio.screech(0);
       const otherVehicleHere = City.vehicles.some(ov => ov.id !== v.id && UTIL.dist(ov, { x: nx, y: ny }) < 1.5);
-      if (otherVehicleHere) AudioLib.playOnce('veh_kolision_entre_2', { volume: 0.6 });
-      else if (impactDmg > 20) AudioLib.playOnce('veh_kolision_4_fort', { volume: 0.65 });
-      else if (impactDmg > 8) AudioLib.playOnce(UTIL.pick(['veh_kolision_1', 'veh_kolision_2', 'veh_kolision_3']), { volume: 0.55 });
+      if (otherVehicleHere) AudioLib.playOnce('veh_kolision_entre_2', { volume: 0.6, exclusive: 'veh_collision_' + v.id });
+      else if (impactDmg > 20) AudioLib.playOnce('veh_kolision_4_fort', { volume: 0.65, exclusive: 'veh_collision_' + v.id });
+      else if (impactDmg > 8) AudioLib.playOnce(UTIL.pick(['veh_kolision_1', 'veh_kolision_2', 'veh_kolision_3']), { volume: 0.55, exclusive: 'veh_collision_' + v.id });
       announce(`Collision !${impactDmg > 3 ? ` État du véhicule : ${Math.round(v.hp)}%.` : ''}`, 'assertive');
       if (City.isRoad(v.x, v.y)) this.npcVoiceReaction(v.x, v.y, { group: 'impatient', radius: 12, count: 2 });
     } else {
@@ -340,7 +332,7 @@ const Game = {
       // Conduite tout-terrain à vitesse notable : chance occasionnelle de
       // taper un trou (juste un bruit, pas de dégâts — la route cahoteuse).
       if (offroadFactor < 1 && Math.abs(v.speed) > cls.maxSpeed * 0.3 && UTIL.chance(0.03)) {
-        AudioLib.playOnce(UTIL.pick(['veh_trou_1', 'veh_trou_2', 'veh_trou_3', 'veh_trou_gros_4', 'veh_collision_trou']), { volume: 0.4 });
+        AudioLib.playOnce(UTIL.pick(['veh_trou_1', 'veh_trou_2', 'veh_trou_3', 'veh_trou_gros_4', 'veh_collision_trou']), { volume: 0.4, exclusive: 'veh_trou_' + v.id });
       }
     }
     const speedRatio = Math.abs(v.speed) / cls.maxSpeed;
@@ -719,7 +711,11 @@ const Game = {
   },
   enterAsDriver(v) {
     if (!v) return announce('Aucun véhicule à conduire ici.', 'assertive');
-    if (v.locked && !this.ownedVehicles.includes(v.id)) {
+    if (v.locked) {
+      // Même le propriétaire ne peut pas monter tant qu'il n'a pas déverrouillé
+      // (Ctrl+L) : sinon le verrouillage n'avait aucun effet réel pour lui,
+      // impossible de vraiment vérifier qu'il est bien verrouillé.
+      if (this.ownedVehicles.includes(v.id)) return announce(`${v.name} est verrouillé. Déverrouillez-le d'abord (Ctrl+L).`, 'assertive');
       Audio.beep(0, 700);
       AccessibleConfirm.open(`${v.name} est verrouillé`, 'Forcer la portière ? Cela déclenchera l\'alarme antivol et attirera l\'attention.', (force) => {
         if (!force) return announce('Véhicule verrouillé.', 'assertive');
@@ -3143,6 +3139,7 @@ const Game = {
     if (v.owner !== 'player') return announce('Ce véhicule ne vous appartient pas.', 'assertive');
     v.locked = !v.locked;
     sendWorldEdit('vehicle_lock', { id: v.id, locked: v.locked });
+    AudioLib.playOnce('veh1_verrouillage', { volume: 0.5 });
     announce(v.locked ? `${v.name} verrouillé.` : `${v.name} déverrouillé.`, 'assertive');
   },
   // Retrouver un véhicule : s'il n'y en a qu'un, guidage direct ; s'il y en a

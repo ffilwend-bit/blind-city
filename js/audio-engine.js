@@ -637,18 +637,18 @@ const RealEngine = {
     if (delta > 0.14 && speedRatio > 0.15) { // il faut rouler un minimum : pas de son d'accélération à l'arrêt (tapotage)
       this.lastEventTime = now;
       const key = delta > 0.3 ? 'veh1_accel_forte' : UTIL.pick(['veh1_accel_courte1', 'veh1_accel_courte2', 'veh1_accel_progressive2']);
-      AudioLib.playOnce(key, { volume: 0.4 });
-      if (speedRatio > 0.75 && delta > 0.25) AudioLib.playOnce(UTIL.pick(['veh1_turbo_1', 'veh1_turbo_2']), { volume: 0.3 });
+      AudioLib.playOnce(key, { volume: 0.4, exclusive: 'realengine_event' });
+      if (speedRatio > 0.75 && delta > 0.25) AudioLib.playOnce(UTIL.pick(['veh1_turbo_1', 'veh1_turbo_2']), { volume: 0.3, exclusive: 'realengine_event' });
     } else if (delta < -0.18) {
       this.lastEventTime = now;
       const key = speedRatio > 0.55 ? 'veh1_decel_haute_vitesse' : UTIL.pick(['veh1_decel_1', 'veh1_petit_decel_1', 'veh1_petit_decel_2']);
-      AudioLib.playOnce(key, { volume: 0.35 });
+      AudioLib.playOnce(key, { volume: 0.35, exclusive: 'realengine_event' });
     }
   },
   // Freinage volontaire (espace) : plus fort qu'une simple décélération.
   brake(speedRatio) {
     const key = speedRatio > 0.5 ? 'veh1_frenage_brusque_haute_vitesse' : UTIL.pick(['veh1_frenage_1', 'veh1_frenage_2', 'veh1_frenage_3', 'veh1_frenage_4', 'veh1_frenage_5']);
-    AudioLib.playOnce(key, { volume: 0.45 });
+    AudioLib.playOnce(key, { volume: 0.45, exclusive: 'realengine_brake' });
   },
 };
 
@@ -683,7 +683,7 @@ const RealAirEngine = {
     const el = AudioLib.loopElements[loopKey];
     if (el) { el.volume = 0.25 + speedRatio * 0.25; el.playbackRate = 0.85 + speedRatio * 0.4; }
     // Appareil endommagé : le moteur crachote de temps en temps.
-    if (v.hp < 30 && Math.random() < 0.01) AudioLib.playOnce('avion_helico_crache', { volume: 0.4 });
+    if (v.hp < 30 && Math.random() < 0.01) AudioLib.playOnce('avion_helico_crache', { volume: 0.4, exclusive: true });
   },
 };
 
@@ -728,7 +728,7 @@ function createSampleEngine(keys) {
       // Son de transition uniquement quand on change vraiment de palier de
       // régime (pas à chaque frame) — c'est ce qui rend l'ensemble cohérent.
       const tier = speedRatio < 0.3 ? 'basse' : speedRatio < 0.7 ? 'moyenne' : 'haute';
-      if (this.lastTier && tier !== this.lastTier && keys.transition) AudioLib.playOnce(keys.transition, { volume: 0.25 });
+      if (this.lastTier && tier !== this.lastTier && keys.transition) AudioLib.playOnce(keys.transition, { volume: 0.25, exclusive: keys.demarrage + '_event' });
       this.lastTier = tier;
       // Évènements ponctuels (accélération/décélération) selon la vraie
       // variation de vitesse — pas un minuteur aveugle.
@@ -738,10 +738,10 @@ function createSampleEngine(keys) {
       if (now - this.lastEventTime < 700) return;
       if (delta > 0.14 && speedRatio > 0.15) { // pas de son d'accélération à l'arrêt (tapotage)
         this.lastEventTime = now;
-        AudioLib.playOnce(delta > 0.3 ? keys.accelForte : UTIL.pick(keys.accels), { volume: 0.4 });
+        AudioLib.playOnce(delta > 0.3 ? keys.accelForte : UTIL.pick(keys.accels), { volume: 0.4, exclusive: keys.demarrage + '_event' });
       } else if (delta < -0.18) {
         this.lastEventTime = now;
-        AudioLib.playOnce(speedRatio > 0.55 ? keys.decelLongue : UTIL.pick(keys.decels), { volume: 0.35 });
+        AudioLib.playOnce(speedRatio > 0.55 ? keys.decelLongue : UTIL.pick(keys.decels), { volume: 0.35, exclusive: keys.demarrage + '_event' });
       }
     },
   };
@@ -875,9 +875,24 @@ const AudioLib = {
     }
   },
   isLoopPlaying(key) { const n = this.loopElements[key]; return !!(n && n.playing && !n.paused); },
+  // clé -> instance en cours pour les sons "exclusifs" (voir opts.exclusive) :
+  // les sons de véhicule (moteur, accélération...) se redemandent très
+  // souvent en peu de temps ; sans ça, chaque nouvel appel s'empilait sur les
+  // précédents encore en cours de lecture, ce qui finissait par faire un bruit
+  // de fond confus et désagréable au lieu d'un vrai son de moteur.
+  _exclusiveByKey: {},
   playOnce(key, opts = {}) {
     const src = SOUND_FILES[key];
     if (!src) return null;
+    // opts.exclusive: true -> exclusif par SA PROPRE clé ; une chaîne -> un
+    // "canal" partagé explicite (ex. plusieurs sons ponctuels du moteur d'un
+    // même véhicule, choisis au hasard parmi plusieurs fichiers, qui doivent
+    // quand même se couper les uns les autres au lieu de s'empiler).
+    const exclKey = opts.exclusive === true ? key : opts.exclusive;
+    if (exclKey) {
+      const prev = this._exclusiveByKey[exclKey];
+      if (prev) { try { prev.pause(); } catch (e) {} this.activeOneShots.delete(prev); }
+    }
     // Un nouvel élément à chaque appel : deux tirs rapprochés ne se coupent pas la parole.
     const a = new (window.Audio)(src);
     a.preload = 'auto';
@@ -887,7 +902,8 @@ const AudioLib = {
     // oublie" dans ce jeu) peut sinon être coupé en plein milieu par le
     // ramasse-miettes du navigateur, qui ne sait pas qu'il doit attendre la fin.
     this.activeOneShots.add(a);
-    const cleanup = () => { this.activeOneShots.delete(a); };
+    if (exclKey) this._exclusiveByKey[exclKey] = a;
+    const cleanup = () => { this.activeOneShots.delete(a); if (exclKey && this._exclusiveByKey[exclKey] === a) delete this._exclusiveByKey[exclKey]; };
     a.addEventListener('ended', cleanup, { once: true });
     a.addEventListener('error', cleanup, { once: true });
     if (opts.onEnded) a.addEventListener('ended', opts.onEnded, { once: true });
