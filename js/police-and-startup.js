@@ -1420,6 +1420,7 @@ Game.openPoliceMenu = function() {
     { id: 'goto_alert', title: '🚨 Se rendre à la dernière alerte', desc: this.lastCrimeAlert ? `${this.lastCrimeAlert.name}, guidage GPS.` : 'Aucune alerte reçue pour l\'instant.' },
     { id: 'impound', title: '🚛 Mettre en fourrière', desc: 'Un véhicule non-possédé à proximité (8 cases).' },
     { id: 'vehicle_owner', title: '🔎 Propriétaire d\'un véhicule', desc: 'Identifier le propriétaire du véhicule où vous êtes, ou le plus proche.' },
+    { id: 'vehicle_search', title: '🚓 Fouiller un véhicule', desc: 'Le véhicule déverrouillé le plus proche : voir et saisir le contenu du coffre.' },
     { id: 'tank', title: '🪖 Réquisitionner un char d\'assaut', desc: 'Très cher, un seul à la fois.' },
     { id: 'invoice', title: '🧾 Facturer un client', desc: 'Envoyer une facture (frais divers) à un joueur réel proche.' },
     { id: 'cell', title: '🔒 Mettre en cellule / Libérer', desc: 'Cible verrouillée, menottée ou neutralisée — uniquement dans les cellules du commissariat.' },
@@ -1434,6 +1435,7 @@ Game.openPoliceMenu = function() {
     else if (sel.id === 'goto_alert') { closeMenu(); Game.goToLastCrimeAlert(); }
     else if (sel.id === 'impound') { closeMenu(); Game.impoundVehicle(); }
     else if (sel.id === 'vehicle_owner') { closeMenu(); Game.lookupVehicleOwner(); }
+    else if (sel.id === 'vehicle_search') { closeMenu(); Game.searchVehicle(); }
     else if (sel.id === 'tank') { closeMenu(); Game.requisitionTank(); }
     else if (sel.id === 'invoice') Game.openInvoiceMenu();
     else if (sel.id === 'cell') { closeMenu(); Game.toggleJail(); }
@@ -1537,6 +1539,38 @@ Game.requisitionTank = function() {
   });
 };
 
+// Fouille policière d'un véhicule : réservée à la police, et seulement si le
+// véhicule est déverrouillé (sinon il faut d'abord le faire ouvrir par son
+// propriétaire, ou le forcer comme n'importe qui — voir enterAsDriver).
+Game.searchVehicle = function() {
+  if (!Roles.hasPerm('cni')) return announce('Réservé à la police.', 'assertive');
+  const v = City.vehicles.filter(vv => UTIL.dist(vv, this) < 4).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+  if (!v) return announce('Aucun véhicule à proximité à fouiller.', 'assertive');
+  if (v.locked) return announce(`${v.name} est verrouillé : impossible de le fouiller sans l'ouvrir d'abord (consentement du propriétaire, ou forcer la portière).`, 'assertive');
+  openVehicleSearchMenu(v);
+};
+function openVehicleSearchMenu(v) {
+  const ownerLabel = v.ownerName || (v.owner ? 'propriétaire non identifié' : 'aucun propriétaire enregistré');
+  el('menuTitle').textContent = `Fouille de ${v.name}`;
+  const inv = v.inventory || [];
+  const items = inv.map((it, i) => ({ id: 'item_' + i, title: `${it.legal === false ? '☣️ ' : ''}${it.name} (${it.q || 1})`, desc: it.legal === false ? 'Objet illégal — choisir la quantité à saisir.' : 'Choisir la quantité à saisir.' }));
+  if (!items.length) items.push({ id: 'empty', title: 'Rien trouvé', desc: `Coffre vide. Propriétaire : ${ownerLabel}.` });
+  el('menuOverlay').style.display = 'flex';
+  renderMenu(items, (sel) => {
+    if (sel.id === 'empty') { closeMenu(); return; }
+    const idx = parseInt(sel.id.replace('item_', ''), 10);
+    const it = inv[idx];
+    closeMenu();
+    QtyPicker.open(`${it.name} à saisir`, it.q || 1, (n) => {
+      it.q -= n; if (it.q <= 0) v.inventory = v.inventory.filter(i => i !== it);
+      Game.addItem({ ...it, q: n });
+      const illegal = it.legal === false;
+      announce(`Vous saisissez ${n} ${it.name}${illegal ? ', objet illégal' : ''} dans ${v.name}.`, 'assertive');
+      if (illegal) RPJournal.log('Police', `Saisie lors de la fouille de ${v.name} (${ownerLabel}) : ${n} ${it.name}.`, 'alert');
+      updateHud();
+    });
+  });
+}
 Game.searchTarget = function() {
   const lockedLive = this.lockedTarget && !this.lockedTarget.isPlayer ? this.getLiveTarget() : null;
   const npcTarget = lockedLive || City.npcs.filter(n => !n.dead && UTIL.dist(n, this) < 3).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0]
