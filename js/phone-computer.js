@@ -256,6 +256,49 @@ const Phone = {
       });
       if (houses.length) this._makeListAccessible(ul, `Adresses des maisons : ${houses.length} recensée${houses.length > 1 ? 's' : ''}. Balayez d'un doigt pour parcourir, double tapez pour vous faire guider.`);
     }
+    if (name === 'music') {
+      a.innerHTML = `<h3>🎵 Musique</h3>
+        <p id="musicNowPlaying" style="color:var(--muted);font-size:0.85rem;"></p>
+        <button class="phone-btn" id="musicPick">📂 Choisir un fichier audio</button>
+        <button class="phone-btn" id="musicResume" style="display:none;"></button>
+        <button class="phone-btn" id="musicToggle" style="display:none;"></button>
+        <button class="phone-btn" id="musicStop" style="display:none;">⏹️ Arrêter</button>
+        <div style="display:flex;align-items:center;gap:8px;margin:8px 0;">
+          <button class="phone-btn" id="musicVolDown" aria-label="Baisser le volume">🔉</button>
+          <span id="musicVolLabel" style="min-width:48px;text-align:center;"></span>
+          <button class="phone-btn" id="musicVolUp" aria-label="Monter le volume">🔊</button>
+        </div>
+        <button class="phone-btn" id="musicBuyRadio" style="display:${Game.portableRadio.owned ? 'none' : ''};">🛒 Radio portable (20 000 FCFA — Ctrl+R partout)</button>
+        <p style="color:var(--muted);font-size:0.75rem;margin-top:8px;">${Game.portableRadio.owned ? '📻 Radio portable possédée : Ctrl+R pour lire/pause à tout instant, sans ouvrir le téléphone.' : ''}</p>
+        <button class="phone-btn" onclick="Phone.renderHome()">Retour</button>`;
+      const refresh = () => {
+        el('musicNowPlaying').textContent = MusicPlayer.fileName ? `Fichier : ${MusicPlayer.fileName} (${MusicPlayer.playing ? 'lecture' : 'pause'}).` : 'Aucun fichier chargé.';
+        el('musicToggle').textContent = MusicPlayer.playing ? '⏸️ Pause' : '▶️ Lire';
+        el('musicToggle').style.display = MusicPlayer.fileName ? '' : 'none';
+        el('musicStop').style.display = MusicPlayer.fileName ? '' : 'none';
+        el('musicVolLabel').textContent = Math.round(MusicPlayer.volume * 100) + '%';
+        const lastName = MusicPlayer.lastKnownName();
+        const resumeBtn = el('musicResume');
+        if (!MusicPlayer.fileName && lastName) { resumeBtn.style.display = ''; resumeBtn.textContent = `🔄 Reprendre « ${lastName} »`; }
+        else resumeBtn.style.display = 'none';
+      };
+      refresh();
+      el('musicPick').addEventListener('click', () => {
+        MusicPlayer.pickFile().then((ok) => { if (ok) { MusicPlayer.play(); refresh(); announce(`${MusicPlayer.fileName} chargé.`, 'assertive'); } });
+      });
+      el('musicResume').addEventListener('click', () => {
+        MusicPlayer.resumeLastFile().then((ok) => {
+          if (ok) { MusicPlayer.play(); refresh(); announce(`${MusicPlayer.fileName} repris.`, 'assertive'); }
+          else announce('Impossible de reprendre ce fichier. Choisissez-le à nouveau.', 'assertive');
+        });
+      });
+      el('musicToggle').addEventListener('click', () => { const playing = MusicPlayer.toggle(); refresh(); announce(playing ? 'Lecture.' : 'Pause.', 'polite'); });
+      el('musicStop').addEventListener('click', () => { MusicPlayer.stop(); refresh(); announce('Musique arrêtée.', 'polite'); });
+      el('musicVolUp').addEventListener('click', () => { MusicPlayer.setVolume(MusicPlayer.volume + 0.1); refresh(); });
+      el('musicVolDown').addEventListener('click', () => { MusicPlayer.setVolume(MusicPlayer.volume - 0.1); refresh(); });
+      const buyBtn = el('musicBuyRadio');
+      if (buyBtn) buyBtn.addEventListener('click', () => { Game.buyPortableRadio(); this.renderApp('music'); });
+    }
     if (name === 'jobs') {
       a.innerHTML = '<h3>🛡️ Métiers</h3><p style="color:var(--muted);font-size:0.8rem;">Métier actuel : <strong>' + (Roles.list[Roles.current]?.name || Roles.current) + '</strong></p><ul class="contact-list" id="phoneJobsList"></ul><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
       const ul = el('phoneJobsList');

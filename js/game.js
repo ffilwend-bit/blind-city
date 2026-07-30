@@ -22,6 +22,7 @@ const Game = {
   outfit: { haut: null, bas: null, chaussures: null, couleurHaut: null, couleurBas: null, couleurChaussures: null, coiffure: null, lunettes: null, isPolice: false, masque: false, accessoires: [] },
   miningMachine: false,
   talkie: { owned: false, battery: 1, on: false, frequency: 151.5 },
+  portableRadio: { owned: false }, // débloque le raccourci Ctrl+R : lire/pause la musique perso partout, sans ouvrir le téléphone
   voiceOpen: false, // micro de proximité (parler en direct aux gens autour de vous, sans passer par un appel)
 
   getDistrictName() { return City.getDistrictAt(this.x, this.y).name; },
@@ -2265,6 +2266,9 @@ const Game = {
         this.energy = Math.min(100, (this.energy || 0) + 40);
         if (window.AudioLib) AudioLib.playOnce('sfx_notification', { volume: 0.3 });
         return announce('Vous vous reposez un moment. Énergie restaurée.', 'assertive');
+      case 'audio':
+        announce(`${obj.name}. Ouverture du lecteur de musique.`, 'polite');
+        return this.openMusicMenu(`${obj.name} (${obj.room})`);
       default:
         return announce(`${obj.name}. Un bel élément de votre intérieur.`, 'polite');
     }
@@ -5011,7 +5015,7 @@ const Game = {
       completedMissions: this.completedMissions, activeMissionId: this.activeMission?.id || null,
       role: this.role, policeRank: this.policeRank, licenses: this.licenses, skills: this.skills,
       will: this.will, tickets: this.tickets, invoices: this.invoices,
-      player: this.player, outfit: this.outfit, miningMachine: this.miningMachine, talkie: this.talkie,
+      player: this.player, outfit: this.outfit, miningMachine: this.miningMachine, talkie: this.talkie, portableRadio: this.portableRadio,
       rolesCurrent: Roles.current, rolesRecruiters: Roles.recruiters, savedPlaces: this.savedPlaces, ownsTablet: this.ownsTablet,
       phones: this.phones, activePhoneIndex: this.activePhoneIndex, lastParkedVehicle: this.lastParkedVehicle, theoryPassed: this.theoryPassed, flightTheoryPassed: this.flightTheoryPassed, myContacts: this.myContacts,
       hasHelmet: this.hasHelmet, hasVest: this.hasVest, pendingBills: this.pendingBills,
@@ -5059,6 +5063,7 @@ const Game = {
       if (!('masque' in this.outfit)) this.outfit.masque = false;
       if (!Array.isArray(this.outfit.accessoires)) this.outfit.accessoires = [];
       if (!this.talkie) this.talkie = { owned: false, battery: 1, on: false, frequency: 151.5 };
+      if (!this.portableRadio) this.portableRadio = { owned: false };
       // Chien guide : resynchronise le module GuideDog avec l'état restauré.
       if (typeof GuideDog !== 'undefined') GuideDog.data = (this.guideDog && this.guideDog.alive) ? this.guideDog : null;
       if (!Array.isArray(this.savedPlaces)) this.savedPlaces = [];
@@ -5107,6 +5112,17 @@ const Game = {
     this.money -= price; this.talkie.owned = true; this.talkie.battery = 1;
     Audio.cash();
     announce('Talkie-walkie acheté, batterie pleine.', 'assertive');
+    updateHud();
+  },
+  // Petite radio portable : débloque Ctrl+R pour lire/mettre en pause la
+  // musique perso à tout instant, sans ouvrir le téléphone.
+  buyPortableRadio() {
+    if (this.portableRadio.owned) return announce('Vous possédez déjà une radio portable.', 'polite');
+    const price = 20000;
+    if (this.money < price) return announce(`Radio portable : ${UTIL.formatMoney(price)}.`, 'assertive');
+    this.money -= price; this.portableRadio.owned = true;
+    Audio.cash();
+    announce('Radio portable achetée. Ctrl+R pour lire ou mettre en pause votre musique, à tout instant.', 'assertive');
     updateHud();
   },
   // Tablette : appareil séparé du téléphone, exigé pour consulter et accepter

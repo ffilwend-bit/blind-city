@@ -30,6 +30,12 @@ function setupExtraInput() {
     else if (ctrl && key === 'u') { e.preventDefault(); Game.openPoliceMenu(); }
     else if (ctrl && key === 's') { e.preventDefault(); Game.toggleSiren(); }
     else if (ctrl && key === 'h') { e.preventDefault(); Game.honk(); }
+    else if (ctrl && key === 'r') {
+      e.preventDefault();
+      if (!Game.portableRadio.owned) announce('Vous n\'avez pas de radio portable. Achetez-en une dans l\'appli Musique du téléphone.', 'assertive');
+      else if (!MusicPlayer.fileName) Game.openMusicMenu('radio portable'); // rien à lire : ouvre le choix de fichier
+      else announce(MusicPlayer.toggle() ? 'Lecture.' : 'Pause.', 'polite');
+    }
     else if (ctrl && key === 'd') { e.preventDefault(); Game.toggleDriveAssist(); } // assistant de conduite (alerte obstacles)
     else if (ctrl && key === 'k') { e.preventDefault(); openConvoyMenu(); } // gérer le convoi (créer / rejoindre / quitter)
     else if (ctrl && key === 'x') { e.preventDefault(); Game.callTaxi(); }
@@ -1255,12 +1261,14 @@ Game.openVehicleMenu = function() {
   const items = [
     { id: 'info', title: 'ℹ️ Infos du véhicule', desc: 'Puissance, essence, état, portes, passagers.' },
     { id: 'drivemode', title: '🧭 Mode de conduite', desc: 'Choisir conduite automatique, manuelle guidée, ou revenir à la conduite libre.' },
+    { id: 'radio', title: '🎵 Autoradio', desc: MusicPlayer.fileName ? `En cours : ${MusicPlayer.fileName}.` : 'Jouer votre propre musique (fichier local).' },
   ];
   el('menuOverlay').style.display = 'flex';
   renderMenu(items, (sel) => {
     closeMenu();
     if (sel.id === 'info') this.openVehicleInfo(this.vehicle);
     else if (sel.id === 'drivemode') this.openDriveModeMenu(this.vehicle);
+    else if (sel.id === 'radio') this.openMusicMenu('autoradio');
   });
 };
 Game.openVehicleInfo = function(v) {
@@ -1539,6 +1547,45 @@ Game.requisitionTank = function() {
   });
 };
 
+// Menu de contrôle du lecteur de musique personnelle, partagé par tous les
+// points d'accès (téléphone, enceinte/télé chez soi, autoradio, radio
+// portable) — seul le "label" affiché change, les contrôles sont les mêmes.
+Game.openMusicMenu = function(label) {
+  const lastName = MusicPlayer.lastKnownName();
+  el('menuTitle').textContent = `Musique${label ? ' — ' + label : ''}`;
+  const items = [{ id: 'pick', title: '📂 Choisir un fichier audio', desc: 'Ouvre le sélecteur de fichiers de votre ordinateur.' }];
+  if (!MusicPlayer.fileName && lastName) {
+    items.push({ id: 'resume', title: `🔄 Reprendre « ${lastName} »`, desc: MusicPlayer.supported ? 'Redonne accès au même fichier (une autorisation peut être redemandée).' : 'Non mémorisé sur ce navigateur : il faudra le rechercher à nouveau.' });
+  }
+  if (MusicPlayer.fileName) {
+    items.push({ id: 'toggle', title: MusicPlayer.playing ? '⏸️ Mettre en pause' : '▶️ Lire', desc: `Fichier actuel : ${MusicPlayer.fileName}.` });
+    items.push({ id: 'stop', title: '⏹️ Arrêter', desc: 'Revient au début du morceau.' });
+    items.push({ id: 'volup', title: '🔊 Volume plus fort', desc: `Actuellement ${Math.round(MusicPlayer.volume * 100)}%.` });
+    items.push({ id: 'voldown', title: '🔉 Volume plus faible', desc: `Actuellement ${Math.round(MusicPlayer.volume * 100)}%.` });
+  }
+  el('menuOverlay').style.display = 'flex';
+  renderMenu(items, (sel) => {
+    if (sel.id === 'pick') {
+      closeMenu();
+      MusicPlayer.pickFile().then((ok) => { if (ok) { MusicPlayer.play(); announce(`${MusicPlayer.fileName} chargé${label ? ' sur ' + label : ''}.`, 'assertive'); } });
+    } else if (sel.id === 'resume') {
+      closeMenu();
+      MusicPlayer.resumeLastFile().then((ok) => {
+        if (ok) { MusicPlayer.play(); announce(`${MusicPlayer.fileName} repris${label ? ' sur ' + label : ''}.`, 'assertive'); }
+        else announce('Impossible de reprendre ce fichier. Choisissez-le à nouveau.', 'assertive');
+      });
+    } else if (sel.id === 'toggle') {
+      closeMenu();
+      announce(MusicPlayer.toggle() ? 'Lecture.' : 'Pause.', 'polite');
+    } else if (sel.id === 'stop') {
+      closeMenu(); MusicPlayer.stop(); announce('Musique arrêtée.', 'polite');
+    } else if (sel.id === 'volup') {
+      MusicPlayer.setVolume(MusicPlayer.volume + 0.1); Game.openMusicMenu(label);
+    } else if (sel.id === 'voldown') {
+      MusicPlayer.setVolume(MusicPlayer.volume - 0.1); Game.openMusicMenu(label);
+    }
+  });
+};
 // Fouille policière d'un véhicule : réservée à la police, et seulement si le
 // véhicule est déverrouillé (sinon il faut d'abord le faire ouvrir par son
 // propriétaire, ou le forcer comme n'importe qui — voir enterAsDriver).

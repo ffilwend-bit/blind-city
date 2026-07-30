@@ -1034,5 +1034,132 @@ const AmbientZones = {
 window.Weather = Weather; window.AmbientZones = AmbientZones;
 
 /* ============================================================
+   LECTEUR DE MUSIQUE PERSONNELLE (fichier local du joueur)
+   Un seul lecteur partagé, accessible depuis plusieurs "appareils" (téléphone,
+   enceinte/télé chez soi, autoradio, radio portable) : ce ne sont que des
+   points d'accès différents aux mêmes contrôles, pas des lecteurs séparés.
+   Contrainte du navigateur : JS ne peut pas lire un fichier au hasard sur le
+   disque sans que le joueur le choisisse lui-même (sécurité). Avec la File
+   System Access API (Chrome/Edge), on peut retenir l'accès au VRAI fichier
+   d'une session à l'autre via un "handle" stocké dans IndexedDB (localStorage
+   ne peut pas contenir ce genre d'objet). Sans cette API (Firefox/Safari), on
+   retombe sur un simple <input type=file> : le nom est retenu, mais il faut
+   resélectionner le fichier à chaque session.
+============================================================ */
+const MusicPlayer = {
+  audioEl: null, gainNode: null, sourceNode: null,
+  fileName: null, fileHandle: null, playing: false, volume: 0.8,
+  supported: typeof window.showOpenFilePicker === 'function',
+
+  _ensureNodes() {
+    if (this.audioEl) return;
+    this.audioEl = new (window.Audio)();
+    this.audioEl.loop = true; // musique perso en boucle continue, comme une vraie radio
+    const ctx = Audio.ensure();
+    this.gainNode = ctx.createGain();
+    this.gainNode.gain.value = this.volume;
+    this.sourceNode = ctx.createMediaElementSource(this.audioEl);
+    this.sourceNode.connect(this.gainNode).connect(Audio.master);
+    this.audioEl.addEventListener('ended', () => { this.playing = false; });
+  },
+
+  // Mini IndexedDB clé/valeur, juste pour stocker le FileSystemFileHandle
+  // (impossible dans localStorage, qui n'accepte que du texte).
+  _dbPromise: null,
+  _openDb() {
+    if (this._dbPromise) return this._dbPromise;
+    this._dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open('blind_city_music', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('kv');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return this._dbPromise;
+  },
+  async _dbGet(key) {
+    try {
+      const db = await this._openDb();
+      return await new Promise((resolve) => {
+        const r = db.transaction('kv', 'readonly').objectStore('kv').get(key);
+        r.onsuccess = () => resolve(r.result || null);
+        r.onerror = () => resolve(null);
+      });
+    } catch (e) { return null; }
+  },
+  async _dbSet(key, val) {
+    try {
+      const db = await this._openDb();
+      return await new Promise((resolve) => {
+        const r = db.transaction('kv', 'readwrite').objectStore('kv').put(val, key);
+        r.onsuccess = () => resolve(true);
+        r.onerror = () => resolve(false);
+      });
+    } catch (e) { return false; }
+  },
+
+  // Doit être appelé directement depuis un clic/Entrée (geste utilisateur
+  // requis par le navigateur pour choisir un fichier).
+  async pickFile() {
+    this._ensureNodes();
+    if (this.supported) {
+      let handles;
+      try {
+        handles = await window.showOpenFilePicker({ types: [{ description: 'Fichiers audio', accept: { 'audio/*': ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac'] } }] });
+      } catch (e) { return false; } // fenêtre annulée par le joueur
+      await this._loadHandle(handles[0]);
+      await this._dbSet('lastFile', handles[0]);
+      return true;
+    }
+    // Repli sans mémorisation réelle (navigateur sans File System Access API).
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file'; input.accept = 'audio/*';
+      input.onchange = () => { if (input.files[0]) { this._loadPlainFile(input.files[0]); resolve(true); } else resolve(false); };
+      input.click();
+    });
+  },
+  async _loadHandle(handle) {
+    let perm = await handle.queryPermission({ mode: 'read' });
+    if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
+    if (perm !== 'granted') { announce('Autorisation refusée pour ce fichier.', 'assertive'); return false; }
+    const file = await handle.getFile();
+    this.fileHandle = handle;
+    this._loadPlainFile(file);
+    return true;
+  },
+  _loadPlainFile(file) {
+    this._ensureNodes();
+    if (this.audioEl.src) URL.revokeObjectURL(this.audioEl.src);
+    this.audioEl.src = URL.createObjectURL(file);
+    this.fileName = file.name;
+    localStorage.setItem('blind_city_music_name', file.name);
+  },
+  // Nom du dernier fichier connu, même avant tout chargement dans cette
+  // session (pour l'annoncer/proposer une reprise dès l'ouverture du menu).
+  lastKnownName() { return this.fileName || localStorage.getItem('blind_city_music_name'); },
+  // Tente de retrouver le VRAI dernier fichier (File System Access uniquement) ;
+  // resterPermission() ci-après gère la reprise avec un nouveau geste utilisateur.
+  async getLastHandle() { return this.supported ? this._dbGet('lastFile') : null; },
+  async resumeLastFile() {
+    const handle = await this.getLastHandle();
+    if (!handle) return false;
+    return this._loadHandle(handle);
+  },
+
+  play() {
+    this._ensureNodes();
+    if (!this.audioEl.src) { announce('Choisissez d\'abord un fichier audio.', 'assertive'); return false; }
+    this.audioEl.play().catch(() => {});
+    this.playing = true;
+    return true;
+  },
+  pause() { if (this.audioEl) { this.audioEl.pause(); this.playing = false; } },
+  stop() { if (this.audioEl) { this.audioEl.pause(); this.audioEl.currentTime = 0; this.playing = false; } },
+  toggle() { if (this.playing) { this.pause(); return false; } return this.play(); },
+  setVolume(v) { this.volume = Math.max(0, Math.min(1, v)); if (this.gainNode) this.gainNode.gain.value = this.volume; },
+};
+window.MusicPlayer = MusicPlayer;
+
+/* ============================================================
    CONFIGURATION ET UTILITAIRES
 ============================================================ */
