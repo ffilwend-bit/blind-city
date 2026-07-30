@@ -23,7 +23,7 @@ const Phone = {
     if (firstIcon) firstIcon.focus();
     announce(mode === 'tablet'
       ? 'Tablette ouverte. Applications : missions extrêmes, et toutes celles du téléphone. Utilisez les flèches pour naviguer.'
-      : 'Téléphone ouvert. Applications : contacts, messages, appeler, garage, carte, réglages. Utilisez les flèches pour naviguer.', 'polite');
+      : 'Téléphone ouvert. Applications : contacts, messages, appeler, parking, carte, réglages. Utilisez les flèches pour naviguer.', 'polite');
   },
   closePhone() { this.open = false; el('phoneOverlay').style.display = 'none'; this.hangup(); document.activeElement?.blur(); },
   updateClock() { const d = new Date(); el('phoneTime').textContent = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0'); },
@@ -144,7 +144,7 @@ const Phone = {
       });
     }
     if (name === 'garage') {
-      a.innerHTML = '<h3>🚗 Garage App</h3><div id="garageAppList"></div><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
+      a.innerHTML = '<h3>🅿️ Parking</h3><div id="garageAppList"></div><button class="phone-btn" onclick="Phone.renderHome()">Retour</button>';
       this.renderGarageApp();
     }
     if (name === 'missions') {
@@ -642,13 +642,13 @@ const Phone = {
     owned.forEach(v => {
       const cls = VEHICLE_CATALOG[v.type];
       const loc = Game.getVehicleLocationInfo(v);
-      const locLabel = loc.kind === 'garage_principal' ? `📍 ${loc.poi.name}` : loc.kind === 'garage_maison' ? `📍 Garage personnel (${loc.house.name || 'maison'})` : loc.kind === 'aeroport' ? `📍 ${loc.poi.name}` : '📍 Ailleurs en ville';
+      const locLabel = loc.kind === 'garage_principal' ? `📍 ${loc.poi.name}` : loc.kind === 'garage_maison' ? `📍 Parking personnel (${loc.house.name || 'maison'})` : loc.kind === 'aeroport' ? `📍 ${loc.poi.name}` : '📍 Ailleurs en ville';
       const serviceLabel = v.pendingService ? ` — ${v.pendingService === 'livraison' ? 'livraison en cours' : 'transfert en cours'}` : '';
       const p = document.createElement('div'); p.style.cssText = 'background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;';
       let buttons = `<button class="phone-btn" data-act="locate" data-id="${v.id}">📍 Localiser</button>`;
       if (!v.pendingService) {
         if (!cls?.flies && loc.kind === 'garage_principal') buttons += ` <button class="phone-btn" data-act="call" data-id="${v.id}">🚗 Appeler (livraison)</button>`;
-        if (!cls?.flies && loc.kind === 'garage_maison') buttons += ` <button class="phone-btn" data-act="transfer" data-id="${v.id}">🚚 Transférer vers un garage principal</button>`;
+        if (!cls?.flies && loc.kind === 'garage_maison') buttons += ` <button class="phone-btn" data-act="transfer" data-id="${v.id}">🚚 Transférer vers un parking principal</button>`;
       }
       p.innerHTML = `<strong>${v.name}</strong><br><span style="color:var(--muted);font-size:0.75rem;">Essence ${Math.round(v.fuel * 100)}%, État ${Math.round(v.hp)}%. ${locLabel}${serviceLabel}</span><br>${buttons}`;
       p.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {

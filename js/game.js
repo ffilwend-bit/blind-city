@@ -805,7 +805,7 @@ const Game = {
   describeVehicleLocation(v) {
     const loc = this.getVehicleLocationInfo(v);
     if (loc.kind === 'garage_principal') return `garé au ${loc.poi.name}`;
-    if (loc.kind === 'garage_maison') return `garé dans votre garage personnel (${loc.house.name || 'votre maison'})`;
+    if (loc.kind === 'garage_maison') return `garé dans votre parking personnel (${loc.house.name || 'votre maison'})`;
     if (loc.kind === 'aeroport') return `à ${loc.poi.name}`;
     return `dernier emplacement connu, quartier ${City.getDistrictAt(v.x, v.y).name}`;
   },
@@ -826,7 +826,7 @@ const Game = {
     if (!owned.length) return announce('Aucun de vos véhicules n\'est disponible pour le moment.', 'assertive');
     if (owned.length === 1) return this.requestVehicleDelivery(owned[0]);
     if (typeof ensureMenuOpen === 'function') ensureMenuOpen();
-    el('menuTitle').textContent = '🚗 Mon garage — appeler un véhicule';
+    el('menuTitle').textContent = '🚗 Mon parking — appeler un véhicule';
     const items = owned.map((v, i) => ({
       id: 'veh_' + i,
       title: v.name,
@@ -845,8 +845,8 @@ const Game = {
     if (v.pendingService) return announce(`${v.name} est déjà en cours de service (${v.pendingService === 'livraison' ? 'livraison' : 'transfert'} en cours).`, 'assertive');
     const loc = this.getVehicleLocationInfo(v);
     if (loc.kind !== 'garage_principal') {
-      const extra = loc.kind === 'garage_maison' ? ' Depuis le téléphone, vous pouvez demander son transfert vers un garage principal pour pouvoir ensuite le faire livrer.' : '';
-      return announce(`${v.name} n'est pas dans un garage principal (${this.describeVehicleLocationFull(v)}) : impossible de le faire livrer.${extra}`, 'assertive');
+      const extra = loc.kind === 'garage_maison' ? ' Depuis le téléphone, vous pouvez demander son transfert vers un parking principal pour pouvoir ensuite le faire livrer.' : '';
+      return announce(`${v.name} n'est pas dans un parking principal (${this.describeVehicleLocationFull(v)}) : impossible de le faire livrer.${extra}`, 'assertive');
     }
     const delaySec = UTIL.randInt(30, 60);
     v.pendingService = 'livraison';
@@ -863,7 +863,7 @@ const Game = {
   // vers un des 3 garages principaux, pour pouvoir ensuite le faire livrer.
   openVehicleTransferMenu(v) {
     const loc = this.getVehicleLocationInfo(v);
-    if (loc.kind !== 'garage_maison') return announce(`${v.name} n'est pas dans un garage personnel (${this.describeVehicleLocationFull(v)}).`, 'assertive');
+    if (loc.kind !== 'garage_maison') return announce(`${v.name} n'est pas dans un parking personnel (${this.describeVehicleLocationFull(v)}).`, 'assertive');
     if (v.pendingService) return announce(`${v.name} est déjà en cours de service.`, 'assertive');
     const garages = this.mainGarages();
     if (typeof ensureMenuOpen === 'function') ensureMenuOpen();
@@ -871,7 +871,7 @@ const Game = {
     const items = garages.map((g, i) => ({ id: 'g_' + i, title: g.name, desc: `${Math.round(UTIL.dist(g, this) * CONFIG.METERS_PER_TILE)} m d'ici.`, garage: g }));
     renderMenu(items, (it) => { if (it.garage) { closeMenu(); this.transferVehicleToGarage(v, it.garage); } });
     el('menuOverlay').style.display = 'flex';
-    announce(`Choisissez le garage principal vers lequel transférer ${v.name}.`, 'assertive');
+    announce(`Choisissez le parking principal vers lequel transférer ${v.name}.`, 'assertive');
   },
   transferVehicleToGarage(v, garage) {
     const delaySec = UTIL.randInt(60, 120);
@@ -2858,17 +2858,18 @@ const Game = {
     announce(`Solde bancaire : ${UTIL.formatMoney(this.money)}. Les banques gèrent vos fonds.`, 'polite');
   },
   // Parking public (lieu « garage » sur la carte) : vos véhicules restent
-  // toujours exactement où vous les laissez (aucun besoin d'un endroit
-  // précis pour ça) — ce lieu sert surtout de repère RP dans la ville, et
-  // rappelle qu'on peut faire venir un véhicule possédé n'importe où via
-  // Garage sur le téléphone (touche O), y compris chez soi.
+  // toujours exactement où vous les laissez. Seuls les 3 parkings PRINCIPAUX
+  // (voir Game.mainGarages) offrent un service de livraison par chauffeur
+  // PNJ via le téléphone (touche O) — un simple parking public n'est qu'un
+  // stationnement sûr, sans ce service.
   openPublicParking(poi) {
+    const principal = !!poi.principal;
     if (this.inVehicle && this.vehicle) {
-      announce(`Parking public : ${poi.name}. ${this.vehicle.name} peut rester garé ici en toute sécurité — descendez puis rappelez-le n'importe où plus tard via Garage sur votre téléphone (touche O).`, 'assertive');
+      announce(`${poi.name} : ${this.vehicle.name} peut rester garé ici en toute sécurité — descendez pour l'y laisser.${principal ? ' Comme c\'est un parking principal, vous pourrez ensuite le faire livrer n\'importe où via Parking sur votre téléphone (touche O).' : ' Ce n\'est pas un parking principal : pas de livraison possible depuis ici, il faudra venir le rechercher sur place.'}`, 'assertive');
     } else if (this.ownedVehicles.length) {
-      announce(`Parking public : ${poi.name}. Vos véhicules restent où vous les laissez, chez vous comme ici ; utilisez Garage sur votre téléphone (touche O) pour en rappeler un à votre position actuelle.`, 'polite');
+      announce(`${poi.name}. Vos véhicules restent où vous les laissez.${principal ? ' Utilisez Parking sur votre téléphone (touche O) pour en faire livrer un depuis ici.' : ' Ce n\'est pas un parking principal : aucun service de livraison depuis ici.'}`, 'polite');
     } else {
-      announce(`Parking public : ${poi.name}. Vous n'avez pas encore de véhicule à y garer.`, 'polite');
+      announce(`${poi.name}. Vous n'avez pas encore de véhicule à y garer.`, 'polite');
     }
   },
   // Terrain agricole : culture de drogue sur plusieurs jours RÉELS, y compris

@@ -171,7 +171,7 @@ function openItemActionMenu(itemId) {
 function openMainMenu() {
   el('menuTitle').textContent = 'Menu principal';
   const items = [
-    { id: 'vehicles', title: '🚗 Véhicules', desc: 'Garage, conduite automatique, acheter/vente.' },
+    { id: 'vehicles', title: '🚗 Véhicules', desc: 'Parking, conduite automatique, acheter/vente.' },
     { id: 'weapons', title: '🔫 Armes', desc: 'Équiper, recharger, acheter munitions.' },
     { id: 'inventory', title: '🎒 Inventaire', desc: 'Consulter, utiliser, vendre, donner ou déposer vos objets.' },
     { id: 'missions', title: '🎯 Missions', desc: 'Voir et activer des missions.' },
@@ -691,7 +691,7 @@ function openStaffCodeMenu() {
 function openVehicleMenu() {
   el('menuTitle').textContent = 'Véhicules';
   const items = [
-    { id: 'garage', title: 'Sortir mon véhicule', desc: 'Faire sortir votre véhicule du garage.' },
+    { id: 'garage', title: 'Sortir mon véhicule', desc: 'Faire livrer votre véhicule depuis un parking principal.' },
     { id: 'info', title: 'Infos véhicule', desc: 'Puissance, essence, état, portes, passagers.' },
     { id: 'doors', title: 'Portes et coffre', desc: 'Ouvrir ou fermer les portes du véhicule proche.' },
     { id: 'trunk', title: 'Coffre : objets', desc: 'Déposer ou récupérer un objet dans le coffre du véhicule où vous êtes.' },

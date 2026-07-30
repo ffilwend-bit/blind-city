@@ -326,15 +326,15 @@ const City = {
     add('Port du barrage', 'port', 'Zone du barrage', 2);
     add('Station-service', 'station_essence', 'Gounghin', 3);
     add('Station-service de Koulouba', 'station_essence', 'Koulouba', 2);
-    // Garages principaux : les 3 seuls garages-relais de la ville où un
+    // Parkings principaux : les 3 seuls parkings-relais de la ville où un
     // véhicule possédé peut être livré par un chauffeur PNJ via le téléphone
     // (voir Game.requestVehicleDelivery). Les autres "Parking de X" restent de
     // simples emplacements de stationnement, sans service de livraison.
-    add('Garage principal 1', 'garage', 'Zone industrielle de Kossodo', 1, { principal: true });
+    add('Parking principal 1', 'garage', 'Zone industrielle de Kossodo', 1, { principal: true });
     add('Parking de Kossodo', 'garage', 'Zone industrielle de Kossodo', 1);
-    add('Garage principal 2', 'garage', 'Koulouba', 1, { principal: true });
+    add('Parking principal 2', 'garage', 'Koulouba', 1, { principal: true });
     add('Parking de Koulouba', 'garage', 'Koulouba', 1);
-    add('Garage principal 3', 'garage', 'Gounghin', 1, { principal: true });
+    add('Parking principal 3', 'garage', 'Gounghin', 1, { principal: true });
     add('Entrepôt', 'entrepot', 'Zone industrielle de Kossodo', 4);
     add('Usine', 'usine', 'Zone industrielle de Kossodo', 3);
     add('Bar', 'bar', 'Gounghin', 2);
