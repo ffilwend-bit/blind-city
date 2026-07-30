@@ -45,12 +45,22 @@ const Game = {
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
     if (this.ridingWith) return announce('Vous êtes passager. Appuyez sur Interagir pour descendre.', 'polite');
     if (this.inVehicle && this.vehicle) {
-      // Au volant, on tourne par quarts (90°) : la conduite ne se fait que sur
-      // les 4 axes de la grille, quel que soit le pas demandé par la touche.
-      const vdelta = delta >= 0 ? 2 : -2;
-      this.vehicle.heading = ((this.vehicle.heading + vdelta) % 8 + 8) % 8; this.heading = this.vehicle.heading;
       const cls = VEHICLE_CATALOG[this.vehicle.type];
-      if (cls && !cls.flies) AudioLib.playOnce('clignotant_voiture', { volume: 0.35 });
+      if (cls?.flies) {
+        // Un avion/hélico vole librement, pas sur une grille de rues : virage
+        // fin par 45° comme à pied (voir plus bas), pour viser un cap précis
+        // sans les paliers de 90° qui faisaient dépasser le cap voulu et
+        // provoquaient un zigzag ("tournez à droite" puis "à gauche" juste
+        // après, sans jamais se stabiliser).
+        this.vehicle.heading = ((this.vehicle.heading + delta) % 8 + 8) % 8; this.heading = this.vehicle.heading;
+      } else {
+        // Au volant d'un véhicule terrestre, on tourne par quarts (90°) : la
+        // conduite ne se fait que sur les 4 axes de la grille, quel que soit
+        // le pas demandé par la touche.
+        const vdelta = delta >= 0 ? 2 : -2;
+        this.vehicle.heading = ((this.vehicle.heading + vdelta) % 8 + 8) % 8; this.heading = this.vehicle.heading;
+        AudioLib.playOnce('clignotant_voiture', { volume: 0.35 });
+      }
     }
     // À pied, on tourne finement par huitièmes (45°) : flèche gauche/droite fait
     // pivoter un peu à la fois sur soi-même, pour viser un cap précis parmi les
@@ -214,7 +224,13 @@ const Game = {
       v.engineOn = true; v.engineStartAt = null;
       announce(cls.flies ? 'Moteur stabilisé : vous pouvez décoller.' : 'Moteur démarré.', 'assertive');
     }
-    if (dx !== 0 || dy !== 0) v.heading = (dx > 0 ? 2 : dx < 0 ? 6 : dy > 0 ? 4 : dy < 0 ? 0 : v.heading);
+    // dx,dy viennent toujours de headingToDelta(v.heading) (avancer) ou de son
+    // opposé (reculer) : re-déduire le cap à partir de dx,dy avec un mapping
+    // uniquement cardinal (comme ci-dessous) écraserait un cap DIAGONAL (avion
+    // en virage fin par 45°) en le ramenant au cap cardinal le plus proche.
+    // Pour un avion/hélico, le cap est déjà correct (posé par turn()) : inutile
+    // de le re-déduire ici.
+    if (!cls.flies && (dx !== 0 || dy !== 0)) v.heading = (dx > 0 ? 2 : dx < 0 ? 6 : dy > 0 ? 4 : dy < 0 ? 0 : v.heading);
     const isBraking = (dx === 0 && dy === 0);
     // Freinage brutal : freinage engagé alors qu'on roulait vite, détecté une
     // seule fois au début du freinage (pas à chaque image tant qu'on freine).
@@ -271,8 +287,12 @@ const Game = {
     // le zigzag ("tournez à droite" puis "à gauche" après avoir dépassé le cap).
     const step = v.speed * this.MOVE_SCALE;
     const dir = v.heading;
-    const ndx = dir === 2 ? step : dir === 6 ? -step : 0;
-    const ndy = dir === 4 ? step : dir === 0 ? -step : 0;
+    // headingToDelta gère les 8 caps (dont les 4 diagonaux, utilisés par un
+    // avion/hélico en virage fin) ; pour un véhicule terrestre, cap toujours
+    // cardinal (0/2/4/6), donc dx/dy valent exactement comme avant (0 ou ±1).
+    const dirDelta = this.headingToDelta(dir);
+    const ndx = dirDelta.dx * step;
+    const ndy = dirDelta.dy * step;
     // Avancement fluide même à basse vitesse : à vitesse suffisante on arrondit
     // (comportement classique), sinon on ACCUMULE la fraction de case parcourue
     // et on ne franchit une case entière que quand le cumul l'atteint. Sans ça,
@@ -285,8 +305,8 @@ const Game = {
       let adv = 0;
       if (v._moveAccum >= 1) { v._moveAccum -= 1; adv = 1; }
       else if (v._moveAccum <= -1) { v._moveAccum += 1; adv = -1; }
-      nx = v.x + (dir === 2 ? adv : dir === 6 ? -adv : 0);
-      ny = v.y + (dir === 4 ? adv : dir === 0 ? -adv : 0);
+      nx = v.x + dirDelta.dx * adv;
+      ny = v.y + dirDelta.dy * adv;
     }
     if (cls.flies) {
       v.altitude = Math.max(0, v.altitude + (Game.keys.has('shift') ? 2 : Game.keys.has('control') ? -2 : 0));
@@ -334,12 +354,13 @@ const Game = {
     }
     updateHud();
   },
+  // Généralisé aux 8 caps (dont les diagonaux, pour un avion/hélico en virage
+  // fin) via un produit scalaire avec la direction du cap : négatif = on
+  // pousse globalement à l'opposé de là où l'on regarde, donc marche arrière.
+  // Équivalent exact de l'ancien test cardinal-only pour les 4 caps 0/2/4/6.
   isReverse(heading, dx, dy) {
-    if (heading === 0 && dy > 0) return true; // heading north, pressing south
-    if (heading === 4 && dy < 0) return true;
-    if (heading === 2 && dx < 0) return true;
-    if (heading === 6 && dx > 0) return true;
-    return false;
+    const hd = this.headingToDelta(heading);
+    return (dx * hd.dx + dy * hd.dy) < 0;
   },
   brakeVehicle() {
     if (!this.vehicle) return;
