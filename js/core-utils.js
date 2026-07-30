@@ -28,6 +28,7 @@ const CONFIG = {
   NOTIFICATION_SOUND: 'sfx_notification', // clé dans SOUND_FILES ; modifiable via Réglages
   FREQ_TOLERANCE: 0.05,
   MAX_RADIO_PARTICIPANTS: 10, // limite indicative par fréquence (gérée côté client)
+  GPS_BEEP_MODE: false, // guidage par bips directionnels au lieu de la voix (Maj+N)
 };
 
 /* ============================================================
@@ -44,6 +45,7 @@ const UserSettings = {
       const d = JSON.parse(raw);
       if (typeof d.speechRate === 'number') CONFIG.SPEECH_RATE = d.speechRate;
       if (d.notificationSound && SOUND_FILES[d.notificationSound]) CONFIG.NOTIFICATION_SOUND = d.notificationSound;
+      if (typeof d.gpsBeepMode === 'boolean') CONFIG.GPS_BEEP_MODE = d.gpsBeepMode;
     } catch (e) { /* ignore, on garde les valeurs par défaut */ }
   },
   save() {
@@ -51,6 +53,7 @@ const UserSettings = {
       localStorage.setItem(this.KEY, JSON.stringify({
         speechRate: CONFIG.SPEECH_RATE,
         notificationSound: CONFIG.NOTIFICATION_SOUND,
+        gpsBeepMode: CONFIG.GPS_BEEP_MODE,
       }));
     } catch (e) { /* stockage indisponible, on ignore */ }
   },

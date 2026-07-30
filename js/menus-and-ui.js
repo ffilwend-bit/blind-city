@@ -1005,10 +1005,14 @@ function setupInput() {
       }
     }
     else if (key === 'pagedown') { if (Game.inVehicle && VEHICLE_CATALOG[Game.vehicle.type].flies) { Game.altitude = Math.max(0, Game.altitude - 5); Game.vehicle.altitude = Game.altitude; announce('Altitude ' + Math.round(Game.altitude) + ' m.', 'polite'); } }
-    // Boîte manuelle (motos et voitures sport uniquement) : point/slash pour
-    // monter/descendre de rapport, comme un embrayage.
-    else if (key === '.') Game.shiftGear(1);
-    else if (key === '/') Game.shiftGear(-1);
+    // Boîte manuelle (motos et voitures sport uniquement) : crochets pour
+    // monter/descendre de rapport, comme un embrayage. On lit e.code (position
+    // physique de la touche) plutôt que e.key : sur un clavier AZERTY, "." et
+    // "/" se tapent avec Maj sur les MÊMES touches que ";" et ":" déjà
+    // utilisées pour fixer le cap aux 4 points cardinaux (Est/Ouest) —
+    // conflit direct qui changeait le cap au lieu de la vitesse, ou l'inverse.
+    else if (e.code === 'BracketRight') Game.shiftGear(1);
+    else if (e.code === 'BracketLeft') Game.shiftGear(-1);
     // Verrouillage de cible 1 à 9. On lit e.code (Digit1.../Numpad1...) plutôt que
     // e.key : sur un clavier AZERTY, la rangée du haut sans Maj donne & é " ' ( etc.,
     // donc e.key n'était jamais "1".."9" et le ciblage ne marchait pas.

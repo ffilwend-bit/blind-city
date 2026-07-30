@@ -80,6 +80,7 @@ function setupExtraInput() {
     else if (shift && key === 'h') { e.preventDefault(); toggleHandsUp(); }
     else if (shift && key === 'b') { e.preventDefault(); Game.toggleBeacons(); }
     else if (shift && key === 'g') { e.preventDefault(); Game.stopGuidance(); }
+    else if (shift && key === 'n') { e.preventDefault(); Game.toggleGpsBeeps(); }
     else if (shift && key === 'c') { e.preventDefault(); Game.cityTour(); }
     else if (shift && key === 'u') {
       e.preventDefault();
@@ -102,7 +103,7 @@ function setupExtraInput() {
   });
   el('closePhone').addEventListener('click', () => Phone.closePhone());
   el('phoneAirplaneBtn').addEventListener('click', () => Phone.toggleAirplane());
-  el('phoneVoiceBtn').addEventListener('click', () => Phone.toggleVoiceChat());
+  el('phoneVoiceBtn').addEventListener('click', () => Phone.toggleMic());
   // Computer
   el('closeComputer').addEventListener('click', () => Computer.close());
   document.querySelectorAll('.computer-sidebar button').forEach(b => b.addEventListener('click', () => Computer.renderMenu(b.dataset.cmd)));

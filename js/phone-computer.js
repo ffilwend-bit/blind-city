@@ -1,5 +1,10 @@
 const Phone = {
-  open: false, airplane: false, signal: 4, voiceChat: false, isCaller: false, peerVoiceOn: false,
+  open: false, airplane: false, signal: 4, isCaller: false,
+  // Micro coupé par le joueur pendant un appel : la voix se connecte
+  // désormais AUTOMATIQUEMENT dès que l'appel est actif (comme un vrai
+  // téléphone) — plus besoin d'activer quoi que ce soit pour s'entendre.
+  // Ce bouton ne sert plus qu'à se couper le micro si on le souhaite.
+  micMuted: false,
   deviceMode: 'phone', // 'phone' ou 'tablet' — détermine quelles icônes s'affichent
   contacts: [
     { id: 'police', name: 'Police', number: '17', role: 'police' },
@@ -482,7 +487,7 @@ const Phone = {
     if (contact.isPlayer) {
       if (!Net.connected) return announce('Vous n\'êtes pas connecté à un serveur multijoueur.', 'assertive');
       this.currentCall = contact; this.callState = 'ringing_out'; this.activeCallId = null;
-      this.isCaller = true; this.peerVoiceOn = false;
+      this.isCaller = true;
       this.renderApp('call');
       el('callName').textContent = contact.name; el('callStatus').textContent = 'Appel en cours, ça sonne...';
       AudioLib.playLoop('sfx_attente_appel');
@@ -599,13 +604,12 @@ const Phone = {
     Net.callAnswer(this.incomingCall.callId);
     this.currentCall = { name: this.incomingCall.fromName, isPlayer: true, id: this.incomingCall.fromId };
     this.activeCallId = this.incomingCall.callId; this.callState = 'active';
-    this.isCaller = false; this.peerVoiceOn = false;
+    this.isCaller = false;
     this.incomingCall = null;
     this.renderApp('call');
     el('callName').textContent = this.currentCall.name; el('callStatus').textContent = 'En communication.';
     const area = el('callMsgArea'); if (area) { area.style.display = 'block'; focusTextInput(el('callMsgInput')); }
     announce(`Appel avec ${this.currentCall.name} en cours.`, 'assertive');
-    Net.send({ type: 'voice_toggle', callId: this.activeCallId, on: this.voiceChat });
     this.maybeStartVoice();
   },
   declineCall() {
@@ -623,7 +627,6 @@ const Phone = {
     if (el('callStatus')) el('callStatus').textContent = 'En communication.';
     const area = el('callMsgArea'); if (area) { area.style.display = 'block'; focusTextInput(el('callMsgInput')); }
     announce(`${byName || this.currentCall?.name || 'La personne'} décroche. Vous êtes en communication.`, 'assertive');
-    Net.send({ type: 'voice_toggle', callId: this.activeCallId, on: this.voiceChat });
     this.maybeStartVoice();
   },
   onCallDeclined(callId) {
@@ -669,33 +672,34 @@ const Phone = {
     clearTimeout(this.callLocalTimeout);
     VoiceChat.stop();
     this.currentCall = null; this.activeCallId = null; this.callState = null; this.incomingCall = null;
-    this.isCaller = false; this.peerVoiceOn = false; this._lastDialedNumber = null;
+    this.isCaller = false; this._lastDialedNumber = null;
     if (el('callStatus')) el('callStatus').textContent = 'Raccroché';
     const area = el('callMsgArea'); if (area) area.style.display = 'none';
   },
+  // L'autre personne coupe/réactive SON micro (juste informatif : le silence
+  // s'explique, la connexion vocale elle-même reste active).
   onPeerVoiceToggle(callId, on) {
     if (callId !== this.activeCallId) return;
-    this.peerVoiceOn = on;
-    if (on) { announce('L\'autre personne a activé la voix directe.', 'polite'); this.maybeStartVoice(); }
-    else { announce('L\'autre personne a coupé la voix directe.', 'polite'); VoiceChat.stop(); }
+    announce(on ? 'L\'autre personne a réactivé son micro.' : 'L\'autre personne a coupé son micro.', 'polite');
   },
   // Le joueur qui a lancé l'appel fait toujours l'offre WebRTC (l'autre attend
-  // et répond) : ça évite tout conflit si les deux activent la voix en même temps.
+  // et répond, voir VoiceChat.handleOffer) : ça évite tout conflit. Se
+  // déclenche automatiquement dès que l'appel est actif, des deux côtés,
+  // sans aucune action manuelle requise.
   maybeStartVoice() {
-    if (this.voiceChat && this.peerVoiceOn && this.callState === 'active' && this.isCaller) {
-      VoiceChat.start(this.activeCallId, true);
+    if (this.callState === 'active' && this.isCaller) {
+      VoiceChat.start(this.activeCallId, true).then(() => { if (this.micMuted) VoiceChat.setMuted(true); });
     }
   },
-  toggleVoiceChat() {
-    this.voiceChat = !this.voiceChat;
-    el('phoneVoiceBtn').textContent = this.voiceChat ? '🔴 Voix directe ON' : '🎙️ Voix directe';
-    el('phoneVoiceBtn').className = this.voiceChat ? 'phone-btn active' : 'phone-btn';
-    announce('Chat vocal direct ' + (this.voiceChat ? 'activé' : 'désactivé') + '.', 'polite');
-    if (this.activeCallId && this.callState === 'active') {
-      Net.send({ type: 'voice_toggle', callId: this.activeCallId, on: this.voiceChat });
-      if (this.voiceChat) this.maybeStartVoice();
-      else VoiceChat.stop();
-    }
+  // Coupe/réactive SON PROPRE micro pendant un appel (ou par avance) — la
+  // voix reste connectée, seul le son émis est coupé.
+  toggleMic() {
+    this.micMuted = !this.micMuted;
+    el('phoneVoiceBtn').textContent = this.micMuted ? '🔇 Réactiver le micro' : '🎙️ Couper le micro';
+    el('phoneVoiceBtn').className = this.micMuted ? 'phone-btn active' : 'phone-btn';
+    announce(this.micMuted ? 'Micro coupé.' : 'Micro réactivé.', 'polite');
+    VoiceChat.setMuted(this.micMuted);
+    if (this.activeCallId && this.callState === 'active') Net.send({ type: 'voice_toggle', callId: this.activeCallId, on: !this.micMuted });
   },
   // Garage : montre où se trouve RÉELLEMENT chaque véhicule possédé (garage
   // principal, garage personnel, aéroport, ou ailleurs) et propose seulement

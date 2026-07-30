@@ -89,8 +89,6 @@ const VoiceChat = {
       this.localStream = await requestMicrophoneAccess();
     } catch (e) {
       announce('Impossible d\'accéder au micro pour la voix directe. Si l\'autorisation n\'a jamais été accordée, activez temporairement votre lecteur d\'écran pour cliquer sur Autoriser dans la fenêtre du navigateur.', 'assertive');
-      Phone.voiceChat = false;
-      if (el('phoneVoiceBtn')) { el('phoneVoiceBtn').textContent = '🎙️ Voix directe'; el('phoneVoiceBtn').className = 'phone-btn'; }
       this.starting = false;
       return;
     }
@@ -118,7 +116,10 @@ const VoiceChat = {
   },
 
   async handleOffer(callId, data) {
-    if (!Phone.voiceChat || callId !== Phone.activeCallId) return; // l'utilisateur n'a pas activé la voix directe
+    // La voix se connecte désormais automatiquement dès que l'appel est actif
+    // (comme un vrai appel téléphonique) : plus besoin d'activer quoi que ce
+    // soit manuellement des deux côtés avant de pouvoir s'entendre.
+    if (callId !== Phone.activeCallId) return;
     if (!this.pc || this.callId !== callId) await this.start(callId, false);
     if (!this.pc) return; // micro refusé/indisponible : start() a déjà annoncé l'échec, on ne peut pas continuer
     await this.pc.setRemoteDescription(new RTCSessionDescription(data));
@@ -151,6 +152,10 @@ const VoiceChat = {
     if (this.pc) { try { this.pc.close(); } catch (e) { /* ignore */ } this.pc = null; }
     if (this.remoteAudioEl) { this.remoteAudioEl.srcObject = null; this.remoteAudioEl = null; }
     this.callId = null; this.pendingIce = [];
+  },
+  // Coupe/rétablit son propre micro sans raccrocher (voir Phone.toggleMic).
+  setMuted(muted) {
+    if (this.localStream) this.localStream.getAudioTracks().forEach(t => { t.enabled = !muted; });
   },
 };
 window.VoiceChat = VoiceChat;

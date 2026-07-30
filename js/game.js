@@ -373,6 +373,14 @@ const Game = {
       if (Weather.state === 'pluie') { if (!AudioLib.isLoopPlaying('veh_essuie_glaces')) AudioLib.playLoop('veh_essuie_glaces', 0.25); }
       else AudioLib.stopLoop('veh_essuie_glaces');
     }
+    // Le guidage GPS ne se réévaluait qu'au virage (voir turn()) : en ligne
+    // droite, rien ne le rafraîchissait jamais pendant la conduite. Résultat,
+    // dépasser un virage sans tourner laissait la consigne périmée en place ;
+    // le prochain recalcul (au virage suivant, bien plus loin) partait d'une
+    // position si éloignée du chemin prévu qu'il fallait faire demi-tour pour
+    // le rejoindre — ce qui ressemblait à un trajet qui recommence à zéro. On
+    // aligne sur la marche à pied (move(), qui rafraîchit à chaque pas).
+    if (this.guidanceTarget) this.updateGuidance();
     updateHud();
   },
   // Généralisé aux 8 caps (dont les diagonaux, pour un avion/hélico en virage
@@ -1388,8 +1396,34 @@ const Game = {
       this._sameGuidanceCount = 0;
       this._lastGuidanceInstruction = instruction;
     }
+    // Mode bips directionnels : pour ceux que la voix répétée dérange, un
+    // simple bip suffit à indiquer où tourner (activé/désactivé par Maj+N).
+    // La voix classique reste le mode par défaut, inchangé.
+    if (CONFIG.GPS_BEEP_MODE) { this._playGuidanceBeep(this._lastTurnDiff || 0); return; }
     Audio.tone({ freq: 700, type: 'sine', duration: 0.1, gain: 0.08, pan: this.panForPoint(t.x, t.y) });
     speak(instruction, 'interrupt');
+  },
+  // Bip directionnel (mode Maj+N) : un bip aigu centré tout droit, un bip
+  // panoramique à droite/gauche selon le virage, doublé si le virage est
+  // franc, deux bips graves pour un demi-tour — reconnaissable sans écouter
+  // aucune phrase.
+  _playGuidanceBeep(diff) {
+    diff = ((diff % 8) + 8) % 8;
+    const beep = (freq, pan, delay) => setTimeout(() => { if (window.Audio && Audio.tone) Audio.tone({ freq, type: 'sine', duration: 0.12, gain: 0.12, pan }); }, delay || 0);
+    if (diff === 0 || diff === 1 || diff === 7) beep(880, 0);
+    else if (diff === 4) { beep(300, 0); beep(300, 0, 160); }
+    else if (diff === 2) beep(600, 0.8);
+    else if (diff === 3) { beep(600, 0.8); beep(600, 0.8, 160); }
+    else if (diff === 6) beep(600, -0.8);
+    else if (diff === 5) { beep(600, -0.8); beep(600, -0.8, 160); }
+  },
+  // Bascule le mode de guidage GPS entre voix parlée (par défaut) et bips
+  // directionnels seuls, pour ceux que les annonces vocales répétées
+  // dérangent en conduite. Persisté indépendamment de la sauvegarde de partie.
+  toggleGpsBeeps() {
+    CONFIG.GPS_BEEP_MODE = !CONFIG.GPS_BEEP_MODE;
+    UserSettings.save();
+    announce(CONFIG.GPS_BEEP_MODE ? 'Guidage GPS par bips sonores activé : un bip aigu tout droit, un bip à droite ou à gauche selon le virage, deux bips graves pour un demi-tour.' : 'Guidage GPS vocal réactivé.', 'assertive');
   },
   // Direction cardinale d'une case à sa voisine (0=nord,2=est,4=sud,6=ouest ;
   // -1 si pas cardinalement adjacentes).
@@ -1400,6 +1434,7 @@ const Game = {
   // 4 demi-tour, 5 franchement à gauche, 6 à gauche, 7 légèrement à gauche.
   _turnInstruction(diff, meters) {
     diff = ((diff % 8) + 8) % 8;
+    this._lastTurnDiff = diff; // mémorisé pour le mode bips (voir updateGuidance)
     // Un écart de 45° ou moins (diff 0, 1 ou 7) est traité comme « tout droit » :
     // avec la rotation fine à 45°, un simple dépassement d'un cran faisait sinon
     // dire « légèrement à gauche » puis « légèrement à droite » en boucle (le
@@ -5142,7 +5177,7 @@ const Game = {
     });
   },
   help() {
-    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+G arrêter le guidage, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
+    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Maj+G arrêter le guidage, Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
   },
 
   // Save / load
@@ -5172,6 +5207,10 @@ const Game = {
       // Mobilier acheté et placé dans les maisons (personnalisation) : la ville
       // est régénérée à chaque session, il faut donc le sauvegarder à part.
       houseFurniture: Object.fromEntries((City.houses || []).filter(h => h.furniture && h.furniture.length).map(h => [h.id, h.furniture])),
+      // Rangement de base de chaque maison (le "coffre-fort" accessible via
+      // Rangement de la maison) : même raison, sans quoi tout ce qu'on y range
+      // disparaît à la reconnexion puisque la ville régénérée repart à vide.
+      houseStorage: Object.fromEntries((City.houses || []).filter(h => h.storage && h.storage.length).map(h => [h.id, h.storage])),
       unconscious: this.unconscious, unconsciousSince: this.unconsciousSince, // pour reprendre le décompte de réveil au bon endroit
     };
     localStorage.setItem('blind_city_v18', JSON.stringify(payload));
@@ -5233,6 +5272,7 @@ const Game = {
       });
       // Réattache le mobilier des maisons à la ville régénérée.
       if (d.houseFurniture) (City.houses || []).forEach(h => { if (d.houseFurniture[h.id]) h.furniture = d.houseFurniture[h.id]; });
+      if (d.houseStorage) (City.houses || []).forEach(h => { if (d.houseStorage[h.id]) h.storage = d.houseStorage[h.id]; });
       if (d.rolesCurrent) Roles.current = d.rolesCurrent;
       if (d.rolesRecruiters) Roles.recruiters = d.rolesRecruiters;
       // Resynchronise les missions déjà accomplies lors d'une session
