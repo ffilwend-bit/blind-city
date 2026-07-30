@@ -2300,9 +2300,9 @@ const Game = {
     // faire le plein était en fait impossible — refuelVehicle() exige d'être
     // dans le véhicule, mais on en était déjà sorti avant de pouvoir l'appeler.
     if (this.inVehicle && this.vehicle) {
-      const servicePoi = City.pois.find(p => (p.type === 'station_essence' || p.type === 'garage') && UTIL.dist(p, this.vehicle) < 4);
+      const servicePoi = City.pois.find(p => (p.type === 'station_essence' || p.type === 'garage' || p.type === 'atelier') && UTIL.dist(p, this.vehicle) < 4);
       if (servicePoi) {
-        const label = servicePoi.type === 'station_essence' ? '⛽ Faire le plein / recharger' : '🅿️ Se garer ici';
+        const label = servicePoi.type === 'station_essence' ? '⛽ Faire le plein / recharger' : servicePoi.type === 'atelier' ? '🔧 Faire réparer' : '🅿️ Se garer ici';
         if (typeof ensureMenuOpen === 'function') ensureMenuOpen(); else el('menuOverlay').style.display = 'flex';
         el('menuTitle').textContent = servicePoi.name;
         const items = [
@@ -2332,7 +2332,7 @@ const Game = {
     // Bâtiments : E N'ENTRE PLUS (l'entrée est réservée à Ctrl+Alt+E). Les lieux
     // « sans porte » (station-service, aéroport…) restent des services qu'on
     // utilise directement ; un lieu où l'on est DÉJÀ entré : E rouvre son contenu.
-    const noDoorEnter = ['station_essence', 'mine', 'aeroport', 'heliport', 'port'];
+    const noDoorEnter = ['station_essence', 'mine', 'aeroport', 'heliport', 'port', 'atelier'];
     City.pois.filter(p => UTIL.dist(p, this) < 4).forEach(p => {
       const inside = this.indoors && this.indoors.ref === p;
       if (noDoorEnter.includes(p.type) || inside) {
@@ -2594,6 +2594,7 @@ const Game = {
     else if (poi.type === 'hopital') { this.heal(100); announce('Vous êtes soigné à l\'hôpital.', 'assertive'); }
     else if (poi.type === 'banque') { if (this.activeMission && this.activeMission.type === 'heist' && !this.heistState) this.beginBankHeist(); else this.bank(); }
     else if (poi.type === 'station_essence') { this.refuelVehicle(poi); }
+    else if (poi.type === 'atelier') { this.enterWorkshop(poi); }
     else if (poi.type === 'prison') { this.openPrison(poi); }
     else if (poi.type === 'aeroport' || poi.type === 'heliport') { this.aircraftMenu(poi); }
     else if (poi.type === 'mine') { const mine = City.miningSites.find(m => m.x === poi.x && m.y === poi.y); if (mine) { if (!this.miningMachine) announce(`Site minier. Ressource : ${mine.resource}. Achetez une machine d'extraction (750 000 FCFA, touche Ctrl+M) pour un bien meilleur rendement.`, 'polite'); this.mine(mine); } }
@@ -2853,6 +2854,21 @@ const Game = {
     const cost = Math.floor((100 - this.vehicle.hp) * 500);
     if (this.money >= cost) { this.money -= cost; this.vehicle.hp = 100; this.vehicle.fuel = 1; announce(`Réparé pour ${UTIL.formatMoney(cost)}.`, 'assertive'); Audio.cash(); }
     else announce(`Réparation : ${UTIL.formatMoney(cost)}. Fonds insuffisants.`, 'assertive');
+  },
+  // Atelier de réparation : lieu de travail des garagistes, et service de
+  // réparation fiable pour tout le monde même sans mécanicien réel connecté
+  // (contrairement au dépannage à domicile, qui dépend d'un vrai joueur).
+  enterWorkshop(poi) {
+    if (Roles.current === 'mecanicien') return this.openMechanicMenu();
+    if (!this.inVehicle || !this.vehicle) return announce(`${poi.name}. Montez dans un véhicule pour le faire réparer ici.`, 'assertive');
+    const v = this.vehicle;
+    if (v.hp >= 100) return announce(`${poi.name}. ${v.name} est déjà en parfait état.`, 'polite');
+    const cost = Math.floor((100 - v.hp) * 300);
+    if (this.money < cost) return announce(`${poi.name} : réparation complète pour ${UTIL.formatMoney(cost)}. Fonds insuffisants.`, 'assertive');
+    this.money -= cost; v.hp = 100;
+    Audio.cash();
+    announce(`${poi.name} : ${v.name} réparé, état 100%, pour ${UTIL.formatMoney(cost)}.`, 'assertive');
+    updateHud();
   },
   bank() {
     announce(`Solde bancaire : ${UTIL.formatMoney(this.money)}. Les banques gèrent vos fonds.`, 'polite');

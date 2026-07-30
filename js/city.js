@@ -76,7 +76,7 @@ const City = {
   miningSites: [],
   morgue: [], // défunts en attente d'enterrement : { name, cause, time }
   graves: [], // défunts enterrés au cimetière : { name, cause, time }
-  solidTypes: new Set(['maison','immeuble','mur','usine','entrepot','garage','police','hopital','banque','prison','mine','tour','barriere','magasin','restaurant','qg_extreme','auto_ecole','ecole_pilotage','tribunal','monument','gouvernorat','cimetiere','morgue']),
+  solidTypes: new Set(['maison','immeuble','mur','usine','entrepot','garage','atelier','police','hopital','banque','prison','mine','tour','barriere','magasin','restaurant','qg_extreme','auto_ecole','ecole_pilotage','tribunal','monument','gouvernorat','cimetiere','morgue']),
 
   generate() {
     this.grid.clear(); this.pois = []; this.npcs = []; this.vehicles = []; this.roadAxes = []; this.districts = []; this.houses = []; this.missions = []; this.gangs = []; this.miningSites = []; this.groundItems = [];
@@ -335,6 +335,11 @@ const City = {
     add('Parking principal 2', 'garage', 'Koulouba', 1, { principal: true });
     add('Parking de Koulouba', 'garage', 'Koulouba', 1);
     add('Parking principal 3', 'garage', 'Gounghin', 1, { principal: true });
+    // Atelier de réparation : lieu de travail des garagistes, et service de
+    // réparation fiable pour tous. Un seul pour l'instant — facile d'en
+    // ajouter d'autres plus tard en dupliquant cette ligne avec un autre nom
+    // et un autre quartier.
+    add('Atelier de réparation 1', 'atelier', 'Zone industrielle de Kossodo', 1);
     add('Entrepôt', 'entrepot', 'Zone industrielle de Kossodo', 4);
     add('Usine', 'usine', 'Zone industrielle de Kossodo', 3);
     add('Bar', 'bar', 'Gounghin', 2);

@@ -318,6 +318,7 @@ function openNearestMenu() {
     { type: 'station_essence', label: '⛽ Station-service (essence + recharge électrique)' },
     { type: 'vetements', label: '👕 Boutique de vêtements' },
     { type: 'restaurant', label: '🍽️ Restaurant' },
+    { type: 'atelier', label: '🔧 Atelier de réparation' },
   ];
   const items = types.map(t => {
     const list = City.pois.filter(p => p.type === t.type).map(p => ({ ...p, dist: UTIL.dist(p, Game) })).sort((a, b) => a.dist - b.dist);
@@ -466,7 +467,7 @@ const DISTRICT_TYPES = {
   aeroport: 'Aéroport', mine: 'Zone minière',
 };
 const SERVICE_TYPES = {
-  magasin: 'Boutique / magasin', restaurant: 'Restaurant', garage: 'Parking public',
+  magasin: 'Boutique / magasin', restaurant: 'Restaurant', garage: 'Parking public', atelier: 'Atelier de réparation',
   banque: 'Banque', hopital: 'Hôpital', police: 'Commissariat de police',
   prison: 'Prison', immeuble: 'Immeuble (logements)',
   tribunal: 'Cour pénale (tribunal)', monument: 'Monument de la Musique',
