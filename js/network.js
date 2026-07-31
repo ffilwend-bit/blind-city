@@ -247,6 +247,22 @@ const Net = {
       if (this._pendingAccountsCallback) this._pendingAccountsCallback(msg.accounts || []);
     } else if (msg.type === 'staff_job_requests') {
       if (this._jobRequestsCallback) this._jobRequestsCallback(msg.requests || []);
+    } else if (msg.type === 'staff_inspect_query') {
+      // Un membre du staff demande à voir notre inventaire/véhicules/argent :
+      // le serveur ne connaît pas ces données (gérées côté client), donc c'est
+      // nous qui répondons directement avec notre propre état.
+      this.send({
+        type: 'staff_inspect_response', requesterId: msg.requesterId,
+        data: {
+          x: Game.x, y: Game.y,
+          inventory: (Game.inventory || []).map(i => `${i.q || 1} ${i.name}`),
+          money: Game.money, bank: Game.bank,
+          ownedVehicles: (Game.ownedVehicles || []).map(id => { const v = City.vehicles.find(vv => vv.id === id); return v ? v.name : id; }),
+          role: Game.role || 'aucun',
+        },
+      });
+    } else if (msg.type === 'staff_inspect_result') {
+      if (this._inspectCallback) this._inspectCallback(msg);
     } else if (msg.type === 'staff_job_request_alert') {
       // Sans ça, une candidature de métier n'apparaissait que dans le journal
       // staff silencieux (jamais annoncé) : un admin ne la découvrait que s'il

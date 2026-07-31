@@ -44,6 +44,10 @@ const GuideDog = {
       _lastStep: 0, _lastPant: 0, _lastBark: 0, _lastNeed: 0,
     };
     Game.guideDog = this.data;
+    // Marque qu'un chien a déjà été attribué une fois : sert à ne plus jamais
+    // en offrir un gratuitement après celui-ci, même si ce chien meurt plus
+    // tard (voir menus-and-ui.js, le chien offert au nouveau joueur).
+    Game.guideDogEverOwned = true;
   },
 
   /* ---------- Achats : animalerie & vétérinaire ---------- */

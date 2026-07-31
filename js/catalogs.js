@@ -178,7 +178,8 @@ function generateShopCatalog() {
   }
   const plats = ['riz au poisson','yassa poulet','maafe','tchep','alloco','attiéké','poulet DG','saka saka','choukouya','mafe','couscous','hamburger','pizza','tacos','sandwich'];
   for (let p of plats) {
-    catalog.push({ id: id('plat', catalog.length), name: `Plat : ${p}`, category: 'plat', price: UTIL.randInt(1500, 6500), size: 1, legal: true, consumable: true, hunger: 50, desc: `Plat chaud : ${p}.` });
+    // Prix légèrement revus à la baisse (plats chauds de restaurant, un peu trop chers).
+    catalog.push({ id: id('plat', catalog.length), name: `Plat : ${p}`, category: 'plat', price: UTIL.randInt(1300, 5500), size: 1, legal: true, consumable: true, hunger: 50, desc: `Plat chaud : ${p}.` });
   }
   const boissons = ['eau minérale 50cl','eau minérale 1.5L','eau gazeuse','jus d\'orange','jus de mangue','jus de pomme','jus de bissap','jus de gingembre','jus de bouye','soda cola','soda orange','soda citron','bière','vin rouge','vin blanc','whisky','café','thé','lait','lait caillé','yaourt','boisson énergisante'];
   for (let b of boissons) {

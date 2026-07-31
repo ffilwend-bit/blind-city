@@ -914,6 +914,40 @@ const AudioLib = {
     }
   },
   isLoopPlaying(key) { const n = this.loopElements[key]; return !!(n && n.playing && !n.paused); },
+  // Boucles PANNÉES à INSTANCES MULTIPLES : contrairement à playLoop/loopElements
+  // (une seule instance globale par clé de son, pour le moteur de SON PROPRE
+  // véhicule), ceci permet de faire jouer le MÊME fichier plusieurs fois en même
+  // temps, chacun avec son propre panoramique/volume — nécessaire pour entendre
+  // à la fois plusieurs véhicules d'autres joueurs autour de soi, chacun localisé
+  // à sa position. instanceId = identifiant unique (ex. 'ambveh_' + idJoueur).
+  instanceLoops: {},
+  playLoopInstance(instanceId, key, volume = 0.3, pan = 0) {
+    const existing = this.instanceLoops[instanceId];
+    if (existing && existing.key === key) {
+      existing.gain.gain.value = volume;
+      if (existing.panner) existing.panner.pan.value = pan;
+      return;
+    }
+    if (existing) this.stopLoopInstance(instanceId);
+    if (!Audio.ensure) return;
+    const ctx = Audio.ensure();
+    const buf = this._loopBuffers[key];
+    if (!buf) { this._ensureLoopBuffer(key); return; } // pas encore décodé : réessayé au prochain tick
+    const source = ctx.createBufferSource();
+    source.buffer = buf; source.loop = true;
+    const gain = ctx.createGain(); gain.gain.value = volume;
+    const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    if (panner) { panner.pan.value = pan; source.connect(gain).connect(panner).connect(Audio.master || ctx.destination); }
+    else source.connect(gain).connect(Audio.master || ctx.destination);
+    try { source.start(); } catch (e) {}
+    this.instanceLoops[instanceId] = { key, source, gain, panner };
+  },
+  stopLoopInstance(instanceId) {
+    const inst = this.instanceLoops[instanceId];
+    if (!inst) return;
+    try { inst.source.stop(); } catch (e) {}
+    delete this.instanceLoops[instanceId];
+  },
   // clé -> instance en cours pour les sons "exclusifs" (voir opts.exclusive) :
   // les sons de véhicule (moteur, accélération...) se redemandent très
   // souvent en peu de temps ; sans ça, chaque nouvel appel s'empilait sur les
@@ -1038,8 +1072,10 @@ const Weather = {
     if (Net.connected) return;
     // Probabilités ASYMÉTRIQUES : il se met rarement à pleuvoir, et la pluie
     // s'arrête vite. Avant, un simple basculement à 12 % faisait pleuvoir
-    // environ la moitié du temps — beaucoup trop.
-    if (this.state === 'clair') { if (UTIL.chance(0.08)) this.applyState('pluie', true); }
+    // environ la moitié du temps — beaucoup trop. Repassé de 8 % à 1,5 % par
+    // tick (~90 s) : la pluie reste possible mais devient un évènement rare
+    // au lieu de revenir toutes les 15-20 minutes en moyenne.
+    if (this.state === 'clair') { if (UTIL.chance(0.015)) this.applyState('pluie', true); }
     else { if (UTIL.chance(0.6)) this.applyState('clair', true); }
   },
 };

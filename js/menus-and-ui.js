@@ -124,6 +124,11 @@ function openTalkieMenu() {
   });
   el('menuOverlay').style.display = 'flex';
 }
+// Catégories "à porter" : un clic direct dans l'inventaire les enfile
+// aussitôt, au lieu de passer par le sous-menu d'actions (Utiliser/Donner/
+// Vendre/Déposer) — ce détour à deux étapes donnait l'impression que
+// cliquer sur un habit acheté ne le mettait pas.
+const WEARABLE_CATEGORIES = ['vetement', 'pantalon', 'chaussure', 'accessoire', 'masque', 'vetement_police'];
 function openInventoryMenu() {
   el('menuTitle').textContent = '🎒 Inventaire';
   const items = Game.inventory.map(it => ({
@@ -131,7 +136,12 @@ function openInventoryMenu() {
     desc: it.category ? `Catégorie : ${it.category}.` : 'Objet transportable.',
   }));
   if (!items.length) items.push({ id: 'empty', title: 'Inventaire vide', desc: 'Vous ne portez rien pour le moment.' });
-  renderMenu(items, (it) => { if (it.id !== 'empty') openItemActionMenu(it.id); });
+  renderMenu(items, (it) => {
+    if (it.id === 'empty') return;
+    const invIt = Game.inventory.find(i => i.id === it.id);
+    if (invIt && WEARABLE_CATEGORIES.includes(invIt.category)) { Game.useItem(it.id); openInventoryMenu(); }
+    else openItemActionMenu(it.id);
+  });
   el('menuOverlay').style.display = 'flex';
 }
 function openItemActionMenu(itemId) {
@@ -350,6 +360,7 @@ function openAdminMenu() {
       items.push({ id: 'reject', title: '❌ Refuser la candidature', desc: 'Refuse le métier demandé.' });
     }
     items.push({ id: 'jobrequests', title: '📨 Demandes de métier des joueurs', desc: 'Voir les candidatures de métier envoyées par les joueurs connectés, et les accorder ou refuser.' });
+    items.push({ id: 'players', title: '🧭 Superviser les joueurs connectés', desc: `Position en temps réel et inventaire de chacun (${Net.connected ? Net.remotePlayers.size + 1 : 0} connecté(s)).` });
     items.push({ id: 'recruiter', title: '🧑‍💼 Nommer un recruteur', desc: 'Autoriser une personne à valider les candidatures d\'un métier précis (chaque patron peut recruter ses employés).' });
     items.push({ id: 'pendingaccounts', title: '🎭 Comptes en attente (entretien RP)', desc: 'Voir les nouveaux comptes dont l\'entretien RP n\'a pas été assez concluant, et décider de les accepter ou non.' });
   }
@@ -369,6 +380,45 @@ function openAdminMenu() {
     else if (it.id === 'recruiter') { openRecruiterAppointMenu(); }
     else if (it.id === 'jobrequests') { openStaffJobRequestsMenu(); }
     else if (it.id === 'pendingaccounts') { openStaffPendingAccountsMenu(); }
+    else if (it.id === 'players') { openStaffPlayersMenu(); }
+  });
+}
+// Supervision staff : liste tous les joueurs connectés avec leur position en
+// temps réel (déjà connue localement via la diffusion d'état, voir
+// network.js), et permet de demander à voir l'inventaire/véhicules/argent
+// d'un joueur précis (relayé par le serveur jusqu'à son propre client, qui
+// seul connaît ces données — voir Net.handleMessage 'staff_inspect_query').
+function openStaffPlayersMenu() {
+  if (!Net.connected) { closeMenu(); return announce('Nécessite une connexion au serveur.', 'assertive'); }
+  el('menuTitle').textContent = 'Joueurs connectés';
+  const list = Array.from(Net.remotePlayers.values());
+  const items = list.map(p => {
+    const d = City.getDistrictAt(p.x, p.y);
+    const dist = Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE);
+    return { id: p.id, title: `${p.firstName} ${p.lastName}`, desc: `Position : ${Math.round(p.x)}, ${Math.round(p.y)} (${d ? d.name : '?'}) — à ${dist} m de vous.` };
+  });
+  if (!items.length) items.push({ id: 'empty', title: 'Aucun autre joueur connecté', desc: 'Vous êtes seul sur le serveur pour le moment.' });
+  renderMenu(items, (sel) => {
+    if (sel.id === 'empty') return;
+    el('menuTitle').textContent = `${sel.title} — inspection`;
+    renderMenu([{ id: 'wait', title: '⏳ Demande envoyée...', desc: 'En attente de la réponse du joueur (connecté et en jeu).' }], () => {});
+    el('menuOverlay').style.display = 'flex';
+    Net._inspectCallback = (res) => {
+      if (res.targetId !== sel.id) return;
+      const d = res.data || {};
+      el('menuTitle').textContent = `${res.name} — inventaire et biens`;
+      const detailItems = [
+        { id: 'pos', title: `📍 Position : ${Math.round(d.x)}, ${Math.round(d.y)}`, desc: '' },
+        { id: 'money', title: `💰 Argent : ${UTIL.formatMoney(d.money || 0)} en poche, ${UTIL.formatMoney(d.bank || 0)} en banque`, desc: '' },
+        { id: 'role', title: `🛡️ Métier : ${d.role || 'aucun'}`, desc: '' },
+        { id: 'vehicles', title: `🚗 Véhicules possédés : ${(d.ownedVehicles || []).length ? d.ownedVehicles.join(', ') : 'aucun'}`, desc: '' },
+        { id: 'inv', title: `🎒 Inventaire : ${(d.inventory || []).length ? d.inventory.join(', ') : 'vide'}`, desc: '' },
+        { id: 'back', title: '↩️ Retour à la liste', desc: '' },
+      ];
+      renderMenu(detailItems, (it) => { if (it.id === 'back') openStaffPlayersMenu(); });
+      announce(`${res.name} : à ${Math.round(d.x)}, ${Math.round(d.y)}. ${(d.inventory || []).length} objet(s) en poche.`, 'polite');
+    };
+    Net.send({ type: 'staff_inspect_request', targetId: sel.id });
   });
 }
 // Demandes de métier des joueurs connectés : l'admin les liste et les accorde
@@ -987,7 +1037,12 @@ function setupInput() {
     else if (key === 'r') Game.reload();
     else if (key === 'g' && Game.lockedTarget) Game.changeAim(1); // visée tête/torse/jambes
     else if (key === 'z' && !e.shiftKey) Game.announceTarget(); // rafraîchir/réentendre la cible verrouillée
-    else if (key === 'n') Game.announceInventory();
+    // 'n' ouvrait exactement la même chose que 'b' (lecture vocale rapide de
+    // l'inventaire, voir police-and-startup.js) — les deux touches faisaient
+    // donc doublon. 'n' ouvre maintenant directement le menu d'inventaire
+    // interactif (utiliser/porter, donner, vendre, déposer), 'b' restant le
+    // rappel vocal rapide sans ouvrir de menu.
+    else if (key === 'n') openInventoryMenu();
     else if (key === 'i') Game.announceLocation();
     else if (key === 'o') Game.openGarage();
     else if (key === 'f') Game.soundRadar();
@@ -1449,9 +1504,11 @@ function startGame(seed) {
       if (!Game.ownedVehicles.includes(id)) Game.ownedVehicles.push(id);
       setTimeout(() => announce('Un vélo vous est offert, déverrouillé, juste à côté de vous : aucun permis n\'est requis pour vous déplacer avec, y compris en conduite automatique.', 'polite'), 6000);
     }
-    // Chien guide offert à TOUS les joueurs (existants et nouveaux) : s'ils n'en
-    // ont pas déjà un, on leur en attribue un gratuitement.
-    if (typeof GuideDog !== 'undefined' && !GuideDog.has()) {
+    // Chien guide offert une seule fois dans la vie du personnage : s'il n'en
+    // a jamais eu un (nouveau joueur), on lui en attribue un gratuitement. Si
+    // son chien est mort, on ne lui en redonne PAS un autre automatiquement à
+    // chaque reconnexion — il doit en acheter un à l'animalerie.
+    if (typeof GuideDog !== 'undefined' && !GuideDog.has() && !Game.guideDogEverOwned) {
       GuideDog.acquire();
       setTimeout(() => announce(`Un chien guide, ${Game.guideDog ? Game.guideDog.name : 'votre compagnon'}, vous est offert. Prenez la laisse avec Maj+Alt+0 et choisissez une destination : il vous mènera. Menu du chien : Maj+Alt+1.`, 'polite'), 9000);
     }
@@ -1491,10 +1548,10 @@ function startGame(seed) {
     setInterval(() => {
       if (Game.health < 100 && Game.hunger < 50 && Game.thirst < 50) Game.heal(0.5);
     }, 3000);
-    setInterval(() => Game.save(), 60000);
+    setInterval(() => Game.save(true), 60000);
     // Sauvegarde silencieuse à la fermeture de l'onglet, sans attendre la
     // prochaine sauvegarde automatique (jusqu'à 60 secondes de perdues sinon).
-    window.addEventListener('beforeunload', () => { try { Game.save(); } catch (e) {} });
+    window.addEventListener('beforeunload', () => { try { Game.save(true); } catch (e) {} });
     setInterval(() => Game.talkieTick(), 5000);
     setInterval(() => Net.sendState(), 300);
     setInterval(() => Weather.tick(), 90000);
@@ -1508,6 +1565,7 @@ function startGame(seed) {
     setInterval(() => Game.vendorTick(), 2000);
     setInterval(() => Game.refreshTargetValidity(), 1500);
     setInterval(() => Game.tickPassengerAudio(), 200);
+    setInterval(() => Game.tickAmbientVehicles(), 400);
     setInterval(() => Game.tickUnconscious(), 5000);
     // Vérifié seulement 1x/seconde avant : à pleine vitesse un véhicule
     // traverse largement plus que le rayon d'arrivée (4 cases) entre deux

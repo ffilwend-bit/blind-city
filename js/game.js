@@ -65,9 +65,14 @@ const Game = {
       if (!cls?.flies) AudioLib.playOnce('clignotant_voiture', { volume: 0.35 });
       // Crissement de pneus si l'on tourne à vive allure : avant, un virage
       // à pleine vitesse ne sonnait pas différemment d'un virage à l'arrêt.
+      // Utilise maintenant les vrais fichiers de freinage/décélération de
+      // chaque véhicule (comme au freinage à l'espace) au lieu d'un son
+      // synthétisé — mêmes fichiers fournis, cohérents avec le reste.
       if (!cls?.flies && !cls?.human && Math.abs(this.vehicle.speed || 0) / (cls?.maxSpeed || 1) > 0.5) {
-        Audio.screech(delta > 0 ? 0.5 : -0.5);
-        if (Net.connected) Net.emitSound('synth:screech', { vol: 0.5 });
+        const speedRatio = Math.abs(this.vehicle.speed) / cls.maxSpeed;
+        if (cls.sport) RealEngine.brake(speedRatio);
+        else if (cls.electric) RealElectricEngine.brake(speedRatio);
+        else RealEngine2.brake(speedRatio);
       }
     }
     // À pied, on tourne finement par huitièmes (45°) : flèche gauche/droite fait
@@ -285,6 +290,14 @@ const Game = {
       const now = Date.now();
       if (now - (this._lastFuelWarn || 0) > 4000) { this._lastFuelWarn = now; announce('Panne d\'essence.', 'assertive'); }
     }
+    // Véhicule détruit (0 % de vie) EN COURS DE ROUTE (accidents répétés) :
+    // le moteur cale immédiatement, il faut le faire réparer. Avant, rien
+    // n'empêchait de continuer à rouler avec une épave à 0 % de vie.
+    if (!cls.human && (v.hp || 0) <= 0 && v.speed !== 0) {
+      v.speed = 0; v.engineOn = false;
+      const now = Date.now();
+      if (now - (this._lastHpWarn || 0) > 4000) { this._lastHpWarn = now; announce(`${v.name} est hors d'usage : le moteur cale. Il faut le faire réparer.`, 'assertive'); }
+    }
     // Seulement au freinage : sinon, hors route, accel*offroadFactor (souvent
     // < 0.05, ex. berline 0.07×0.4) était remis à zéro à CHAQUE image avant de
     // pouvoir s'accumuler — le véhicule ne démarrait jamais (bloqué à
@@ -385,6 +398,14 @@ const Game = {
     if (!cls.flies) {
       if (Weather.state === 'pluie') { if (!AudioLib.isLoopPlaying('veh_essuie_glaces')) AudioLib.playLoop('veh_essuie_glaces', 0.25); }
       else AudioLib.stopLoop('veh_essuie_glaces');
+    } else if (Weather.state === 'pluie') {
+      // Avion/hélicoptère : la pluie d'ambiance (amb_pluie) joue déjà partout,
+      // mais à son volume normal (0.18) elle est noyée par le moteur avion/
+      // hélico, bien plus fort. On la renforce tant qu'on est en vol pour
+      // qu'elle reste audible par-dessus, comme l'essuie-glace le fait au sol.
+      if (!AudioLib.isLoopPlaying('amb_pluie')) AudioLib.playLoop('amb_pluie', 0.4);
+      const rainEl = AudioLib.loopElements['amb_pluie'];
+      if (rainEl) rainEl.volume = 0.4;
     }
     // Le guidage GPS ne se réévaluait qu'au virage (voir turn()) : en ligne
     // droite, rien ne le rafraîchissait jamais pendant la conduite. Résultat,
@@ -587,6 +608,34 @@ const Game = {
     // moteurs "échantillon" (RealEngine2/RealElectricEngine) attendent
     // seulement (v, ratio) — signatures différentes, voir leurs définitions.
     if (cls.flies || cls.sport) engine.update(fakeVehicle, cls, ratio); else engine.update(fakeVehicle, ratio);
+  },
+  // Un piéton (ou un conducteur d'un AUTRE véhicule) à proximité d'un joueur
+  // réel qui conduit doit l'entendre, spatialisé selon sa position — avant,
+  // seul le passager EMBARQUÉ avec ce conducteur (tickPassengerAudio) captait
+  // quoi que ce soit ; à pied, un véhicule ou un avion piloté par quelqu'un
+  // d'autre passait dans un silence total. Rayon large pour un avion/hélico
+  // (on l'entend de loin), plus court pour un véhicule au sol.
+  tickAmbientVehicles() {
+    if (!Net.connected || !window.AudioLib || typeof AudioLib.playLoopInstance !== 'function') return;
+    const active = new Set();
+    Net.remotePlayers.forEach((p, pid) => {
+      if (this.ridingWith && this.ridingWith.id === pid) return; // déjà géré par tickPassengerAudio
+      if (!p.inVehicle || !p.vehicleType) return;
+      const cls = VEHICLE_CATALOG[p.vehicleType];
+      if (!cls || cls.human) return;
+      const radius = cls.flies ? 45 : 16;
+      const dist = UTIL.dist(p, this);
+      if (dist > radius) return;
+      const instanceId = 'ambveh_' + pid;
+      active.add(instanceId);
+      const key = cls.flies ? (p.vehicleType === 'avion' ? 'avion_stable' : 'helico_stable') : cls.electric ? 'veh_elec_vitesse_moyenne' : cls.sport ? 'veh1_cruise' : 'veh2_vitesse_moyenne';
+      const ratio = UTIL.clamp(p.vehicleSpeedRatio || 0, 0, 1);
+      const vol = UTIL.clamp((1 - dist / radius) * (0.15 + ratio * 0.25), 0, 0.4);
+      const pan = this.panForPoint(p.x, p.y);
+      AudioLib.playLoopInstance(instanceId, key, vol, pan);
+    });
+    (this._ambientVehicleIds || []).forEach(instanceId => { if (!active.has(instanceId)) AudioLib.stopLoopInstance(instanceId); });
+    this._ambientVehicleIds = active;
   },
   // Conduite automatique vers un point précis {name,x,y}.
   setAutoDriveTo(dest) {
@@ -871,6 +920,10 @@ const Game = {
     // Le permis est exigé pour conduire — mais pas pour un véhicule-école, ni
     // pour un vélo ou tout véhicule à propulsion humaine (cls.noLicense).
     if (!v.examVehicle && !cls?.noLicense && !this.checkLicense(cls?.flies ? 'flying' : 'driving')) return;
+    // Un véhicule totalement détruit (0 % de vie, suite à des accidents
+    // répétés) ne doit plus pouvoir démarrer — avant, rien n'empêchait de
+    // rouler avec une épave. Il faut d'abord le faire réparer.
+    if ((v.hp || 0) <= 0) return announce(`${v.name} est hors d'usage : le moteur ne démarre plus. Il faut le faire réparer avant de pouvoir le conduire.`, 'assertive');
     if (cls && !cls.flies && !cls.human && cls.doors > 0) { // pas de portière/ceinture pour un vélo, ni pour une moto/scooter/quad (aucune portière)
       AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 });
       if (Net.connected) Net.emitSound('veh1_ouverture_porte', { vol: 0.5 }); // porte audible par les joueurs proches
@@ -1205,6 +1258,10 @@ const Game = {
     if (this.inVehicle && this.vehicle) {
       const cls = VEHICLE_CATALOG[this.vehicle.type];
       if (!cls.human) parts.push(`${cls.electric ? 'batterie' : 'essence'} ${Math.round(this.vehicle.fuel * 100)}%`);
+    }
+    if (Net.connected) {
+      const n = Net.remotePlayers.size + 1;
+      parts.push(`${n} joueur${n > 1 ? 's' : ''} connecté${n > 1 ? 's' : ''} dans la ville`);
     }
     announce(parts.join(', ') + '.', 'polite');
   },
@@ -1934,28 +1991,45 @@ const Game = {
   // Scanner and targeting
   scan() {
     Audio.beep(0, 1200);
-    const npcs = City.npcs.filter(n => UTIL.dist(n, this) < CONFIG.SCAN_RADIUS).map(n => ({ ...n, dist: UTIL.dist(n, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(n.x - this.x, n.y - this.y) }));
-    const realPlayers = Array.from(Net.remotePlayers.values()).filter(p => UTIL.dist(p, this) < CONFIG.SCAN_RADIUS).map(p => ({
+    // Survol en avion/hélicoptère à altitude : rayon de recherche bien plus
+    // large (on voit large depuis le ciel), utile pour la police en
+    // patrouille aérienne à la recherche de criminels au sol — avant, le
+    // scan gardait le même rayon qu'à pied, inutile depuis les airs.
+    const cls = this.inVehicle && this.vehicle ? VEHICLE_CATALOG[this.vehicle.type] : null;
+    const airborne = !!(cls && cls.flies && this.altitude > 5);
+    const RADIUS = airborne ? CONFIG.SCAN_RADIUS * 2.5 : CONFIG.SCAN_RADIUS;
+    const npcs = City.npcs.filter(n => UTIL.dist(n, this) < RADIUS).map(n => ({ ...n, dist: UTIL.dist(n, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(n.x - this.x, n.y - this.y) }));
+    const realPlayers = Array.from(Net.remotePlayers.values()).filter(p => UTIL.dist(p, this) < RADIUS).map(p => ({
       id: p.id, name: `${p.firstName} ${p.lastName}`, job: 'joueur réel', gender: p.gender, outfit: p.outfit, isPlayer: true,
       x: p.x, y: p.y, dist: UTIL.dist(p, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(p.x - this.x, p.y - this.y),
     }));
     const people = [...realPlayers, ...npcs].sort((a, b) => a.dist - b.dist).slice(0, 9);
-    const pois = City.pois.filter(p => UTIL.dist(p, this) < CONFIG.SCAN_RADIUS).map(p => ({ ...p, dist: UTIL.dist(p, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(p.x - this.x, p.y - this.y) })).sort((a, b) => a.dist - b.dist).slice(0, 9);
-    const vehicles = City.vehicles.filter(v => !v.owner && UTIL.dist(v, this) < CONFIG.SCAN_RADIUS).map(v => ({ ...v, dist: UTIL.dist(v, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(v.x - this.x, v.y - this.y) })).sort((a, b) => a.dist - b.dist).slice(0, 5);
-    const ground = (City.groundItems || []).filter(it => UTIL.dist(it, this) < CONFIG.SCAN_RADIUS).map(it => ({ ...it, dist: UTIL.dist(it, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(it.x - this.x, it.y - this.y) })).sort((a, b) => a.dist - b.dist).slice(0, 5);
-    this.scannedTargets = people;
-    let msg = `Scan : ${people.length} personnes, ${pois.length} lieux, ${vehicles.length} véhicules, ${ground.length} objets au sol. `;
-    if (people.length) msg += 'Personnes : ' + people.map((n, i) => `${i + 1}, ${n.name}${n.isPlayer ? ' (joueur réel)' : ', ' + n.job}, ${Math.round(n.dist)} m, ${n.bearing}`).join('. ');
+    const pois = City.pois.filter(p => UTIL.dist(p, this) < RADIUS).map(p => ({ ...p, dist: UTIL.dist(p, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(p.x - this.x, p.y - this.y) })).sort((a, b) => a.dist - b.dist).slice(0, 9);
+    // Les véhicules (dont avions/hélicoptères posés ou en vol si assez proches)
+    // sont maintenant aussi CIBLABLES, pas juste annoncés : on peut tirer
+    // dessus (crever un pneu, l'endommager, l'empêcher de rouler/voler — voir
+    // shoot() et enterAsDriver()). Numérotés à la suite des personnes, pour ne
+    // pas changer la numérotation existante (Ctrl+1-9) pour cibler une personne.
+    const vehicles = City.vehicles.filter(v => UTIL.dist(v, this) < RADIUS).map(v => ({ ...v, isVehicle: true, dist: UTIL.dist(v, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(v.x - this.x, v.y - this.y) })).sort((a, b) => a.dist - b.dist).slice(0, 5);
+    const ground = (City.groundItems || []).filter(it => UTIL.dist(it, this) < RADIUS).map(it => ({ ...it, dist: UTIL.dist(it, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(it.x - this.x, it.y - this.y) })).sort((a, b) => a.dist - b.dist).slice(0, 5);
+    this.scannedTargets = [...people, ...vehicles];
+    let msg = airborne ? `Recherche aérienne : ${people.length} personnes repérées au sol, dont ${npcs.filter(n => n.hostile).length} individu(s) suspect(s), ${vehicles.length} véhicules. ` : `Scan : ${people.length} personnes, ${pois.length} lieux, ${vehicles.length} véhicules, ${ground.length} objets au sol. `;
+    if (people.length) msg += 'Personnes : ' + people.map((n, i) => `${i + 1}, ${n.name}${n.isPlayer ? ' (joueur réel)' : n.hostile ? ', suspect' : ', ' + n.job}, ${Math.round(n.dist)} m, ${n.bearing}`).join('. ');
     if (pois.length) msg += 'Lieux : ' + pois.map(p => `${p.name}, ${Math.round(p.dist)} m, ${p.bearing}`).join('. ');
-    if (vehicles.length) msg += 'Véhicules : ' + vehicles.map(v => `${v.name}, ${Math.round(v.dist)} m, ${v.bearing}`).join('. ');
+    if (vehicles.length) msg += 'Véhicules : ' + vehicles.map((v, i) => `${people.length + i + 1}, ${v.name}, ${Math.round(v.dist)} m, ${v.bearing}`).join('. ');
     if (ground.length) msg += 'Au sol : ' + ground.map(it => `${it.name}${it.q > 1 ? ' ×' + it.q : ''}, ${Math.round(it.dist)} m, ${it.bearing}`).join('. ');
     announce(msg, 'assertive');
-    if (people.length) announce('Tapez 1 à 9 pour cibler une personne.', 'polite');
+    if (people.length || vehicles.length) announce('Tapez 1 à 9 pour cibler une personne ou un véhicule.', 'polite');
   },
   target(index) {
     const n = this.scannedTargets[index - 1];
     if (!n) return announce('Cible invalide.', 'assertive');
     this.lockedTarget = n;
+    if (n.isVehicle) {
+      announce(`Cible verrouillée : ${n.name} (véhicule), ${Math.round(n.dist)} mètres, ${n.bearing}.`, 'assertive');
+      updateHud();
+      return;
+    }
     announce(`Cible verrouillée : ${n.name}, ${n.isPlayer ? 'joueur réel' : n.job}, ${Math.round(n.dist)} mètres, ${n.bearing}.`, 'assertive');
     // Braquer une arme en verrouillant : la cible PNJ réagit tout de suite
     // (mains en l'air si acculée, sinon fuite) — le reste est géré par npcTick.
@@ -1978,6 +2052,13 @@ const Game = {
   getLiveTarget() {
     if (!this.lockedTarget) return null;
     let live;
+    if (this.lockedTarget.isVehicle) {
+      const v = City.vehicles.find(vv => vv.id === this.lockedTarget.id);
+      if (!v) return null;
+      live = { id: v.id, name: v.name, isVehicle: true, x: v.x, y: v.y, health: v.hp };
+      this.lockedTarget.x = live.x; this.lockedTarget.y = live.y; this.lockedTarget.hp = v.hp;
+      return live;
+    }
     if (this.lockedTarget.isPlayer) {
       const p = Net.remotePlayers.get(this.lockedTarget.id);
       if (!p) return null; // déconnecté ou hors de portée réseau
@@ -2109,7 +2190,16 @@ const Game = {
     if (target && range <= effRange) {
       if (Math.random() < acc) {
         let dmg = w.dmg * (this.aimPart === 'tete' ? 2 : this.aimPart === 'jambes' ? 0.6 : 1);
-        if (target.isPlayer) {
+        if (target.isVehicle) {
+          const v = City.vehicles.find(vv => vv.id === target.id);
+          if (v) {
+            v.hp = Math.max(0, (v.hp || 100) - Math.round(dmg));
+            Audio.impact(0);
+            if (Net.connected) Net.emitSound('veh_kolision_1', { vol: 0.5 });
+            announce(`Véhicule touché : ${target.name}, vie à ${Math.round(v.hp)} pour cent.`, 'assertive');
+            if (v.hp <= 0) announce(`${target.name} est hors d'usage.`, 'assertive');
+          }
+        } else if (target.isPlayer) {
           // Chaque client est seul autorité sur sa propre santé : on relaie le
           // coup au joueur visé via le serveur, il s'applique les dégâts lui-même.
           if (!Net.connected) return;
@@ -3557,19 +3647,16 @@ const Game = {
     const owned = (this.ownedVehicles || []).map(id => City.vehicles.find(v => v.id === id)).filter(Boolean);
     if (!owned.length) return announce('Vous ne possédez aucun véhicule.', 'assertive');
     const honkVehicle = (v) => {
-      const cls = VEHICLE_CATALOG[v.type];
-      let key = 'klaxon_voiture';
-      if (cls && cls.human) key = 'velo_clochette';
-      else if (cls && (cls.type === '2 roues' || cls.type === 'moto')) key = 'klaxon_moto';
-      else if (cls && cls.type === 'poids lourd') key = 'klaxon_camion';
-      else if (cls && cls.type === 'air') key = 'klaxon_voiture'; // pas de vrai klaxon en vol, mais utile au sol pour le repérer
-      else if (cls && cls.price >= 8000000) key = 'klaxon_luxe';
+      // Signal dédié de repérage (pas un klaxon) — le même que celui utilisé
+      // par findMyCar() : distinct du bruit de klaxon des autres véhicules
+      // (NPC, collisions), pour qu'on le reconnaisse sans ambiguïté comme
+      // « c'est le mien qui répond », qu'on soit à pied ou dans un autre véhicule.
       const pan = this.panForPoint(v.x, v.y);
       const dist = UTIL.dist(v, this);
       const vol = UTIL.clamp(0.9 - dist / 40, 0.15, 0.9);
-      AudioLib.playPositional(key, pan, vol);
+      AudioLib.playPositional('veh_alarme_position', pan, vol);
       const m = Math.round(dist * CONFIG.METERS_PER_TILE);
-      announce(`${v.name} klaxonne à ${m} mètres, vers le ${UTIL.bearing(v.x - this.x, v.y - this.y)}.`, 'polite');
+      announce(`${v.name} émet son signal de repérage à ${m} mètres, vers le ${UTIL.bearing(v.x - this.x, v.y - this.y)}.`, 'polite');
     };
     if (owned.length === 1) return honkVehicle(owned[0]);
     el('menuTitle').textContent = 'Faire sonner quel véhicule ?';
@@ -5384,11 +5471,15 @@ const Game = {
     });
   },
   help() {
-    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Maj+V faire sonner mon véhicule pour le repérer à l\'oreille (utile si deux véhicules identiques sont côte à côte), Alt+H se planquer ou sortir de la planque près d\'une couverture (rend bien plus difficile à repérer et permet de semer une poursuite), Maj+G arrêter le guidage, boîte manuelle des motos et voitures sport : les deux touches à droite du clavier juste avant Entrée (crochet fermant pour monter d\'un rapport, celle juste avant pour redescendre), Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
+    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B lecture rapide de l\'inventaire, N ouvrir le menu d\'inventaire (utiliser, porter, donner, vendre, déposer), L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Maj+V faire sonner mon véhicule pour le repérer à l\'oreille (utile si deux véhicules identiques sont côte à côte), Alt+H se planquer ou sortir de la planque près d\'une couverture (rend bien plus difficile à repérer et permet de semer une poursuite), Maj+G arrêter le guidage, boîte manuelle des motos et voitures sport : les deux touches à droite du clavier juste avant Entrée (crochet fermant pour monter d\'un rapport, celle juste avant pour redescendre), Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
   },
 
   // Save / load
-  save() {
+  // silent=true pour les sauvegardes automatiques en arrière-plan (toutes les
+  // 60 s, et à la fermeture de l'onglet) : avant, l'annonce vocale « Partie
+  // sauvegardée » se répétait sans arrêt même sans action du joueur, ce qui
+  // devenait vite pénible. Une sauvegarde manuelle (menu) reste annoncée.
+  save(silent) {
     const payload = {
       x: this.x, y: this.y, altitude: this.altitude, heading: this.heading, health: this.health, money: this.money,
       bank: this.bank, dirtyMoney: this.dirtyMoney, hunger: this.hunger, thirst: this.thirst, energy: this.energy,
@@ -5411,6 +5502,7 @@ const Game = {
       phones: this.phones, activePhoneIndex: this.activePhoneIndex, lastParkedVehicle: this.lastParkedVehicle, theoryPassed: this.theoryPassed, flightTheoryPassed: this.flightTheoryPassed, myContacts: this.myContacts,
       hasHelmet: this.hasHelmet, hasVest: this.hasVest, pendingBills: this.pendingBills,
       guideDog: this.guideDog, // chien guide (position, état, équipement) — coûteux, doit persister
+      guideDogEverOwned: this.guideDogEverOwned, // empêche d'en redonner un gratuit après la mort du premier
       // Mobilier acheté et placé dans les maisons (personnalisation) : la ville
       // est régénérée à chaque session, il faut donc le sauvegarder à part.
       houseFurniture: Object.fromEntries((City.houses || []).filter(h => h.furniture && h.furniture.length).map(h => [h.id, h.furniture])),
@@ -5424,7 +5516,7 @@ const Game = {
     // Si un compte joueur est connecté, pousse aussi la sauvegarde côté
     // serveur : c'est ce qui permet de la retrouver depuis un autre appareil.
     if (Net.connected && Net.accountUsername) Net.saveProgressToServer(payload);
-    announce('Partie sauvegardée.', 'polite');
+    if (!silent) announce('Partie sauvegardée.', 'polite');
   },
   load() {
     const s = localStorage.getItem('blind_city_v18') || localStorage.getItem('blind_city_v17') || localStorage.getItem('city_blind_v16') || localStorage.getItem('city_blind_v15') || localStorage.getItem('city_blind_v12') || localStorage.getItem('city_blind_v10'); if (!s) return;
@@ -5676,15 +5768,18 @@ const Game = {
     updateHud();
   },
   talkieTick() {
+    // Autonomie augmentée drastiquement : avant, une batterie pleine ne
+    // tenait qu'environ 8 minutes allumée (0.01 toutes les 5 s) — beaucoup
+    // trop court pour un talkie-walkie. Décharge divisée par 10.
     if (this.talkie.owned && this.talkie.on) {
-      this.talkie.battery = Math.max(0, this.talkie.battery - 0.01);
+      this.talkie.battery = Math.max(0, this.talkie.battery - 0.001);
       if (this.talkie.battery <= 0) { this.talkie.on = false; announce('Batterie du talkie-walkie épuisée. Il s\'éteint.', 'assertive'); }
     }
   },
   talkiePTT(message) {
     if (!this.talkie.owned || !this.talkie.on) return announce('Allumez d\'abord votre talkie-walkie.', 'assertive');
     if (this.talkie.battery <= 0.02) return announce('Batterie trop faible pour émettre.', 'assertive');
-    this.talkie.battery = Math.max(0, this.talkie.battery - 0.01);
+    this.talkie.battery = Math.max(0, this.talkie.battery - 0.002);
     AudioLib.playOnce('son_talkie_bip', { volume: 0.6 });
     const txt = message || 'Message reçu, à vous.';
     announce(`Vous émettez sur ${this.talkie.frequency.toFixed(3)} mégahertz : « ${txt} »`, 'polite');

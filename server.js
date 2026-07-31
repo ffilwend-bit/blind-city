@@ -257,7 +257,9 @@ const jobRequests = new Map();
 let weatherState = 'clair'; // 'clair' | 'pluie'
 function weatherTick() {
   const before = weatherState;
-  if (weatherState === 'clair') { if (Math.random() < 0.08) weatherState = 'pluie'; }
+  // Repassé de 8 % à 1,5 % par tick (~90 s) : la pluie revenait beaucoup trop
+  // souvent (toutes les 15-20 minutes en moyenne) — désormais un évènement rare.
+  if (weatherState === 'clair') { if (Math.random() < 0.015) weatherState = 'pluie'; }
   else { if (Math.random() < 0.6) weatherState = 'clair'; }
   if (weatherState !== before) broadcast({ type: 'weather_change', state: weatherState });
 }
@@ -513,6 +515,21 @@ wss.on('connection', (ws, req) => {
       }
       send(ws, { type: 'staff_job_review_result', name: req.name, roleName: req.roleName, approved: !!msg.approve });
       broadcastStaffLog(`${player.firstName} ${player.lastName} a ${msg.approve ? 'accordé' : 'refusé'} le métier « ${req.roleName} » à ${req.name}.`);
+    }
+    // Le staff demande à voir ce qu'un joueur connecté possède (inventaire,
+    // véhicules, argent) : le serveur ne stocke pas ces données lui-même (le
+    // jeu est côté client pour l'inventaire), donc il relaie la demande au
+    // client visé, qui répond directement avec son propre état.
+    else if (msg.type === 'staff_inspect_request') {
+      if (!player.staffRole) { send(ws, { type: 'staff_error', text: 'Réservé au mode staff.' }); return; }
+      const target = players.get(msg.targetId);
+      if (!target) { send(ws, { type: 'staff_error', text: 'Joueur introuvable (déconnecté ?).' }); return; }
+      send(target.ws, { type: 'staff_inspect_query', requesterId: id });
+    }
+    else if (msg.type === 'staff_inspect_response') {
+      const requester = players.get(msg.requesterId);
+      if (!requester) return;
+      send(requester.ws, { type: 'staff_inspect_result', targetId: id, name: `${player.firstName} ${player.lastName}`, data: msg.data });
     }
     else if (msg.type === 'appoint_recruiter') {
       const target = players.get(msg.targetId);

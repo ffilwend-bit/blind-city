@@ -752,10 +752,28 @@ Game.impoundVehicle = function() {
     AudioLib.playNotification();
   }, delay);
 };
+// Avant, ceci cherchait des POI de type 'camera', qui n'a jamais existé dans
+// la génération de ville (voir city.js) : le filtre ne matchait donc jamais
+// que les immeubles génériques, et la fonctionnalité "caméra" ne faisait en
+// pratique que lister des bâtiments sans aucune information utile. Les vrais
+// commerces équipés de caméras (banque, armurerie, magasin, concessionnaire,
+// garage, station-service, bar) sont maintenant surveillés pour de vrai :
+// pour chacun, on rapporte qui s'y trouve en ce moment (PNJ, joueurs réels,
+// individus hostiles repérés), sans avoir à s'y rendre physiquement.
+const CAMERA_POI_TYPES = ['banque', 'magasin', 'armurerie', 'bar', 'concessionnaire', 'garage', 'station_essence'];
 Game.cameraControl = function() {
   if (!Roles.hasPerm('cameras')) return announce('Réservé à la police.', 'assertive');
-  const cams = City.pois.filter(p => p.type === 'camera' || p.type === 'immeuble').slice(0, 5);
-  announce('Caméras de surveillance : ' + cams.map(c => c.name + ' à ' + Math.round(UTIL.dist(c, Game) * CONFIG.METERS_PER_TILE) + ' m').join('. '), 'polite');
+  const cams = City.pois.filter(p => CAMERA_POI_TYPES.includes(p.type)).map(p => ({ ...p, dist: UTIL.dist(p, Game) })).sort((a, b) => a.dist - b.dist).slice(0, 6);
+  if (!cams.length) return announce('Aucune caméra de surveillance disponible dans cette ville.', 'assertive');
+  const parts = cams.map(c => {
+    const npcsHere = City.npcs.filter(n => !n.dead && UTIL.dist(n, c) < 5);
+    const playersHere = Array.from(Net.remotePlayers.values()).filter(p => UTIL.dist(p, c) < 5);
+    const hostileCount = npcsHere.filter(n => n.hostile).length;
+    const total = npcsHere.length + playersHere.length;
+    const activity = total === 0 ? 'rien à signaler' : `${total} personne(s) présente(s)${hostileCount ? `, dont ${hostileCount} individu(s) suspect(s)` : ''}`;
+    return `${c.name}, à ${Math.round(c.dist * CONFIG.METERS_PER_TILE)} m : ${activity}`;
+  });
+  announce('Caméras de surveillance. ' + parts.join('. '), 'assertive');
 };
 
 /* ============================================================
