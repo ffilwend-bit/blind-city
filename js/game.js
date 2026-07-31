@@ -775,8 +775,13 @@ const Game = {
     updateHud();
   },
 
-  // Enter / exit vehicle
-  interactVehicle() {
+  // Enter / exit vehicle. `targetVehicle` : véhicule PRÉCIS choisi dans le
+  // menu de interact() — indispensable quand deux véhicules du même nom sont
+  // garés côte à côte : avant, cette fonction retrouvait TOUJOURS elle-même
+  // « le plus proche » en ignorant complètement lequel avait été choisi dans
+  // le menu, donc les deux entrées identiques du menu faisaient exactement
+  // la même chose et il était impossible d'atteindre le second véhicule.
+  interactVehicle(targetVehicle) {
     if (this.inVehicle) {
       const cls = VEHICLE_CATALOG[this.vehicle.type];
       this.x = Math.round(this.vehicle.x); this.y = Math.round(this.vehicle.y); this.altitude = 0;
@@ -803,7 +808,7 @@ const Game = {
       // non — un taxi peut appartenir à son chauffeur) et un éventuel chauffeur
       // réel au volant tout près.
       const driver = this.getNearbyRemoteDriver();
-      const v = City.vehicles.filter(vv => UTIL.dist(vv, this) < 4).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+      const v = targetVehicle || City.vehicles.filter(vv => UTIL.dist(vv, this) < 4).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
       if (!v && !driver) { updateHud(); return announce('Aucun véhicule à proximité.', 'assertive'); }
       // Vélo / véhicule à une seule place sans portières : pas de menu de
       // portières (une seule place). On monte directement pour l'utiliser.
@@ -2684,7 +2689,12 @@ const Game = {
       }
     });
     City.vehicles.filter(v => !this.inVehicle && UTIL.dist(v, this) < 3).forEach(v => {
-      targets.push({ d: UTIL.dist(v, this), label: `🚗 ${v.name} (véhicule)`, act: () => this.interactVehicle() });
+      // Distance précise et mention « à vous » : indispensable pour distinguer
+      // deux véhicules du même modèle garés côte à côte, sans quoi le menu
+      // affichait deux entrées au texte IDENTIQUE, impossibles à différencier.
+      const meters = Math.round(UTIL.dist(v, this) * CONFIG.METERS_PER_TILE);
+      const mine = v.owner === 'player' ? ' — à vous' : '';
+      targets.push({ d: UTIL.dist(v, this), label: `🚗 ${v.name} (véhicule, ${meters} m${mine})`, act: () => this.interactVehicle(v) });
     });
     City.miningSites.filter(m => UTIL.dist(m, this) < 4).forEach(m => {
       targets.push({ d: UTIL.dist(m, this), label: '⛏️ Site minier', act: () => this.mine(m) });
@@ -3537,6 +3547,43 @@ const Game = {
   // plusieurs (garés à des endroits différents), un vrai choix s'affiche,
   // avec la distance et la direction de chacun. Inclut aussi le dernier
   // véhicule emprunté (non possédé), s'il est différent.
+  // Fait sonner le klaxon d'UN de ses véhicules à distance (sans y monter),
+  // pour le repérer à l'oreille — utile en plus du guidage GPS (Maj+F),
+  // surtout quand deux véhicules identiques sont garés côte à côte : le son
+  // spatialisé permet de savoir lequel est le sien sans se fier au nom.
+  // Contrairement à findMyCar(), rejouable à volonté, sans lancer de guidage.
+  honkMyVehicle() {
+    if (this.inVehicle) return announce('Vous êtes déjà dans un véhicule.', 'polite');
+    const owned = (this.ownedVehicles || []).map(id => City.vehicles.find(v => v.id === id)).filter(Boolean);
+    if (!owned.length) return announce('Vous ne possédez aucun véhicule.', 'assertive');
+    const honkVehicle = (v) => {
+      const cls = VEHICLE_CATALOG[v.type];
+      let key = 'klaxon_voiture';
+      if (cls && cls.human) key = 'velo_clochette';
+      else if (cls && (cls.type === '2 roues' || cls.type === 'moto')) key = 'klaxon_moto';
+      else if (cls && cls.type === 'poids lourd') key = 'klaxon_camion';
+      else if (cls && cls.type === 'air') key = 'klaxon_voiture'; // pas de vrai klaxon en vol, mais utile au sol pour le repérer
+      else if (cls && cls.price >= 8000000) key = 'klaxon_luxe';
+      const pan = this.panForPoint(v.x, v.y);
+      const dist = UTIL.dist(v, this);
+      const vol = UTIL.clamp(0.9 - dist / 40, 0.15, 0.9);
+      AudioLib.playPositional(key, pan, vol);
+      const m = Math.round(dist * CONFIG.METERS_PER_TILE);
+      announce(`${v.name} klaxonne à ${m} mètres, vers le ${UTIL.bearing(v.x - this.x, v.y - this.y)}.`, 'polite');
+    };
+    if (owned.length === 1) return honkVehicle(owned[0]);
+    el('menuTitle').textContent = 'Faire sonner quel véhicule ?';
+    const items = owned.map(v => {
+      const dist = Math.round(UTIL.dist(v, this) * CONFIG.METERS_PER_TILE);
+      return { id: v.id, title: v.name, desc: `${dist} m.` };
+    });
+    el('menuOverlay').style.display = 'flex';
+    renderMenu(items, (sel) => {
+      closeMenu();
+      const v = owned.find(vv => vv.id === sel.id);
+      if (v) honkVehicle(v);
+    });
+  },
   findMyCar() {
     if (this.inVehicle) return announce('Vous êtes déjà dans un véhicule.', 'polite');
     const owned = (this.ownedVehicles || []).map(id => City.vehicles.find(v => v.id === id)).filter(Boolean);
@@ -5337,7 +5384,7 @@ const Game = {
     });
   },
   help() {
-    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Alt+H se planquer ou sortir de la planque près d\'une couverture (rend bien plus difficile à repérer et permet de semer une poursuite), Maj+G arrêter le guidage, boîte manuelle des motos et voitures sport : les deux touches à droite du clavier juste avant Entrée (crochet fermant pour monter d\'un rapport, celle juste avant pour redescendre), Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
+    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Maj+V faire sonner mon véhicule pour le repérer à l\'oreille (utile si deux véhicules identiques sont côte à côte), Alt+H se planquer ou sortir de la planque près d\'une couverture (rend bien plus difficile à repérer et permet de semer une poursuite), Maj+G arrêter le guidage, boîte manuelle des motos et voitures sport : les deux touches à droite du clavier juste avant Entrée (crochet fermant pour monter d\'un rapport, celle juste avant pour redescendre), Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
   },
 
   // Save / load

@@ -82,6 +82,7 @@ function setupExtraInput() {
     else if (alt && key === 'h') { e.preventDefault(); Game.toggleHide(); }
     else if (shift && key === 's') { e.preventDefault(); Game.announceLocation(); }
     else if (shift && key === 'f') { e.preventDefault(); Game.findMyCar(); }
+    else if (shift && key === 'v') { e.preventDefault(); Game.honkMyVehicle(); }
     else if (shift && key === 'p') { e.preventDefault(); Game.openPocketDevices(); }
     else if (shift && key === 'h') { e.preventDefault(); toggleHandsUp(); }
     else if (shift && key === 'b') { e.preventDefault(); Game.toggleBeacons(); }
