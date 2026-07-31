@@ -179,15 +179,25 @@ function createPeerVoiceMesh(opts) {
   return {
     channel: opts.channel,
     peers: new Map(), // peerId -> { pc, pendingIce, remoteEl, audioNodes }
+    connecting: new Set(), // peerId en cours de connexion (évite les connect() en double)
     localStream: null,
     micEnabled: opts.defaultMicEnabled !== false, // false pour le talkie (silence tant que le PTT n'est pas tenu)
+    micFailedAt: 0, // dernier échec de getUserMedia, pour temporiser les nouvelles tentatives
 
     async ensureLocalStream() {
       if (this.localStream) return this.localStream;
+      // evaluate() tourne toutes les secondes : sans temporisation, un micro
+      // indisponible (permission refusée, périphérique déjà utilisé...) faisait
+      // retenter getUserMedia() et réannoncer "Micro indisponible" CHAQUE
+      // seconde, indéfiniment — d'où le message qui boucle sans fin signalé.
+      const now = Date.now();
+      if (now - this.micFailedAt < 8000) return null;
       try {
         this.localStream = await requestMicrophoneAccess();
         this.localStream.getAudioTracks().forEach(t => { t.enabled = this.micEnabled; });
+        this.micFailedAt = 0;
       } catch (e) {
+        this.micFailedAt = now;
         announce('Micro indisponible. Si l\'autorisation n\'a jamais été accordée, activez temporairement votre lecteur d\'écran pour cliquer sur Autoriser dans la fenêtre du navigateur.', 'assertive');
         this.localStream = null;
       }
@@ -195,9 +205,16 @@ function createPeerVoiceMesh(opts) {
     },
 
     async connect(peerId, isOfferer) {
-      if (this.peers.has(peerId)) return;
-      const stream = await this.ensureLocalStream();
+      // Garde anti-doublon : evaluate() peut être rappelé (toutes les secondes)
+      // avant qu'un connect() précédent pour ce même pair n'ait fini d'attendre
+      // le micro — sans ça, chaque tick relançait un getUserMedia() concurrent
+      // en plus du précédent, encore jamais terminé.
+      if (this.peers.has(peerId) || this.connecting.has(peerId)) return;
+      this.connecting.add(peerId);
+      let stream;
+      try { stream = await this.ensureLocalStream(); } finally { this.connecting.delete(peerId); }
       if (!stream) return;
+      if (this.peers.has(peerId)) return; // connecté entre-temps par l'autre côté
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
       const entry = { pc, pendingIce: [], remoteEl: null, audioNodes: null };
