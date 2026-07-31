@@ -245,3 +245,13 @@ const FURNITURE_CATALOG = {
 ============================================================ */
 // Missions recommandées aux nouveaux joueurs : pas de système d'IDs à saisir pour celles-ci.
 const BEGINNER_MISSION_TYPES = ['taxi_soigne', 'colis_fragile', 'objet_perdu', 'urgence_medicale', 'filature'];
+// Seules CES missions exigent vraiment plusieurs VRAIS joueurs présents EN
+// MÊME TEMPS à des postes séparés (voir leurs descriptions : "impossible
+// seul"). Avant, la demande de saisie d'identifiants d'équipe bloquait
+// TOUTES les autres missions (transport, mine, course, taxi, pêche...) —
+// même celles explicitement solo — avant que le guidage GPS ne soit activé
+// (voir finishActivateMission) : si le joueur ne comprenait pas cette boîte
+// de saisie inattendue ou ne la validait pas, la mission restait active mais
+// SANS AUCUN guidage. Restreint maintenant aux seules missions qui en ont
+// réellement besoin.
+const MULTIPLAYER_REQUIRED_MISSION_TYPES = ['defense_territoire', 'casse_extreme', 'convoi_blinde'];

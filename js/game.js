@@ -785,6 +785,18 @@ const Game = {
     if (!Net.connected) return announce('Vous n\'êtes pas connecté à un serveur : pas d\'identifiant à communiquer.', 'assertive');
     announce(`Votre identifiant de connexion est le ${Net.id.replace(/^p/, '')}.`, 'assertive');
   },
+  // Rappel de la mission active à tout moment (raccourci séparé de Ctrl+I qui
+  // donne SON PROPRE identifiant) : son identifiant à elle, son type, la
+  // récompense, et les identifiants d'équipe déjà autorisés à l'accomplir.
+  announceActiveMissionId() {
+    const m = this.activeMission;
+    if (!m) return announce('Aucune mission active pour le moment.', 'assertive');
+    const parts = [`Mission active : ${m.title}, identifiant ${m.id}, récompense ${UTIL.formatMoney(m.reward)}`];
+    if (m.authorizedIds && m.authorizedIds.length) parts.push(`identifiants autorisés : ${m.authorizedIds.join(', ')}`);
+    const d = Math.round(UTIL.dist(m, this) * CONFIG.METERS_PER_TILE);
+    parts.push(`objectif à ${d} mètres, vers le ${UTIL.bearing(m.x - this.x, m.y - this.y)}`);
+    announce(parts.join(', ') + '.', 'assertive');
+  },
   // Missions à IDs façon GTA : au lancement d'une mission (sauf celles
   // recommandées aux nouveaux, comme le taxi), il faut saisir les identifiants
   // de l'équipe qui la joue. Seuls ces identifiants pourront l'accomplir —
@@ -1248,22 +1260,29 @@ const Game = {
   // banque, sale), et essence/batterie si en véhicule — rien de tout ça
   // n'était consultable auparavant (seul un HUD visuel existait, inutile pour
   // un joueur aveugle).
+  // Bilan volontairement COURT : uniquement l'essentiel toujours utile (santé,
+  // faim, soif, énergie, argent en poche), le reste seulement quand ça change
+  // vraiment quelque chose. Avant, casque/gilet étaient annoncés à chaque
+  // fois même quand non portés ("pas de casque, pas de gilet"), ce qui
+  // rallongeait le bilan sans rien apporter — trop d'informations à chaque F6.
   announceStatus() {
-    const parts = [`Santé ${Math.round(this.health)}%`, `faim à ${Math.round(this.hunger)}%`, `soif à ${Math.round(this.thirst)}%`, `énergie ${Math.round(this.energy)}%`];
-    parts.push(`argent en poche : ${UTIL.formatMoney(this.money)}`);
+    const parts = [`Santé ${Math.round(this.health)}%`, `faim à ${Math.round(this.hunger)}%`, `soif à ${Math.round(this.thirst)}%`, `énergie ${Math.round(this.energy)}%`, `argent en poche : ${UTIL.formatMoney(this.money)}`];
     if (this.bank) parts.push(`en banque : ${UTIL.formatMoney(this.bank)}`);
     if (this.dirtyMoney) parts.push(`argent sale : ${UTIL.formatMoney(this.dirtyMoney)}`);
-    parts.push(this.hasHelmet ? 'casque blindé porté' : 'pas de casque blindé');
-    parts.push(this.hasVest ? 'gilet blindé porté' : 'pas de gilet blindé');
+    if (this.hasHelmet) parts.push('casque blindé porté');
+    if (this.hasVest) parts.push('gilet blindé porté');
     if (this.inVehicle && this.vehicle) {
       const cls = VEHICLE_CATALOG[this.vehicle.type];
       if (!cls.human) parts.push(`${cls.electric ? 'batterie' : 'essence'} ${Math.round(this.vehicle.fuel * 100)}%`);
     }
-    if (Net.connected) {
-      const n = Net.remotePlayers.size + 1;
-      parts.push(`${n} joueur${n > 1 ? 's' : ''} connecté${n > 1 ? 's' : ''} dans la ville`);
-    }
     announce(parts.join(', ') + '.', 'polite');
+  },
+  // Détail complémentaire (joueurs connectés) séparé du bilan principal (F6)
+  // pour ne pas l'alourdir — consultable à part via F7.
+  announceServerInfo() {
+    if (!Net.connected) return announce('Vous jouez en solo (hors ligne).', 'polite');
+    const n = Net.remotePlayers.size + 1;
+    announce(`${n} joueur${n > 1 ? 's' : ''} connecté${n > 1 ? 's' : ''} dans la ville.`, 'polite');
   },
   announceLocation() {
     const d = City.getDistrictAt(this.x, this.y);
@@ -3800,7 +3819,7 @@ const Game = {
     // ces identifiants pourront l'accomplir. Ça change à chaque reconnexion.
     // Boîte de saisie accessible (narrée par le jeu) : pas de prompt() natif,
     // qui ne peut pas être lu sans lecteur d'écran externe.
-    if (!BEGINNER_MISSION_TYPES.includes(m.type) && !m.authorizedIds) {
+    if (MULTIPLAYER_REQUIRED_MISSION_TYPES.includes(m.type) && !m.authorizedIds) {
       const myId = Net.connected ? Net.id.replace(/^p/, '') : 'solo';
       AccessibleTextPrompt.open(
         'Mission à identifiants',
@@ -5471,7 +5490,7 @@ const Game = {
     });
   },
   help() {
-    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B lecture rapide de l\'inventaire, N ouvrir le menu d\'inventaire (utiliser, porter, donner, vendre, déposer), L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Maj+V faire sonner mon véhicule pour le repérer à l\'oreille (utile si deux véhicules identiques sont côte à côte), Alt+H se planquer ou sortir de la planque près d\'une couverture (rend bien plus difficile à repérer et permet de semer une poursuite), Maj+G arrêter le guidage, boîte manuelle des motos et voitures sport : les deux touches à droite du clavier juste avant Entrée (crochet fermant pour monter d\'un rapport, celle juste avant pour redescendre), Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
+    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B lecture rapide de l\'inventaire, N ouvrir le menu d\'inventaire (utiliser, porter, donner, vendre, déposer), L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Maj+V faire sonner mon véhicule pour le repérer à l\'oreille (utile si deux véhicules identiques sont côte à côte), Alt+H se planquer ou sortir de la planque près d\'une couverture (rend bien plus difficile à repérer et permet de semer une poursuite), Maj+G arrêter le guidage, boîte manuelle des motos et voitures sport : les deux touches à droite du clavier juste avant Entrée (crochet fermant pour monter d\'un rapport, celle juste avant pour redescendre), Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, F7 joueurs connectés, F8 mission active et son identifiant, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
   },
 
   // Save / load

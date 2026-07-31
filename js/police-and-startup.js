@@ -98,6 +98,8 @@ function setupExtraInput() {
       else { live.follow = !live.follow; announce(live.follow ? `${live.name} vous suit.` : `${live.name} ne vous suit plus.`, 'assertive'); }
     }
     else if (key === 'f6') { e.preventDefault(); Game.announceStatus(); } // bilan vocal : santé, faim, soif, énergie, argent, essence
+    else if (key === 'f7') { e.preventDefault(); Game.announceServerInfo(); } // détail séparé du F6 : joueurs connectés
+    else if (key === 'f8') { e.preventDefault(); Game.announceActiveMissionId(); } // rappel de la mission active et de son identifiant
     else if (key === 'f9') { e.preventDefault(); Game.searchSelf(); }
     else if (key === 'f10') { e.preventDefault(); Game.openVehicleMenu(); }
     else if (key === 'f11') { e.preventDefault(); Game.toggleSiren(); }
