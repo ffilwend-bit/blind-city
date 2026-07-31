@@ -640,10 +640,22 @@ const RealEngine = {
     if (!AudioLib.isLoopPlaying(this.highKey)) AudioLib.playLoop(this.highKey, 0);
     const low = AudioLib.loopElements[this.lowKey], high = AudioLib.loopElements[this.highKey];
     const mix = Math.min(1, speedRatio * 1.3);
-    if (low) { low.volume = 0.32 * (1 - mix) + 0.05; low.playbackRate = 0.8 + speedRatio * 0.55; }
-    if (high) { high.volume = 0.4 * mix; high.playbackRate = 0.85 + speedRatio * 0.5; }
+    // Un seul jeu d'enregistrements (veh1_*) sert à la fois pour le Sport GT,
+    // l'hypercar et les grosses motos sportives (tous cls.sport) : sans rien
+    // de plus, les quatre sonnaient de façon rigoureusement identique. On
+    // module le régime de base selon cls.baseFreq du catalogue (déjà pensé
+    // pour distinguer les véhicules, mais jusqu'ici ignoré par ce moteur
+    // échantillonné) pour qu'une moto sonne clairement plus aiguë/nerveuse
+    // qu'une GT, et l'hypercar légèrement au-dessus de la GT.
+    const pitch = 0.85 + UTIL.clamp(((cls.baseFreq || 60) - 55) / 45, 0, 1) * 0.4;
+    if (low) { low.volume = 0.32 * (1 - mix) + 0.05; low.playbackRate = (0.8 + speedRatio * 0.55) * pitch; }
+    if (high) { high.volume = 0.4 * mix; high.playbackRate = (0.85 + speedRatio * 0.5) * pitch; }
     // Détection des évènements (accélération franche, décélération, freinage)
     // à partir de la vraie variation de vitesse — pas un minuteur aveugle.
+    // Le seuil de décélération (0.18) était sensiblement plus strict que celui
+    // d'accélération (0.14) : un ralentissement progressif (relâcher sans
+    // freiner franchement) ne l'atteignait quasiment jamais, d'où le son de
+    // ralentissement quasi absent signalé. Rapproché du seuil d'accélération.
     const now = Date.now();
     const delta = speedRatio - this.lastSpeedRatio;
     this.lastSpeedRatio = speedRatio;
@@ -653,7 +665,7 @@ const RealEngine = {
       const key = delta > 0.3 ? 'veh1_accel_forte' : UTIL.pick(['veh1_accel_courte1', 'veh1_accel_courte2', 'veh1_accel_progressive2']);
       AudioLib.playOnce(key, { volume: 0.4, exclusive: 'realengine_event' });
       if (speedRatio > 0.75 && delta > 0.25) AudioLib.playOnce(UTIL.pick(['veh1_turbo_1', 'veh1_turbo_2']), { volume: 0.3, exclusive: 'realengine_event' });
-    } else if (delta < -0.18) {
+    } else if (delta < -0.12) {
       this.lastEventTime = now;
       const key = speedRatio > 0.55 ? 'veh1_decel_haute_vitesse' : UTIL.pick(['veh1_decel_1', 'veh1_petit_decel_1', 'veh1_petit_decel_2']);
       AudioLib.playOnce(key, { volume: 0.35, exclusive: 'realengine_event' });
@@ -753,7 +765,7 @@ function createSampleEngine(keys) {
       if (delta > 0.14 && speedRatio > 0.15) { // pas de son d'accélération à l'arrêt (tapotage)
         this.lastEventTime = now;
         AudioLib.playOnce(delta > 0.3 ? keys.accelForte : UTIL.pick(keys.accels), { volume: 0.4, exclusive: keys.demarrage + '_event' });
-      } else if (delta < -0.18) {
+      } else if (delta < -0.12) { // rapproché du seuil d'accélération : un ralentissement progressif n'atteignait presque jamais -0.18
         this.lastEventTime = now;
         AudioLib.playOnce(speedRatio > 0.55 ? keys.decelLongue : UTIL.pick(keys.decels), { volume: 0.35, exclusive: keys.demarrage + '_event' });
       }
@@ -1065,6 +1077,37 @@ const MusicPlayer = {
   audioEl: null, gainNode: null, sourceNode: null,
   fileName: null, fileHandle: null, playing: false, volume: 0.8,
   supported: typeof window.showOpenFilePicker === 'function',
+  // Position de la source si c'est une ENCEINTE FIXE posée dans une maison
+  // ({house, ix, iy}) : le son doit alors baisser avec la distance, comme
+  // dans un vrai GTA — avant, le volume restait plein même en sortant de la
+  // maison et en s'éloignant complètement. `null` = source MOBILE qui suit
+  // le joueur (radio portable, autoradio) : toujours à plein volume, aucune
+  // atténuation par distance n'a de sens pour elle.
+  sourceRef: null,
+  setSourceRef(ref) { this.sourceRef = ref; this.updateSpatialGain(); },
+  // Rappelé toutes les 500 ms tant que la musique joue (voir l'intervalle plus
+  // bas) : recalcule l'atténuation selon la position ACTUELLE du joueur.
+  updateSpatialGain() {
+    if (!this.gainNode) return;
+    if (!this.sourceRef || !this.playing) { this.gainNode.gain.value = this.volume; return; }
+    const g = window.Game, ref = this.sourceRef;
+    let dist;
+    if (g && g.interior && g.interior.ref === ref.house) {
+      // Le joueur est DANS la même maison : distance sur la grille intérieure
+      // (petite échelle, quelques cases par pièce).
+      dist = Math.abs((g.interior.ix || 0) - ref.ix) + Math.abs((g.interior.iy || 0) - ref.iy);
+      const RADIUS = 10;
+      this.gainNode.gain.value = this.volume * Math.max(0, 1 - dist / RADIUS);
+    } else if (g) {
+      // Dehors (ou dans un autre lieu) : distance réelle jusqu'à la maison,
+      // même rayon d'atténuation que la voix de proximité pour rester cohérent.
+      dist = UTIL.dist(g, ref.house);
+      const RADIUS = 25;
+      this.gainNode.gain.value = this.volume * Math.max(0, 1 - dist / RADIUS);
+    } else {
+      this.gainNode.gain.value = this.volume;
+    }
+  },
 
   _ensureNodes() {
     if (this.audioEl) return;
@@ -1171,9 +1214,14 @@ const MusicPlayer = {
   pause() { if (this.audioEl) { this.audioEl.pause(); this.playing = false; } },
   stop() { if (this.audioEl) { this.audioEl.pause(); this.audioEl.currentTime = 0; this.playing = false; } },
   toggle() { if (this.playing) { this.pause(); return false; } return this.play(); },
-  setVolume(v) { this.volume = Math.max(0, Math.min(1, v)); if (this.gainNode) this.gainNode.gain.value = this.volume; },
+  setVolume(v) { this.volume = Math.max(0, Math.min(1, v)); this.updateSpatialGain(); },
 };
 window.MusicPlayer = MusicPlayer;
+// Réévalue l'atténuation par distance en continu tant qu'une musique joue
+// depuis une enceinte fixe (voir sourceRef ci-dessus) — même cadence que la
+// réévaluation de la voix de proximité, largement suffisante pour un volume
+// qui n'a pas besoin d'être aussi réactif qu'une position en temps réel.
+setInterval(() => { if (MusicPlayer.playing) MusicPlayer.updateSpatialGain(); }, 500);
 
 /* ============================================================
    CONFIGURATION ET UTILITAIRES

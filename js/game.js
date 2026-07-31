@@ -127,6 +127,8 @@ const Game = {
   },
   move(dx, dy, opts = {}) {
     if (this.jailed) return announce('Vous êtes en cellule. Seul un policier peut vous libérer.', 'polite');
+    // La planque (Alt+H) exige l'immobilité : bouger la rompt aussitôt.
+    if (this.hidden) { this.hidden = false; announce('Vous quittez votre cachette en bougeant.', 'polite'); }
     if (this.interior) return this._moveInterior(dx, dy); // déplacement dans le plan intérieur
     if (this.ridingWith) return announce('Vous êtes passager. Appuyez sur Interagir pour descendre avant de marcher.', 'polite');
     if (this.inVehicle && this.vehicle) {
@@ -458,21 +460,61 @@ const Game = {
     const v = this.vehicle; const dest = v.autoDest; const cls = VEHICLE_CATALOG[v.type];
     const dx = dest.x - v.x, dy = dest.y - v.y; const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < 3) { this.stopAutoDrive(); announce(`Arrivé à ${dest.name}.`, 'assertive'); return; }
-    // realistic steering: choose heading toward destination, prefer roads
+    // Suit un vrai chemin praticable (même A* que le guidage GPS piéton/vocal,
+    // computePath) au lieu de choisir juste le cap qui rapproche le plus à vol
+    // d'oiseau à CHAQUE image sans jamais voir plus loin qu'une case : ce
+    // calcul glouton pouvait revenir sur ses pas dans un quartier dense (cap
+    // qui oscille, "ne progresse pas") et, pire, rester bloqué à foncer sans
+    // fin contre un obstacle si les 4 cases voisines étaient solides — d'où
+    // les dégâts qui s'accumulaient jusqu'à détruire le véhicule.
+    const px = Math.round(v.x), py = Math.round(v.y);
+    const gx = Math.round(dest.x), gy = Math.round(dest.y);
+    const goalMoved = !v._autoPathGoal || v._autoPathGoal.x !== gx || v._autoPathGoal.y !== gy;
+    let offPath = true;
+    if (v.autoPath && v.autoPath.length && !goalMoved) {
+      let bd = Infinity, bi = 0;
+      for (let i = 0; i < v.autoPath.length; i++) {
+        const d = Math.abs(v.autoPath[i].x - px) + Math.abs(v.autoPath[i].y - py);
+        if (d < bd) { bd = d; bi = i; }
+      }
+      v._autoPathIdx = bi; offPath = bd > 1;
+    }
+    const stale = Date.now() - (v._autoPathAt || 0) > 6000;
+    if (goalMoved || !v.autoPath || !v.autoPath.length || offPath || stale) {
+      v.autoPath = (!(cls.flies && v.altitude > 0)) ? this.computePath(px, py, dest.x, dest.y) : null;
+      v._autoPathGoal = { x: gx, y: gy }; v._autoPathAt = Date.now(); v._autoPathIdx = 0;
+    }
+    // Filet de sécurité : si la position ne progresse plus du tout depuis
+    // plusieurs secondes malgré le pilotage actif (chemin introuvable, ou cas
+    // limite non prévu), on arrête proprement au lieu de continuer à foncer
+    // indéfiniment dans ce qui bloque.
+    if (!v._autoLastPos || UTIL.dist(v._autoLastPos, v) > 0.3) {
+      v._autoLastPos = { x: v.x, y: v.y }; v._autoStuckSince = Date.now();
+    } else if (Date.now() - (v._autoStuckSince || Date.now()) > 5000) {
+      this.stopAutoDrive();
+      announce('Conduite automatique bloquée par un obstacle. Contrôle repris.', 'assertive');
+      return;
+    }
     let best = v.heading;
-    let bestScore = -Infinity;
-    for (let h = 0; h < 8; h += 2) { // only cardinal for vehicles
-      const nx = v.x + (h === 2 ? 1 : h === 6 ? -1 : 0);
-      const ny = v.y + (h === 4 ? 1 : h === 0 ? -1 : 0);
-      // Un avion/hélico EN VOL survole les bâtiments (comme dans driveVehicle) :
-      // sans ce cas, un appareil en altitude au-dessus d'un quartier bâti
-      // trouvait les 4 caps "solides" et le pilotage auto restait bloqué.
-      if (!(cls.flies && v.altitude > 0) && City.isSolid(nx, ny)) continue;
-      const ndx = dest.x - nx, ndy = dest.y - ny;
-      let score = -Math.sqrt(ndx * ndx + ndy * ndy);
-      if (City.isRoad(nx, ny)) score += 4; // prefer roads
-      if (h === v.heading) score += 1; // keep direction
-      if (score > bestScore) { bestScore = score; best = h; }
+    if (v.autoPath && v.autoPath.length > 1) {
+      let i = Math.min(v._autoPathIdx || 0, v.autoPath.length - 1);
+      while (i < v.autoPath.length - 1 && v.autoPath[i].x === px && v.autoPath[i].y === py) i++;
+      const dirOf = this._dirOf(px, py, v.autoPath[i].x, v.autoPath[i].y);
+      if (dirOf >= 0) best = dirOf;
+    } else if (!v.autoPath) {
+      // Repli pour le vol en altitude (jamais passé au pathfinding piéton
+      // au-dessus des bâtiments) : ancien calcul direct à vol d'oiseau.
+      let bestScore = -Infinity;
+      for (let h = 0; h < 8; h += 2) {
+        const nx = v.x + (h === 2 ? 1 : h === 6 ? -1 : 0);
+        const ny = v.y + (h === 4 ? 1 : h === 0 ? -1 : 0);
+        if (!(cls.flies && v.altitude > 0) && City.isSolid(nx, ny)) continue;
+        const ndx = dest.x - nx, ndy = dest.y - ny;
+        let score = -Math.sqrt(ndx * ndx + ndy * ndy);
+        if (City.isRoad(nx, ny)) score += 4;
+        if (h === v.heading) score += 1;
+        if (score > bestScore) { bestScore = score; best = h; }
+      }
     }
     v.heading = best;
     // driveVehicle(0,0) = freinage (aucune entrée), pas "avancer dans le cap" :
@@ -1525,6 +1567,45 @@ const Game = {
     }
     return instruction;
   },
+  // Ligne de vue directe entre deux points (tracé de Bresenham) : renvoie
+  // faux dès qu'un bâtiment (case solide) se trouve entre les deux — sert à
+  // la dissimulation (se planquer derrière un pâté de maisons) et à rendre
+  // les poursuites/le repérage moins « à travers les murs ».
+  hasLineOfSight(x0, y0, x1, y1) {
+    x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+    let dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy, x = x0, y = y0;
+    let guard = 0;
+    while ((x !== x1 || y !== y1) && guard++ < 2000) {
+      if ((x !== x0 || y !== y0) && (x !== x1 || y !== y1) && City.isSolid(x, y)) return false;
+      const e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x += sx; }
+      if (e2 <= dx) { err += dx; y += sy; }
+    }
+    return true;
+  },
+  // Se planquer/se relever : accroupi près d'une couverture (véhicule ou
+  // bâtiment tout proche) et immobile, on devient bien plus difficile à
+  // repérer — voir hidden dans _updatePnjChase/_updateRealChase et scan().
+  // Répond au « on ne peut que scanner puis tirer, c'est trop simple » : une
+  // vraie planque change maintenant l'issue d'une poursuite ou d'un scan.
+  toggleHide() {
+    if (this.hidden) {
+      this.hidden = false;
+      announce('Vous sortez de votre cachette.', 'assertive');
+      updateHud();
+      return;
+    }
+    if (this.inVehicle) return announce('Descendez d\'abord du véhicule pour vous cacher.', 'assertive');
+    if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
+    const hasCover = City.vehicles.some(v => UTIL.dist(v, this) < 2.2) || (City.houses || []).some(h => UTIL.dist(h, this) < 2.2) || City.pois.some(p => UTIL.dist(p, this) < 2.2);
+    if (!hasCover) return announce('Rien à proximité pour vous couvrir : approchez-vous d\'un véhicule ou d\'un bâtiment.', 'assertive');
+    this.hidden = true;
+    AudioLib.playOnce('sfx_notification', { volume: 0.2 });
+    announce('Vous vous planquez, accroupi. Restez immobile : bougez ou attaquez et vous serez repéré à nouveau.', 'assertive');
+    updateHud();
+  },
   // A* piéton sur la grille : ne traverse ni bâtiment (case solide) ni eau.
   // Renvoie la liste des cases de la position au but (case praticable la plus
   // proche du but si le but lui-même est un bâtiment), ou null si rien.
@@ -1949,6 +2030,8 @@ const Game = {
     if (this.cooldown) return; // cadence de l'arme : this.cooldown était défini mais jamais vérifié, la cadence n'était jamais appliquée
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
     if (this.isCuffed) return announce('Vous êtes menotté(e), impossible d\'agir.', 'polite');
+    if (this.hidden) { this.hidden = false; announce('Le coup de feu révèle votre position.', 'polite'); } // tirer casse la planque
+
     if (!this.weaponOut || !this.weapon) return announce('Sortez d\'abord une arme.', 'assertive');
     if (this.ammo[this.weapon.ammoType] <= 0) { AudioLib.playOnce('sfx_arme_vide'); announce('Chargeur vide. Rechargez avec R.', 'assertive'); return; }
     const w = this.weapon;
@@ -2403,6 +2486,10 @@ const Game = {
         return announce('Vous vous reposez un moment. Énergie restaurée.', 'assertive');
       case 'audio':
         announce(`${obj.name}. Ouverture du lecteur de musique.`, 'polite');
+        // Enceinte FIXE posée dans la maison : le son doit baisser avec la
+        // distance (y compris en sortant de la maison), pas rester à plein
+        // volume partout comme avant.
+        MusicPlayer.setSourceRef({ house: this.interior.ref, ix: obj.ix, iy: obj.iy });
         return this.openMusicMenu(`${obj.name} (${obj.room})`);
       default:
         return announce(`${obj.name}. Un bel élément de votre intérieur.`, 'polite');
@@ -4974,14 +5061,23 @@ const Game = {
     let nearest = Infinity, closest = cops[0];
     cops.forEach(p => { const d = UTIL.dist(p, this); if (d < nearest) { nearest = d; closest = p; } });
     AudioLib.playLoop('sirene_vehicule_police', UTIL.clamp(0.72 - nearest * 0.02, 0.1, 0.72));
-    if (nearest > 24) {
-      if ((ws.farTicks = (ws.farTicks || 0) + 1) >= 3) { this.wanted = Math.max(0, this.wanted - 20); this.endPoliceChase(true, 'Vous avez semé la police. Niveau de recherche réduit.'); return; }
+    // Planqué (Alt+H) ET hors de vue directe de TOUS les policiers proches :
+    // on sème beaucoup plus vite, même à faible distance — jusque-là, seule
+    // la distance comptait, sans aucune notion de dissimulation réelle.
+    const wellHidden = this.hidden && !cops.some(p => this.hasLineOfSight(p.x, p.y, this.x, this.y));
+    if (nearest > 24 || wellHidden) {
+      if ((ws.farTicks = (ws.farTicks || 0) + (wellHidden ? 2 : 1)) >= 3) {
+        this.wanted = Math.max(0, this.wanted - 20);
+        this.endPoliceChase(true, wellHidden ? 'Bien planqué(e), vous avez semé la police.' : 'Vous avez semé la police. Niveau de recherche réduit.');
+        return;
+      }
     } else ws.farTicks = 0;
     const now = Date.now();
     if (now - (ws.lastDistMsg || 0) > 3000) {
       ws.lastDistMsg = now;
       const m = Math.round(nearest * CONFIG.METERS_PER_TILE);
-      announce(nearest > 12 ? `Vous creusez l'écart : police à ${m} mètres.` : `La police est à ${m} mètres, vers le ${UTIL.bearing(closest.x - this.x, closest.y - this.y)}.`, nearest <= 6 ? 'assertive' : 'polite');
+      if (wellHidden) announce(`Planqué(e) : la police est à ${m} mètres mais ne vous voit pas. Restez immobile.`, 'polite');
+      else announce(nearest > 12 ? `Vous creusez l'écart : police à ${m} mètres.` : `La police est à ${m} mètres, vers le ${UTIL.bearing(closest.x - this.x, closest.y - this.y)}.`, nearest <= 6 ? 'assertive' : 'polite');
     }
   },
   // Filet SOLO : poursuivants PNJ qui se déplacent vraiment vers vous.
@@ -4989,18 +5085,27 @@ const Game = {
     const squad = ws.npcIds.map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
     if (!squad.length) { this.wanted = Math.max(0, this.wanted - 30); this.endPoliceChase(true, 'Vous avez neutralisé la patrouille. Niveau de recherche réduit.'); return; }
     const speed = (this.inVehicle && this.vehicle) ? 2 : 1;
-    squad.forEach(n => this._stepChaserToward(n, speed));
+    // Planqué ET hors de vue directe de TOUTE la patrouille : elle ne fonce
+    // plus droit sur vous (elle n'a plus votre position), sans quoi se
+    // cacher n'aurait aucun effet une fois repéré une première fois.
+    const wellHidden = this.hidden && !squad.some(n => this.hasLineOfSight(n.x, n.y, this.x, this.y));
+    if (!wellHidden) squad.forEach(n => this._stepChaserToward(n, speed));
     let nearest = Infinity, closest = squad[0];
     squad.forEach(n => { const d = UTIL.dist(n, this); if (d < nearest) { nearest = d; closest = n; } });
     AudioLib.playLoop('sirene_vehicule_police', UTIL.clamp(0.72 - nearest * 0.035, 0.12, 0.72));
-    if (nearest <= 1.6) { announce('La patrouille vous rattrape et vous bloque la route !', 'assertive'); this.endPoliceChase(false, null, true); return; }
-    if (nearest > 14) {
-      ws.farTicks = (ws.farTicks || 0) + 1;
-      if (ws.farTicks >= 3) { this.wanted = Math.max(0, this.wanted - 25); this.endPoliceChase(true, 'Vous l\'avez semée ! Niveau de recherche réduit.'); return; }
+    if (!wellHidden && nearest <= 1.6) { announce('La patrouille vous rattrape et vous bloque la route !', 'assertive'); this.endPoliceChase(false, null, true); return; }
+    if (nearest > 14 || wellHidden) {
+      ws.farTicks = (ws.farTicks || 0) + (wellHidden ? 2 : 1);
+      if (ws.farTicks >= 3) {
+        this.wanted = Math.max(0, this.wanted - 25);
+        this.endPoliceChase(true, wellHidden ? 'Bien planqué(e), vous avez semé la patrouille.' : 'Vous l\'avez semée ! Niveau de recherche réduit.');
+        return;
+      }
     } else ws.farTicks = 0;
     const now = Date.now();
     if (now - (ws.lastDistMsg || 0) > 3000) {
       ws.lastDistMsg = now;
+      if (wellHidden) { announce('Planqué(e) : la patrouille cherche sans vous voir. Restez immobile.', 'polite'); return; }
       const m = Math.round(nearest * CONFIG.METERS_PER_TILE);
       announce(nearest > 10 ? `Vous creusez l'écart : patrouille à ${m} mètres.` : `La patrouille est à ${m} mètres, vers le ${UTIL.bearing(closest.x - this.x, closest.y - this.y)}.`, nearest <= 5 ? 'assertive' : 'polite');
     }
@@ -5177,7 +5282,7 @@ const Game = {
     });
   },
   help() {
-    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Maj+G arrêter le guidage, Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
+    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Alt+H se planquer ou sortir de la planque près d\'une couverture (rend bien plus difficile à repérer et permet de semer une poursuite), Maj+G arrêter le guidage, Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
   },
 
   // Save / load

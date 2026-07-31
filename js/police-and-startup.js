@@ -33,8 +33,13 @@ function setupExtraInput() {
     else if (ctrl && key === 'r') {
       e.preventDefault();
       if (!Game.portableRadio.owned) announce('Vous n\'avez pas de radio portable. Achetez-en une dans l\'appli Musique du téléphone.', 'assertive');
-      else if (!MusicPlayer.fileName) Game.openMusicMenu('radio portable'); // rien à lire : ouvre le choix de fichier
-      else announce(MusicPlayer.toggle() ? 'Lecture.' : 'Pause.', 'polite');
+      else {
+        // Radio PORTABLE : suit le joueur partout, jamais de baisse de volume
+        // par distance (contrairement à une enceinte fixe posée en maison).
+        MusicPlayer.setSourceRef(null);
+        if (!MusicPlayer.fileName) Game.openMusicMenu('radio portable'); // rien à lire : ouvre le choix de fichier
+        else announce(MusicPlayer.toggle() ? 'Lecture.' : 'Pause.', 'polite');
+      }
     }
     else if (ctrl && key === 'd') { e.preventDefault(); Game.toggleDriveAssist(); } // assistant de conduite (alerte obstacles)
     else if (ctrl && key === 'k') { e.preventDefault(); openConvoyMenu(); } // gérer le convoi (créer / rejoindre / quitter)
@@ -74,6 +79,7 @@ function setupExtraInput() {
     else if (alt && key === 'v') { e.preventDefault(); Game.openVehicleInfo(Game.vehicle || City.vehicles.find(v => UTIL.dist(v, Game) < 4)); }
     else if (alt && key === 'k') { e.preventDefault(); Convoy.locate(); } // repérage audio rapide du convoi
     else if (alt && key === 'm') { e.preventDefault(); AccessibleTextPrompt.open('Enregistrer un lieu', 'Nom du lieu à enregistrer ici.', '', (n) => { if (n) Game.savePlaceHere(n); }); }
+    else if (alt && key === 'h') { e.preventDefault(); Game.toggleHide(); }
     else if (shift && key === 's') { e.preventDefault(); Game.announceLocation(); }
     else if (shift && key === 'f') { e.preventDefault(); Game.findMyCar(); }
     else if (shift && key === 'p') { e.preventDefault(); Game.openPocketDevices(); }
@@ -1296,7 +1302,7 @@ Game.openVehicleMenu = function() {
     closeMenu();
     if (sel.id === 'info') this.openVehicleInfo(this.vehicle);
     else if (sel.id === 'drivemode') this.openDriveModeMenu(this.vehicle);
-    else if (sel.id === 'radio') this.openMusicMenu('autoradio');
+    else if (sel.id === 'radio') { MusicPlayer.setSourceRef(null); this.openMusicMenu('autoradio'); } // suit le véhicule, jamais spatialisé par distance
   });
 };
 Game.openVehicleInfo = function(v) {
