@@ -1529,13 +1529,21 @@ function startGame(seed) {
    réponse et les candidats ICE (rtc_offer / rtc_answer / rtc_ice) :
    une fois la connexion établie, l'audio passe directement d'un
    appareil à l'autre (pair-à-pair), ce qui minimise la latence, y
-   compris avec une connexion modeste. Sur certains réseaux très
-   restrictifs (double NAT, pare-feu d'entreprise), un serveur TURN
-   peut être nécessaire en complément des serveurs STUN publics
-   utilisés ici — à ajouter dans ICE_SERVERS si besoin.
+   compris avec une connexion modeste. Le STUN seul ne suffit PAS dès
+   qu'un des deux joueurs est derrière un NAT symétrique (fréquent en
+   4G/5G, CGNAT de certains opérateurs, certaines box) : la
+   négociation semble aboutir (micro autorisé, offre/réponse
+   échangées) mais aucun son ne passe jamais — c'est le bug "on ne
+   s'entend pas alors que tout est autorisé" signalé par des joueurs.
+   D'où le serveur TURN de secours ci-dessous, qui relaie l'audio
+   quand la connexion directe pair-à-pair est impossible.
 ============================================================ */
 const ICE_SERVERS = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  { urls: 'stun:openrelay.metered.ca:80' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 // Demande l'accès au micro en prévenant d'abord l'utilisateur, une seule fois
 // par session : la fenêtre d'autorisation du navigateur est une fenêtre système
