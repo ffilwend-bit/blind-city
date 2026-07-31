@@ -336,6 +336,20 @@ const TalkieVoice = createPeerVoiceMesh({
 });
 window.TalkieVoice = TalkieVoice;
 
+// Type de connexion réseau (Wi-Fi / données mobiles) : utile pour diagnostiquer
+// soi-même pourquoi la voix de proximité passe ou pas — en données mobiles, le
+// lien direct échoue souvent (NAT symétrique/CGNAT) et tout repose sur le
+// relais TURN de secours (voir ICE_SERVERS), moins fiable. Repose sur l'API
+// Network Information, pas disponible partout (Firefox, Safari/iOS ne
+// l'implémentent pas) : dans ce cas on l'indique clairement au lieu de deviner.
+function getNetworkTypeLabel() {
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!conn || !conn.type) return null;
+  const labels = { wifi: 'Wi-Fi', cellular: 'données mobiles', ethernet: 'câble Ethernet', bluetooth: 'Bluetooth', wimax: 'WiMAX', none: 'hors ligne', other: 'connexion inconnue', unknown: 'connexion inconnue' };
+  return labels[conn.type] || null;
+}
+window.getNetworkTypeLabel = getNetworkTypeLabel;
+
 const PROX_VOICE_RADIUS = 15; // même rayon que le chat RP texte
 function evaluateProxVoice() {
   if (!Game.voiceOpen || !Net.connected) { if (ProxVoice.peers.size) ProxVoice.evaluate(new Set()); return; }
@@ -357,7 +371,12 @@ setInterval(() => { evaluateProxVoice(); evaluateTalkieVoice(); }, 1000);
 
 function toggleProxVoice() {
   Game.voiceOpen = !Game.voiceOpen;
-  announce(Game.voiceOpen ? 'Micro de proximité activé : les gens autour de vous vous entendent.' : 'Micro de proximité coupé.', 'assertive');
+  let msg = Game.voiceOpen ? 'Micro de proximité activé : les gens autour de vous vous entendent.' : 'Micro de proximité coupé.';
+  if (Game.voiceOpen) {
+    const netType = getNetworkTypeLabel();
+    msg += netType ? ` Votre connexion : ${netType}.` : ' Type de connexion non détectable par ce navigateur.';
+  }
+  announce(msg, 'assertive');
   const btn = document.getElementById('touchProxMic');
   if (btn) btn.className = Game.voiceOpen ? 'touch-btn mic-btn listening' : 'touch-btn mic-btn';
   if (!Game.voiceOpen) ProxVoice.stopAll();
