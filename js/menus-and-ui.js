@@ -1507,6 +1507,7 @@ function startGame(seed) {
     setInterval(() => Convoy.tick(), 2500);
     setInterval(() => Game.vendorTick(), 2000);
     setInterval(() => Game.refreshTargetValidity(), 1500);
+    setInterval(() => Game.tickPassengerAudio(), 200);
     setInterval(() => Game.tickUnconscious(), 5000);
     // Vérifié seulement 1x/seconde avant : à pleine vitesse un véhicule
     // traverse largement plus que le rayon d'arrivée (4 cases) entre deux

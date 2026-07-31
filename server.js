@@ -249,11 +249,25 @@ const calls = new Map();
 /** @type {Map<string, {id:string,name:string,role:string,roleName:string,time:number}>} candidatures de métier en attente, par id de joueur */
 const jobRequests = new Map();
 
+// Météo PARTAGÉE par tout le monde sur ce serveur : avant, chaque client
+// tirait sa propre pluie au hasard, donc deux joueurs côte à côte pouvaient
+// avoir l'un du soleil et l'autre de la pluie. Le serveur décide seul et
+// diffuse le changement à tous — mêmes probabilités qu'avant (rare de se
+// mettre à pleuvoir, la pluie s'arrête vite).
+let weatherState = 'clair'; // 'clair' | 'pluie'
+function weatherTick() {
+  const before = weatherState;
+  if (weatherState === 'clair') { if (Math.random() < 0.08) weatherState = 'pluie'; }
+  else { if (Math.random() < 0.6) weatherState = 'clair'; }
+  if (weatherState !== before) broadcast({ type: 'weather_change', state: weatherState });
+}
+setInterval(weatherTick, 90000);
+
 function publicState(p) {
   return {
     id: p.id, firstName: p.firstName, lastName: p.lastName, gender: p.gender,
     x: p.x, y: p.y, heading: p.heading, health: p.health, hunger: p.hunger, thirst: p.thirst, role: p.role, policeRank: p.policeRank,
-    outfit: p.outfit, inVehicle: p.inVehicle, vehicleName: p.vehicleName,
+    outfit: p.outfit, inVehicle: p.inVehicle, vehicleName: p.vehicleName, vehicleType: p.vehicleType, vehicleSpeedRatio: p.vehicleSpeedRatio,
     talkieOn: p.talkieOn, talkieFrequency: p.talkieFrequency, voiceOpen: p.voiceOpen, handsUp: p.handsUp,
     convoy: p.convoy || null,
     unconscious: !!p.unconscious, isCuffed: !!p.isCuffed, accountUsername: p.accountUsername || null,
@@ -471,6 +485,13 @@ wss.on('connection', (ws, req) => {
       const roleName = safeName(msg.roleName, '', 60) || role;
       jobRequests.set(player.id, { id: player.id, name: `${player.firstName} ${player.lastName}`, role, roleName, time: Date.now() });
       broadcastStaffLog(`${player.firstName} ${player.lastName} demande le métier « ${roleName} ».`);
+      // Le journal staff (staff_log) est stocké silencieusement côté client,
+      // jamais annoncé vocalement : une candidature en attente passait donc
+      // complètement inaperçue tant qu'un admin n'allait pas consulter le
+      // journal de lui-même. Alerte dédiée, annoncée immédiatement.
+      for (const p of players.values()) {
+        if (p.staffRole) send(p.ws, { type: 'staff_job_request_alert', name: `${player.firstName} ${player.lastName}`, roleName });
+      }
     }
     else if (msg.type === 'staff_list_job_requests') {
       if (!player.staffRole) { send(ws, { type: 'staff_error', text: 'Réservé au mode staff.' }); return; }
@@ -712,7 +733,7 @@ wss.on('connection', (ws, req) => {
       player.gender = msg.gender === 'femme' ? 'femme' : 'homme';
       player.joined = true;
       send(ws, {
-        type: 'welcome', id, seed: WORLD_SEED,
+        type: 'welcome', id, seed: WORLD_SEED, weather: weatherState,
         players: Array.from(players.values()).filter(p => p.id !== id && p.joined).map(publicState),
         cityEdits: staffData.cityEdits || [],
         worldEdits: staffData.worldEdits || [],
@@ -742,6 +763,8 @@ wss.on('connection', (ws, req) => {
         player.inVehicle = msg.inVehicle;
       }
       if (msg.vehicleName !== undefined) player.vehicleName = msg.vehicleName;
+      if (msg.vehicleType !== undefined) player.vehicleType = msg.vehicleType;
+      if (typeof msg.vehicleSpeedRatio === 'number') player.vehicleSpeedRatio = msg.vehicleSpeedRatio;
       if (typeof msg.talkieOn === 'boolean') player.talkieOn = msg.talkieOn;
       if (typeof msg.talkieFrequency === 'number') player.talkieFrequency = msg.talkieFrequency;
       if (typeof msg.airplane === 'boolean') player.airplane = msg.airplane;

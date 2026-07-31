@@ -101,7 +101,11 @@ const Phone = {
       // personne). Ils n'apparaissaient pas dans la liste — c'était le bug.
       (Game.myContacts || []).forEach(c => {
         const online = c.username ? Array.from(Net.remotePlayers.values()).find(p => p.accountUsername === c.username) : null;
-        const statut = online ? 'en ligne' : (c.number ? c.number : 'contact');
+        // Sans numéro ET sans compte actuellement en ligne, impossible de
+        // jamais rappeler cette entrée : elle ne doit pas s'afficher (un nom
+        // sans aucun moyen de le joindre n'a pas sa place dans les contacts).
+        if (!c.number && !online) return;
+        const statut = online ? 'en ligne' : c.number;
         const li = document.createElement('li');
         li.innerHTML = `<span>${escapeHtml(c.label)} <span class="badge badge-citoyen">${escapeHtml(statut)}</span></span><button class="phone-btn" aria-label="Appeler ${escapeHtml(c.label)}">📞</button>`;
         li.querySelector('button').addEventListener('click', () => this.callSavedContact(c));
@@ -517,9 +521,11 @@ const Phone = {
   onCallUnavailable() {
     AudioLib.stopAllRingtones();
     clearTimeout(this.callLocalTimeout);
+    // Le son fourni (sfx_correspondant_indisponible) parle de lui-même, comme
+    // un vrai message de compagnie téléphonique : plus besoin que le
+    // narrateur double la même information par-dessus.
     AudioLib.playOnce('sfx_correspondant_indisponible');
     if (el('callStatus')) el('callStatus').textContent = 'Correspondant indisponible.';
-    announce('Votre correspondant n\'est pas disponible. Veuillez rappeler ultérieurement.', 'assertive');
     this.hangup(true);
   },
   receiveCallOffer(callId, fromId, fromName, masked) {
@@ -639,10 +645,11 @@ const Phone = {
     AudioLib.stopAllRingtones();
     clearTimeout(this.callLocalTimeout);
     if (this.callState === 'ringing_out') {
-      // Nous étions l'appelant : personne n'a décroché en 30 secondes → répondeur
+      // Nous étions l'appelant : personne n'a décroché en 30 secondes → répondeur.
+      // Le son du répondeur suffit, comme un vrai message d'opérateur — pas
+      // besoin que le narrateur répète la même chose par-dessus.
       AudioLib.playOnce('sfx_repondeur');
       if (el('callStatus')) el('callStatus').textContent = 'Pas de réponse. Répondeur.';
-      announce('Votre correspondant ne répond pas, veuillez réessayer à nouveau.', 'assertive');
     } else if (this.incomingCall) {
       // Nous étions l'appelé et n'avons pas décroché à temps
       announce('Appel manqué.', 'polite');

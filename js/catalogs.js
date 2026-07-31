@@ -13,7 +13,7 @@ const VEHICLE_CATALOG = {
   scooter: { name: 'Scooter', label: 'scooter', type: '2 roues', baseFreq: 45, mult: 28, wave: 'sawtooth', maxSpeed: 0.8, accel: 0.06, brake: 0.08, turn: 1.0, offroad: 0.25, flies: false, wheels: 2, price: 250000, trunk: 8, seats: 2, doors: 0 },
   berline: { name: 'Berline', label: 'berline', type: 'voiture', baseFreq: 48, mult: 38, wave: 'sawtooth', maxSpeed: 1.05, accel: 0.07, brake: 0.1, turn: 0.95, offroad: 0.4, flies: false, wheels: 4, price: 6000000, trunk: 30, seats: 4, doors: 4 },
   suv: { name: 'SUV', label: 'SUV', type: 'voiture', baseFreq: 50, mult: 40, wave: 'sawtooth', maxSpeed: 1.1, accel: 0.08, brake: 0.1, turn: 0.9, offroad: 0.75, flies: false, wheels: 4, price: 9000000, trunk: 36, seats: 5, doors: 4 },
-  sahel_bf: { name: 'Sahel BF', label: 'Sahel BF', type: 'voiture', baseFreq: 46, mult: 36, wave: 'sawtooth', maxSpeed: 1.0, accel: 0.075, brake: 0.1, turn: 0.9, offroad: 0.92, flies: false, wheels: 4, price: 7500000, trunk: 45, seats: 5, doors: 4, electric: true },
+  sahel_bf: { name: 'Sahel BF', label: 'Sahel BF', type: 'voiture', baseFreq: 46, mult: 36, wave: 'sawtooth', maxSpeed: 1.6, accel: 0.1, brake: 0.1, turn: 0.9, offroad: 0.92, flies: false, wheels: 4, price: 7500000, trunk: 45, seats: 5, doors: 4, electric: true },
   electrique: { name: 'Voiture électrique', label: 'voiture électrique', type: 'voiture', baseFreq: 42, mult: 26, wave: 'sine', maxSpeed: 1.15, accel: 0.1, brake: 0.12, turn: 0.95, offroad: 0.35, flies: false, wheels: 4, price: 14000000, trunk: 28, seats: 4, doors: 4, electric: true },
   // Voitures de sport : vitesse et accélération élevées, tenue de route nerveuse,
   // mais peu de coffre et chères. Vendues au concessionnaire.

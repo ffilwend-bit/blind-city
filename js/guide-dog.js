@@ -82,6 +82,7 @@ const GuideDog = {
     if (catalog[id]) {
       const c = catalog[id];
       if (Game.money < c.price) return announce('Fonds insuffisants.', 'assertive');
+      if (!Game.canAdd(c.item)) return announce('Vos poches sont pleines : impossible de recevoir cet achat.', 'assertive');
       Game.money -= c.price; Game.addItem({ ...c.item }); Audio.cash();
       announce(`${c.item.name} achetée.`, 'assertive'); updateHud(); return;
     }

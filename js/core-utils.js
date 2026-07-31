@@ -2,7 +2,7 @@ const CONFIG = {
   W: 560, H: 560, // agrandie pour loger les villes lointaines Bobo-Dioulasso et Kongoussi (était 240×240, puis 420×420)
   METERS_PER_TILE: 4, // échelle officielle : 1 case = 4 mètres
   SCAN_RADIUS: 60,
-  POCKET_CAPACITY: 15,
+  POCKET_CAPACITY: 30, // doublé (était 15) : les poches se remplissaient trop vite
   BELT_BONUS: 6,
   BACKPACK_CAPACITY: 20,
   VEHICLE_CAPACITY: 30,

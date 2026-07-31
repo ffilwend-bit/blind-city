@@ -387,6 +387,9 @@ Game.retrieveFromTrunk = function(itemId, qty, targetVehicle) {
     return;
   }
   qty = Math.min(Math.max(1, Math.floor(qty) || 1), available);
+  // Même principe que pour un achat : vérifier la place AVANT de retirer du
+  // coffre, sinon l'objet disparaissait du coffre sans jamais être reçu.
+  if (!this.canAdd({ ...it, q: qty })) return announce('Vos poches sont pleines : impossible de récupérer cet objet.', 'assertive');
   it.q -= qty; if (it.q <= 0) v.inventory = v.inventory.filter(i => i !== it);
   this.addItem({ ...it, q: qty });
   announce(`Vous récupérez ${qty > 1 ? qty + ' ' : ''}${it.name} du coffre${v !== this.vehicle ? ' de ' + v.name : ''}.`, 'assertive');

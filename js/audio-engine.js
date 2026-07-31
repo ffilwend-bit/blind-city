@@ -672,9 +672,12 @@ const RealEngine = {
     }
   },
   // Freinage volontaire (espace) : plus fort qu'une simple décélération.
+  // Diffusé aux joueurs proches (passager compris) : avant, seul le
+  // conducteur entendait son propre freinage.
   brake(speedRatio) {
     const key = speedRatio > 0.5 ? 'veh1_frenage_brusque_haute_vitesse' : UTIL.pick(['veh1_frenage_1', 'veh1_frenage_2', 'veh1_frenage_3', 'veh1_frenage_4', 'veh1_frenage_5']);
     AudioLib.playOnce(key, { volume: 0.45, exclusive: 'realengine_brake' });
+    if (window.Net && Net.connected) Net.emitSound(key, { vol: 0.45 });
   },
 };
 
@@ -769,6 +772,16 @@ function createSampleEngine(keys) {
         this.lastEventTime = now;
         AudioLib.playOnce(speedRatio > 0.55 ? keys.decelLongue : UTIL.pick(keys.decels), { volume: 0.35, exclusive: keys.demarrage + '_event' });
       }
+    },
+    // Freinage volontaire (espace) : avant, seul le kit sport (RealEngine)
+    // avait un vrai son de freinage — la majorité des véhicules (normaux et
+    // électriques) restait silencieuse au freinage, seul le changement
+    // progressif de régime étant (à peine) audible au pas suivant. Diffusé
+    // aux joueurs proches (passager compris), comme RealEngine.brake().
+    brake(speedRatio) {
+      const key = speedRatio > 0.5 ? keys.decelLongue : UTIL.pick(keys.decels);
+      AudioLib.playOnce(key, { volume: 0.5, exclusive: keys.demarrage + '_event' });
+      if (window.Net && Net.connected) Net.emitSound(key, { vol: 0.5 });
     },
   };
 }
@@ -1008,16 +1021,26 @@ window.AudioLib = AudioLib;
 ============================================================ */
 const Weather = {
   state: 'clair', // 'clair' | 'pluie'
+  // En multijoueur, la météo vient DU SERVEUR (voir Net.handleMessage,
+  // 'weather_change') : tout le monde sur le même serveur voit la même pluie
+  // au même moment, au lieu que chaque client la tire indépendamment au
+  // hasard (avant, deux joueurs côte à côte pouvaient avoir un temps différent).
+  applyState(newState, sayIt) {
+    if (newState === this.state) return;
+    this.state = newState;
+    if (sayIt) announce(newState === 'pluie' ? 'Le ciel se couvre, il commence à pleuvoir.' : 'La pluie s\'arrête, le ciel se dégage.', 'polite');
+    if (this.state === 'pluie') AudioLib.playLoop('amb_pluie', 0.18); else AudioLib.stopLoop('amb_pluie');
+  },
+  // Repli SOLO uniquement (pas connecté à un serveur) : tirage local, comme
+  // avant. Dès qu'un serveur est connecté, c'est lui qui décide (voir
+  // Net.handleMessage) et ce tirage local ne s'exécute plus.
   tick() {
+    if (Net.connected) return;
     // Probabilités ASYMÉTRIQUES : il se met rarement à pleuvoir, et la pluie
     // s'arrête vite. Avant, un simple basculement à 12 % faisait pleuvoir
     // environ la moitié du temps — beaucoup trop.
-    if (this.state === 'clair') {
-      if (UTIL.chance(0.08)) { this.state = 'pluie'; announce('Le ciel se couvre, il commence à pleuvoir.', 'polite'); }
-    } else {
-      if (UTIL.chance(0.6)) { this.state = 'clair'; announce('La pluie s\'arrête, le ciel se dégage.', 'polite'); }
-    }
-    if (this.state === 'pluie') AudioLib.playLoop('amb_pluie', 0.18); else AudioLib.stopLoop('amb_pluie');
+    if (this.state === 'clair') { if (UTIL.chance(0.08)) this.applyState('pluie', true); }
+    else { if (UTIL.chance(0.6)) this.applyState('clair', true); }
   },
 };
 const AmbientZones = {

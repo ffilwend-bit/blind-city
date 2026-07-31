@@ -44,6 +44,10 @@ const Net = {
         Game.newsArticles = msg.news || [];
         City.morgue = msg.morgue || [];
         City.graves = msg.graves || [];
+        // Météo déjà en cours sur ce serveur : appliquée silencieusement (ce
+        // n'est pas un "changement" pour ce joueur qui vient d'arriver, juste
+        // l'état actuel qu'il découvre en rejoignant).
+        if (msg.weather && typeof Weather !== 'undefined') Weather.applyState(msg.weather, false);
         const displayId = msg.id.replace(/^p/, '');
         setTimeout(() => announce(`Votre identifiant de connexion est le ${displayId}. Communiquez-le à votre équipe pour les missions à IDs. Il change à chaque reconnexion.`, 'polite'), 4000);
         onReady(msg.seed);
@@ -64,7 +68,9 @@ const Net = {
   },
   send(msg) { if (this.connected && this.ws && this.ws.readyState === WebSocket.OPEN) { try { this.ws.send(JSON.stringify(msg)); } catch (e) {} } },
   handleMessage(msg) {
-    if (msg.type === 'dial_result') {
+    if (msg.type === 'weather_change') {
+      Weather.applyState(msg.state, true);
+    } else if (msg.type === 'dial_result') {
       if (this._pendingDialCallback) { const cb = this._pendingDialCallback; this._pendingDialCallback = null; cb(msg); }
       if (!msg.ok) announce(msg.reason || 'Numéro injoignable.', 'assertive');
     } else if (msg.type === 'sms_result') {
@@ -241,6 +247,12 @@ const Net = {
       if (this._pendingAccountsCallback) this._pendingAccountsCallback(msg.accounts || []);
     } else if (msg.type === 'staff_job_requests') {
       if (this._jobRequestsCallback) this._jobRequestsCallback(msg.requests || []);
+    } else if (msg.type === 'staff_job_request_alert') {
+      // Sans ça, une candidature de métier n'apparaissait que dans le journal
+      // staff silencieux (jamais annoncé) : un admin ne la découvrait que s'il
+      // allait le consulter de lui-même — d'où les demandes qui semblaient
+      // ne jamais arriver.
+      announce(`${msg.name} demande le métier « ${msg.roleName} ». Menu staff pour approuver ou refuser.`, 'assertive');
     } else if (msg.type === 'staff_job_review_result') {
       announce(`${msg.name} : métier « ${msg.roleName} » ${msg.approved ? 'accordé' : 'refusé'}.`, 'assertive');
     } else if (msg.type === 'job_granted') {
@@ -303,10 +315,15 @@ const Net = {
       const remote = Net.remotePlayers.get(msg.fromId);
       Game.myContacts = Game.myContacts || [];
       const entry = { number: msg.number || null, username: remote?.accountUsername || null, label: msg.label };
-      // Sans numéro (msg.number absent), on dédoublonne par nom de compte : sinon
-      // chaque message d'un même contact sans numéro créait un nouveau doublon.
-      const i = Game.myContacts.findIndex(c => (msg.number && c.number === msg.number) || (!msg.number && entry.username && c.username === entry.username));
-      if (i !== -1) Game.myContacts[i] = entry; else Game.myContacts.push(entry);
+      // Ni numéro ni compte identifiable (l'expéditeur s'est déconnecté entre
+      // l'envoi et la réception) : impossible de jamais rappeler cette entrée,
+      // elle ne doit pas apparaître dans les contacts.
+      if (entry.number || entry.username) {
+        // Sans numéro (msg.number absent), on dédoublonne par nom de compte : sinon
+        // chaque message d'un même contact sans numéro créait un nouveau doublon.
+        const i = Game.myContacts.findIndex(c => (msg.number && c.number === msg.number) || (!msg.number && entry.username && c.username === entry.username));
+        if (i !== -1) Game.myContacts[i] = entry; else Game.myContacts.push(entry);
+      }
       Phone.contacts = Phone.contacts || [];
       if (msg.number && !Phone.contacts.some(c => c.number === msg.number)) Phone.contacts.push({ id: 'recv_' + msg.number, name: msg.label, number: msg.number, role: 'citoyen' });
       AudioLib.playNotification();
@@ -405,6 +422,11 @@ const Net = {
     this.send({
       type: 'state', x: Game.x, y: Game.y, heading: Game.heading, health: Game.health, hunger: Game.hunger, thirst: Game.thirst,
       role: Roles.current, policeRank: Game.policeRank, outfit: Game.outfit, inVehicle: Game.inVehicle, vehicleName: Game.vehicle?.name || null,
+      // Type et vitesse du véhicule : permet à un PASSAGER (ridingWith, voir
+      // plus haut) d'entendre le moteur de CE véhicule chez lui, en le
+      // synthétisant localement d'après ces données (voir tickPassengerAudio).
+      vehicleType: Game.vehicle?.type || null,
+      vehicleSpeedRatio: (Game.vehicle && VEHICLE_CATALOG[Game.vehicle.type]) ? Math.abs(Game.vehicle.speed || 0) / VEHICLE_CATALOG[Game.vehicle.type].maxSpeed : 0,
       talkieOn: Game.talkie.on, talkieFrequency: Game.talkie.frequency,
       convoy: (typeof Convoy !== 'undefined' ? Convoy.code : null),
       airplane: !!(typeof Phone !== 'undefined' && Phone.airplane),

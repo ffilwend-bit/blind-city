@@ -63,6 +63,12 @@ const Game = {
       // jamais se stabiliser) — la marche à pied n'a jamais eu ce problème.
       this.vehicle.heading = ((this.vehicle.heading + delta) % 8 + 8) % 8; this.heading = this.vehicle.heading;
       if (!cls?.flies) AudioLib.playOnce('clignotant_voiture', { volume: 0.35 });
+      // Crissement de pneus si l'on tourne à vive allure : avant, un virage
+      // à pleine vitesse ne sonnait pas différemment d'un virage à l'arrêt.
+      if (!cls?.flies && !cls?.human && Math.abs(this.vehicle.speed || 0) / (cls?.maxSpeed || 1) > 0.5) {
+        Audio.screech(delta > 0 ? 0.5 : -0.5);
+        if (Net.connected) Net.emitSound('synth:screech', { vol: 0.5 });
+      }
     }
     // À pied, on tourne finement par huitièmes (45°) : flèche gauche/droite fait
     // pivoter un peu à la fois sur soi-même, pour viser un cap précis parmi les
@@ -348,9 +354,14 @@ const Game = {
       }
       v.speed = 0; Audio.screech(0);
       const otherVehicleHere = City.vehicles.some(ov => ov.id !== v.id && UTIL.dist(ov, { x: nx, y: ny }) < 1.5);
-      if (otherVehicleHere) AudioLib.playOnce('veh_kolision_entre_2', { volume: 0.6, exclusive: 'veh_collision_' + v.id });
-      else if (impactDmg > 20) AudioLib.playOnce('veh_kolision_4_fort', { volume: 0.65, exclusive: 'veh_collision_' + v.id });
-      else if (impactDmg > 8) AudioLib.playOnce(UTIL.pick(['veh_kolision_1', 'veh_kolision_2', 'veh_kolision_3']), { volume: 0.55, exclusive: 'veh_collision_' + v.id });
+      // Diffusée aux joueurs proches (passager compris, qui se trouve à la
+      // même position que le véhicule) : avant, seul le conducteur entendait
+      // sa propre collision.
+      const collisionKey = otherVehicleHere ? 'veh_kolision_entre_2' : impactDmg > 20 ? 'veh_kolision_4_fort' : impactDmg > 8 ? UTIL.pick(['veh_kolision_1', 'veh_kolision_2', 'veh_kolision_3']) : null;
+      if (collisionKey) {
+        AudioLib.playOnce(collisionKey, { volume: otherVehicleHere ? 0.6 : (impactDmg > 20 ? 0.65 : 0.55), exclusive: 'veh_collision_' + v.id });
+        if (Net.connected) Net.emitSound(collisionKey, { vol: 0.6 });
+      }
       announce(`Collision !${impactDmg > 3 ? ` État du véhicule : ${Math.round(v.hp)}%.` : ''}`, 'assertive');
       if (City.isRoad(v.x, v.y)) this.npcVoiceReaction(v.x, v.y, { group: 'impatient', radius: 12, count: 2 });
     } else {
@@ -398,10 +409,14 @@ const Game = {
     const v = this.vehicle; const cls = VEHICLE_CATALOG[v.type];
     const speedRatioBefore = Math.abs(v.speed) / cls.maxSpeed;
     v.speed = Math.max(0, Math.abs(v.speed) - 0.15) * (v.speed < 0 ? -1 : 1);
-    // Le vrai freinage enregistré (crissement) n'existe que dans le kit
-    // sport ; les autres moteurs (véhicule2, électrique, aérien) se
-    // contentent d'un ralentissement de régime, déjà audible au prochain pas.
-    if (speedRatioBefore > 0.2 && cls.sport) RealEngine.brake(speedRatioBefore);
+    // Vrai son de freinage à l'appui d'espace : avant, seul le kit sport avait
+    // un crissement dédié — les autres véhicules (normaux, électriques)
+    // restaient silencieux, le changement de régime étant à peine perceptible.
+    if (speedRatioBefore > 0.2) {
+      if (cls.sport) RealEngine.brake(speedRatioBefore);
+      else if (cls.electric) RealElectricEngine.brake(speedRatioBefore);
+      else if (!cls.human && !cls.flies) RealEngine2.brake(speedRatioBefore);
+    }
     // Vélo : vrai son de frein (une variante au hasard), throttlé pour ne pas
     // se répéter en boucle si l'on maintient le frein.
     if (cls.human && speedRatioBefore > 0.05 && Date.now() - (this._lastBikeBrake || 0) > 500) {
@@ -549,6 +564,29 @@ const Game = {
       if (Game.keys.has('arrowleft') || td === 'left') { this.turn(-1); this._lastContinuousMove = now2; }
       else if (Game.keys.has('arrowright') || td === 'right') { this.turn(1); this._lastContinuousMove = now2; }
     }
+  },
+  // Passager d'un VRAI joueur (ridingWith) : avant, seul le conducteur
+  // entendait le moteur de son propre véhicule — le passager roulait dans un
+  // silence total. On synthétise localement le même moteur, d'après le type
+  // et le ratio de vitesse envoyés par le conducteur (voir Net.sendState).
+  tickPassengerAudio() {
+    const driver = this.ridingWith && this.ridingWith.id ? Net.remotePlayers.get(this.ridingWith.id) : null;
+    if (!driver || !driver.inVehicle || !driver.vehicleType) {
+      if (this._passengerEngine) { this._passengerEngine.stop(); this._passengerEngine = null; }
+      return;
+    }
+    const cls = VEHICLE_CATALOG[driver.vehicleType];
+    if (!cls) return;
+    const engine = cls.flies ? RealAirEngine : cls.electric ? RealElectricEngine : cls.sport ? RealEngine : cls.human ? null : RealEngine2;
+    if (!engine) return; // vélo : pas de moteur à synthétiser
+    if (this._passengerEngine && this._passengerEngine !== engine) this._passengerEngine.stop();
+    this._passengerEngine = engine;
+    const fakeVehicle = { id: 'passenger_of_' + driver.id, type: driver.vehicleType };
+    const ratio = UTIL.clamp(driver.vehicleSpeedRatio || 0, 0, 1);
+    // RealEngine (sport) et RealAirEngine attendent (v, cls, ratio) ; les
+    // moteurs "échantillon" (RealEngine2/RealElectricEngine) attendent
+    // seulement (v, ratio) — signatures différentes, voir leurs définitions.
+    if (cls.flies || cls.sport) engine.update(fakeVehicle, cls, ratio); else engine.update(fakeVehicle, ratio);
   },
   // Conduite automatique vers un point précis {name,x,y}.
   setAutoDriveTo(dest) {
@@ -828,7 +866,7 @@ const Game = {
     // Le permis est exigé pour conduire — mais pas pour un véhicule-école, ni
     // pour un vélo ou tout véhicule à propulsion humaine (cls.noLicense).
     if (!v.examVehicle && !cls?.noLicense && !this.checkLicense(cls?.flies ? 'flying' : 'driving')) return;
-    if (cls && !cls.flies && !cls.human) { // pas de portière/ceinture pour un vélo
+    if (cls && !cls.flies && !cls.human && cls.doors > 0) { // pas de portière/ceinture pour un vélo, ni pour une moto/scooter/quad (aucune portière)
       AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 });
       if (Net.connected) Net.emitSound('veh1_ouverture_porte', { vol: 0.5 }); // porte audible par les joueurs proches
       setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
@@ -839,9 +877,13 @@ const Game = {
     // d'avancer sans choisir de destination d'abord »). Pour un guidage vers
     // un lieu précis, le téléphone (Lieux utiles / Carte, bouton 🧭) reste
     // disponible à tout moment, sans jamais bloquer la conduite libre.
+    // Boîte manuelle (motos et voitures sport) : annoncé une seule fois à la
+    // montée, sans quoi les touches (crochet droit/gauche du clavier, sans
+    // rapport avec le cap) restaient invisibles pour le joueur.
+    const gearboxHint = cls?.manualGearbox ? ` Boîte manuelle à ${this.GEAR_RATIOS.length} rapports : les deux touches à droite du clavier, juste avant la touche Entrée (crochet fermant pour monter d'un rapport, celle juste avant pour redescendre), plafonnent votre vitesse tant que vous ne passez pas le rapport suivant.` : '';
     if (cls?.human) announce(`Vous enfourchez ${v.name}. Flèches pour pédaler et tourner, espace pour freiner.`, 'assertive');
-    else if (cls?.doors === 0) announce(`Vous enfourchez ${v.name}. Flèche haut pour démarrer le moteur, puis accélérer et tourner, espace pour freiner.`, 'assertive'); // moto / scooter / quad : on accélère, on ne pédale pas
-    else announce(`Vous montez au volant de ${v.name}. Flèche haut pour démarrer le moteur${cls?.flies ? ' et le laisser se stabiliser' : ''}, puis conduire. Espace pour freiner.`, 'assertive');
+    else if (cls?.doors === 0) announce(`Vous enfourchez ${v.name}. Flèche haut pour démarrer le moteur, puis accélérer et tourner, espace pour freiner.${gearboxHint}`, 'assertive'); // moto / scooter / quad : on accélère, on ne pédale pas
+    else announce(`Vous montez au volant de ${v.name}. Flèche haut pour démarrer le moteur${cls?.flies ? ' et le laisser se stabiliser' : ''}, puis conduire. Espace pour freiner.${gearboxHint}`, 'assertive');
     if (this.activeMission && this.activeMission.type === 'convoyage' && this.activeMission.vehicleId === v.id && !this.deliveryState) this.startVehicleDelivery(this.activeMission);
     // Le taxi PNJ qu'on a fait venir (Ctrl+X) n'a pas de chauffeur : contrairement
     // aux autres véhicules, on promet explicitement "dites un lieu" en l'appelant
@@ -2600,7 +2642,13 @@ const Game = {
         return;
       }
     }
-    if (this.inVehicle) return this.interactVehicle();
+    // Le passager (ridingWith) doit aussi tomber ici pour descendre directement
+    // : sinon E le faisait passer par la recherche de cibles ci-dessous, qui ne
+    // le faisait descendre QUE si le véhicule était la seule cible à portée
+    // (menu de choix sinon, voire une tout autre interaction) — d'où le statut
+    // "passager" qui semblait ne jamais se nettoyer une fois qu'on avait fait
+    // autre chose entre-temps.
+    if (this.inVehicle || this.ridingWith) return this.interactVehicle();
     // On rassemble TOUT ce avec quoi on peut interagir à portée (joueurs, PNJ,
     // bâtiments, maisons, véhicules, mine, gang, objets au sol). S'il n'y a
     // qu'une seule chose, on interagit directement ; s'il y en a plusieurs, on
@@ -3277,6 +3325,10 @@ const Game = {
     if (!it) return announce('Article non trouvé.', 'assertive');
     if (this.money < it.price) return announce('Pas assez d\'argent.', 'assertive');
     if (it.q <= 0) return announce('Rupture de stock.', 'assertive');
+    // Vérifier la place AVANT de débiter : sinon l'argent partait et le stock
+    // diminuait même quand les poches pleines empêchaient l'ajout, faisant
+    // perdre l'argent sans jamais recevoir l'objet.
+    if (!this.canAdd(it)) return announce('Vos poches sont pleines : impossible de recevoir cet achat.', 'assertive');
     this.money -= it.price; it.q--;
     const bought = { ...it, q: 1 };
     this.addItem(bought);
@@ -3299,6 +3351,9 @@ const Game = {
     const unitPrice = Math.round(it.price * (1 + surcharge));
     const total = unitPrice * qty;
     if (this.money < total) return announce(`Pas assez d'argent pour ${qty} ${it.name} (${UTIL.formatMoney(total)}).`, 'assertive');
+    // Même vérification que buyItem() : la place doit être garantie AVANT de
+    // débiter, sinon l'argent partait sans que l'objet ne soit jamais reçu.
+    if (!this.canAdd({ ...it, q: qty })) return announce('Vos poches sont pleines : impossible de recevoir cet achat.', 'assertive');
     this.money -= total; it.q -= qty;
     this.addItem({ ...it, q: qty });
     Audio.cash();
@@ -5282,7 +5337,7 @@ const Game = {
     });
   },
   help() {
-    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Alt+H se planquer ou sortir de la planque près d\'une couverture (rend bien plus difficile à repérer et permet de semer une poursuite), Maj+G arrêter le guidage, Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
+    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B inventaire, L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Alt+H se planquer ou sortir de la planque près d\'une couverture (rend bien plus difficile à repérer et permet de semer une poursuite), Maj+G arrêter le guidage, boîte manuelle des motos et voitures sport : les deux touches à droite du clavier juste avant Entrée (crochet fermant pour monter d\'un rapport, celle juste avant pour redescendre), Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
   },
 
   // Save / load
