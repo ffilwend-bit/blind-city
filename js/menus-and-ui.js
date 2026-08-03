@@ -1556,6 +1556,8 @@ function startGame(seed) {
     setInterval(() => Net.sendState(), 300);
     setInterval(() => Weather.tick(), 90000);
     setInterval(() => AmbientZones.check(), 3000);
+    setInterval(() => Game.tickPassersby(), 4000);
+    setInterval(() => Game.tickNpcTraffic(), 1000);
     setInterval(() => Game.updateBeacons(), 150);
     setInterval(() => Game.updateVehicleDelivery(), 1000);
     setInterval(() => Game.updateGangCombat(), 1500);

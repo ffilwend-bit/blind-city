@@ -255,3 +255,16 @@ const BEGINNER_MISSION_TYPES = ['taxi_soigne', 'colis_fragile', 'objet_perdu', '
 // SANS AUCUN guidage. Restreint maintenant aux seules missions qui en ont
 // réellement besoin.
 const MULTIPLAYER_REQUIRED_MISSION_TYPES = ['defense_territoire', 'casse_extreme', 'convoi_blinde'];
+
+// Bribes de conversation de passants entendues en marchant près d'un PNJ non
+// hostile (voir Game.tickPassersby) — juste de l'ambiance sonore, sans lien
+// avec la voix de mission/dialogue. Une paire homme/femme par phrase, dans
+// SOUND_FILES sous 'passant_<slug>_h' / 'passant_<slug>_f'.
+const PASSANT_LINES = [
+  'carburant', 'pas_regarder', 'cafe_quatorze', 'pas_en_retard', 'nouvelle_boutique', 'prix_incroyables',
+  'marche_abimee', 'ville_en_ruine', 'ciel_gris', 'parapluie', 'ca_fait_une_eternite', 'comment_va_famille',
+  'tu_bosses_toujours', 'marche_difficile', 'tu_as_un_moment', 'je_suis_tout_ouie', 'rater_le_bus', 'je_cours',
+  'trop_de_choses', 'bientot_le_weekend', 'projets_vacances', 'rester_tranquille', 'je_suis_presse', 'pas_le_temps',
+  'oh_bonjour', 'bonne_journee', 'temps_bizarre', 'tu_as_lheure', 'je_suis_en_retard', 'ca_va_tranquille',
+  'a_plus_tard', 'quel_bazar', 'mal_aux_pieds',
+];

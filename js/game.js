@@ -616,26 +616,78 @@ const Game = {
   // d'autre passait dans un silence total. Rayon large pour un avion/hélico
   // (on l'entend de loin), plus court pour un véhicule au sol.
   tickAmbientVehicles() {
-    if (!Net.connected || !window.AudioLib || typeof AudioLib.playLoopInstance !== 'function') return;
+    if (!window.AudioLib || typeof AudioLib.playLoopInstance !== 'function') return;
     const active = new Set();
-    Net.remotePlayers.forEach((p, pid) => {
-      if (this.ridingWith && this.ridingWith.id === pid) return; // déjà géré par tickPassengerAudio
-      if (!p.inVehicle || !p.vehicleType) return;
-      const cls = VEHICLE_CATALOG[p.vehicleType];
-      if (!cls || cls.human) return;
-      const radius = cls.flies ? 45 : 16;
-      const dist = UTIL.dist(p, this);
+    if (Net.connected) {
+      Net.remotePlayers.forEach((p, pid) => {
+        if (this.ridingWith && this.ridingWith.id === pid) return; // déjà géré par tickPassengerAudio
+        if (!p.inVehicle || !p.vehicleType) return;
+        const cls = VEHICLE_CATALOG[p.vehicleType];
+        if (!cls || cls.human) return;
+        const radius = cls.flies ? 45 : 16;
+        const dist = UTIL.dist(p, this);
+        if (dist > radius) return;
+        const instanceId = 'ambveh_' + pid;
+        active.add(instanceId);
+        const key = cls.flies ? (p.vehicleType === 'avion' ? 'avion_stable' : 'helico_stable') : cls.electric ? 'veh_elec_vitesse_moyenne' : cls.sport ? 'veh1_cruise' : 'veh2_vitesse_moyenne';
+        const ratio = UTIL.clamp(p.vehicleSpeedRatio || 0, 0, 1);
+        const vol = UTIL.clamp((1 - dist / radius) * (0.15 + ratio * 0.25), 0, 0.4);
+        const pan = this.panForPoint(p.x, p.y);
+        AudioLib.playLoopInstance(instanceId, key, vol, pan);
+      });
+    }
+    // Circulation de PNJ (voir tickNpcTraffic) : même traitement, pour que ces
+    // véhicules qui roulent seuls dans la ville s'entendent aussi, solo comme en ligne.
+    (this._trafficVehicleIds || new Set()).forEach(vid => {
+      const v = City.vehicles.find(vv => vv.id === vid);
+      if (!v) return;
+      const cls = VEHICLE_CATALOG[v.type];
+      if (!cls) return;
+      const radius = 16;
+      const dist = UTIL.dist(v, this);
       if (dist > radius) return;
-      const instanceId = 'ambveh_' + pid;
+      const instanceId = 'ambveh_ai_' + vid;
       active.add(instanceId);
-      const key = cls.flies ? (p.vehicleType === 'avion' ? 'avion_stable' : 'helico_stable') : cls.electric ? 'veh_elec_vitesse_moyenne' : cls.sport ? 'veh1_cruise' : 'veh2_vitesse_moyenne';
-      const ratio = UTIL.clamp(p.vehicleSpeedRatio || 0, 0, 1);
+      const key = cls.electric ? 'veh_elec_vitesse_moyenne' : cls.sport ? 'veh1_cruise' : 'veh2_vitesse_moyenne';
+      const ratio = UTIL.clamp((v.speed || 0) / (cls.maxSpeed || 1), 0, 1);
       const vol = UTIL.clamp((1 - dist / radius) * (0.15 + ratio * 0.25), 0, 0.4);
-      const pan = this.panForPoint(p.x, p.y);
-      AudioLib.playLoopInstance(instanceId, key, vol, pan);
+      AudioLib.playLoopInstance(instanceId, key, vol, this.panForPoint(v.x, v.y));
     });
     (this._ambientVehicleIds || []).forEach(instanceId => { if (!active.has(instanceId)) AudioLib.stopLoopInstance(instanceId); });
     this._ambientVehicleIds = active;
+  },
+  // Fait "vivre" la ville en animant quelques véhicules non possédés à
+  // proximité, comme une petite circulation de PNJ (avant, un véhicule garé le
+  // restait pour toujours, sans qu'aucun PNJ ne le conduise jamais). Rayon
+  // limité au voisinage du joueur : inutile de simuler du trafic à l'autre
+  // bout de la ville, que personne ne peut voir ni entendre.
+  tickNpcTraffic() {
+    const MAX_TRAFFIC = 4, RADIUS = 35;
+    if (!this._trafficVehicleIds) this._trafficVehicleIds = new Set();
+    for (const id of Array.from(this._trafficVehicleIds)) {
+      const v = City.vehicles.find(vv => vv.id === id);
+      if (!v || v.owner || (this.inVehicle && this.vehicle === v) || !v.aiTraffic) { this._trafficVehicleIds.delete(id); if (v) { v.aiTraffic = false; v.aiPath = null; } continue; }
+      if (!v.aiPath || v.aiPathIdx >= v.aiPath.length || UTIL.dist(v, this) > RADIUS * 1.5) {
+        v.aiTraffic = false; v.aiPath = null; v.speed = 0; this._trafficVehicleIds.delete(id); continue;
+      }
+      const step = v.aiPath[v.aiPathIdx];
+      v.x = step.x; v.y = step.y; v.aiPathIdx++;
+      v.speed = (VEHICLE_CATALOG[v.type]?.maxSpeed || 1) * 0.4;
+    }
+    if (this._trafficVehicleIds.size < MAX_TRAFFIC && UTIL.chance(0.3)) {
+      const candidates = City.vehicles.filter(v => {
+        const cls = VEHICLE_CATALOG[v.type];
+        return !v.owner && !v.aiTraffic && cls && !cls.flies && !cls.human && !(this.inVehicle && this.vehicle === v) && UTIL.dist(v, this) < RADIUS;
+      });
+      if (candidates.length) {
+        const v = UTIL.pick(candidates);
+        const d = UTIL.randInt(8, 20), angle = Math.random() * Math.PI * 2;
+        const destX = UTIL.clamp(Math.round(v.x + Math.cos(angle) * d), 0, City.W - 1);
+        const destY = UTIL.clamp(Math.round(v.y + Math.sin(angle) * d), 0, City.H - 1);
+        const path = this.computePath(v.x, v.y, destX, destY);
+        if (path && path.length > 2) { v.aiTraffic = true; v.aiPath = path; v.aiPathIdx = 1; this._trafficVehicleIds.add(v.id); }
+      }
+    }
   },
   // Conduite automatique vers un point précis {name,x,y}.
   setAutoDriveTo(dest) {
@@ -941,6 +993,9 @@ const Game = {
       if (Net.connected) Net.emitSound('veh1_ouverture_porte', { vol: 0.5 }); // porte audible par les joueurs proches
       setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
     }
+    // Si ce véhicule était animé par la circulation de PNJ (voir
+    // tickNpcTraffic), on lui rend la main immédiatement : c'est le joueur qui conduit maintenant.
+    if (v.aiTraffic) { v.aiTraffic = false; v.aiPath = null; if (this._trafficVehicleIds) this._trafficVehicleIds.delete(v.id); }
     this.vehicle = v; this.inVehicle = true; this.altitude = v.altitude || 0; this.floor = 0;
     // On conduit TOUT DE SUITE avec les flèches, librement, sans qu'aucun menu
     // ne s'impose : c'était la principale source de confusion (« impossible
@@ -2355,6 +2410,25 @@ const Game = {
   // Alias conservé pour compatibilité avec le code existant.
   npcPanicReaction(cx, cy, opts = {}) { this.npcVoiceReaction(cx, cy, opts); },
 
+  // Bribes de conversation de passants entendues en marchant près d'un PNJ
+  // (pas d'interaction directe) : donne l'impression d'une ville vivante,
+  // avec de vraies voix positionnées à la vraie position du PNJ (contrairement
+  // à randomEncounters() ci-dessous, dont le panoramique est purement
+  // aléatoire, sans PNJ réel derrière).
+  tickPassersby() {
+    if (this.inVehicle || this.unconscious || this.interior) return;
+    const now = Date.now();
+    if (now - (this._lastPassantLine || 0) < 12000) return; // pas plus d'une bribe toutes les 12 s
+    const nearby = City.npcs.filter(n => !n.dead && !n.hostile && !n.menotte && !n.knockedOut && !n.handsUp && UTIL.dist(n, this) < 8);
+    if (!nearby.length || !UTIL.chance(0.35)) return;
+    this._lastPassantLine = now;
+    const n = UTIL.pick(nearby);
+    const slug = UTIL.pick(PASSANT_LINES);
+    const key = `passant_${slug}_${n.gender === 'femme' ? 'f' : 'h'}`;
+    const dist = UTIL.dist(n, this);
+    const vol = UTIL.clamp(0.7 - dist / 12, 0.15, 0.7);
+    AudioLib.playPositional(key, this.panForPoint(n.x, n.y), vol);
+  },
   // Random encounters
   randomEncounters() {
     if (UTIL.chance(0.02)) {
