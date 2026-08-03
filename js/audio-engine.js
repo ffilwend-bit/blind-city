@@ -230,6 +230,12 @@ const SOUND_FILES = {
   sfx_recharge: 'sounds/sfx_recharge.mp3',
   sfx_arme_vide: 'sounds/sfx_arme_vide.mp3',
   sfx_rafale: 'sounds/sfx_rafale.mp3',
+  // Enrayage (l'arme se bloque en tirant, voir Game.shoot/reload) et sons de
+  // tir réels dédiés aux armes lourdes (sniper, fusil à pompe) — avant,
+  // toutes les armes partageaient le même tir synthétisé (Audio.gunshot).
+  sfx_arme_enrayee: 'sounds/sfx_arme_enrayee.wav',
+  sfx_arme_lourd_sniper: 'sounds/sfx_arme_lourd_sniper.wav',
+  sfx_arme_lourd_pompe: 'sounds/sfx_arme_lourd_pompe.wav',
   sfx_alarme_antivol: 'sounds/sfx_alarme_antivol.flac', // usage exclusif : antivol de véhicule (vol forcé)
   sfx_explosion: 'sounds/sfx_explosion.mp3',
   sfx_bienvenue: 'sounds/sfx_bienvenue.mp3',

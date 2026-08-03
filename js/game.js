@@ -18,6 +18,8 @@ const Game = {
   MOVE_SCALE: 1 / 12,
   inventory: [], backpack: false, belt: false, holster: null,
   weapons: [], weapon: null, weaponOut: false, ammo: {}, ammoReserve: {},
+  // Enrayage : chance qu'une arme à feu se bloque en tirant (voir shoot/reload).
+  weaponJammed: false, JAM_CHANCE: 0.03,
   lockedTarget: null, scannedTargets: [], aimPart: 'torse',
   activeMission: null, completedMissions: [],
   ownedHouses: [], ownedWarehouses: [], savedPlaces: [], ownsTablet: false, plantations: [],
@@ -2376,10 +2378,21 @@ const Game = {
   selectWeapon(id) {
     if (!this.weapons.includes(id)) return announce('Arme non possédée.', 'assertive');
     this.weapon = WEAPON_CATALOG[id]; this.lastWeaponId = id; this.weaponOut = true;
+    this.weaponJammed = false; // une autre arme qu'on prend en main n'est jamais déjà enrayée
     announce(`${this.weapon.name} équipé. ${this._weaponAmmoStatus(this.weapon)}`, 'assertive'); updateHud();
   },
   reload() {
     if (!this.weapon) return;
+    // Arme enrayée (voir shoot) : R sert d'abord à la dégager, sans
+    // consommer de munition — un vrai rechargement suit sur un appui suivant.
+    if (this.weaponJammed) {
+      this.weaponJammed = false;
+      Audio.click();
+      AudioLib.playOnce('sfx_recharge', { volume: 0.5 });
+      announce(`Vous dégagez l'enrayage de ${this.weapon.name}. Prête à retirer.`, 'assertive');
+      updateHud();
+      return;
+    }
     const type = this.weapon.ammoType;
     if (!type) return announce('Cette arme ne se recharge pas.', 'polite');
     const loaded = this.ammo[type] || 0;
@@ -2404,8 +2417,21 @@ const Game = {
     if (this.hidden) { this.hidden = false; announce('Le coup de feu révèle votre position.', 'polite'); } // tirer casse la planque
 
     if (!this.weaponOut || !this.weapon) return announce('Sortez d\'abord une arme.', 'assertive');
+    if (this.weaponJammed) return announce(`${this.weapon.name} est enrayée. Dégagez-la avec R avant de retirer.`, 'assertive');
     if (this.ammo[this.weapon.ammoType] <= 0) { AudioLib.playOnce('sfx_arme_vide'); announce('Chargeur vide. Rechargez avec R.', 'assertive'); return; }
     const w = this.weapon;
+    // Enrayage : une arme à feu (pas une arme de contact comme la matraque,
+    // magazine: 0) peut occasionnellement se bloquer au tir. Ne consomme pas
+    // de munition ; il faut la dégager (touche R) avant de pouvoir retirer.
+    if (w.magazine > 0 && UTIL.chance(this.JAM_CHANCE)) {
+      this.weaponJammed = true;
+      AudioLib.playOnce('sfx_arme_enrayee', { volume: 0.6, exclusive: 'weapon_shot' });
+      if (Net.connected) Net.emitSound('sfx_arme_enrayee', { vol: 0.5 });
+      announce(`${w.name} s'enraye ! Dégagez-la avec R avant de pouvoir retirer.`, 'assertive');
+      this.cooldown = true; setTimeout(() => this.cooldown = false, w.fireRate * 1000);
+      updateHud();
+      return;
+    }
     const live = this.getLiveTarget();
     const target = live ? { ...this.lockedTarget, ...live } : null;
     const range = target ? UTIL.dist(target, this) : 0;
@@ -2422,8 +2448,11 @@ const Game = {
     if (range > effRange) acc *= 0.3;
     acc += heightBonus + floorBonus + climbBonus;
     this.ammo[w.ammoType]--;
-    Audio.gunshot(w.name, 0);
-    if (Net.connected) Net.emitSound('synth:gunshot', { vol: 0.95 }); // audible par les joueurs proches
+    // Armes lourdes avec un son de tir réel dédié (voir WEAPON_CATALOG) :
+    // sinon, tir synthétisé générique comme avant.
+    if (w.shotSound) AudioLib.playOnce(w.shotSound, { volume: 0.9, exclusive: 'weapon_shot' });
+    else Audio.gunshot(w.name, 0);
+    if (Net.connected) Net.emitSound(w.shotSound || 'synth:gunshot', { vol: 0.95 }); // audible par les joueurs proches
     if (typeof GuideDog !== 'undefined') GuideDog.onDangerNear(this.x, this.y); // le chien alerte / se cache
     setTimeout(() => Audio.shellDrop(0), 150);
     if (Date.now() - (this._lastGunfireReport || 0) > 8000) {
@@ -2481,6 +2510,7 @@ const Game = {
   startBurst() {
     if (this.burstTimer) return;
     if (!this.weaponOut || !this.weapon || !this.weapon.auto) { this.shoot(); return; } // arme non automatique : un seul coup
+    if (this.weaponJammed) { this.shoot(); return; } // laisse shoot() annoncer l'enrayage
     if ((this.ammo[this.weapon.ammoType] || 0) <= 0) { AudioLib.playOnce('sfx_arme_vide'); return announce('Chargeur vide. Rechargez avec R.', 'assertive'); }
     // Le son de rafale boucle tant que le doigt/la touche de tir reste enfoncé.
     // Les armes très rapides (cadence ≤ 0.09 s entre coups, comme l'UZI) ont
@@ -2490,6 +2520,8 @@ const Game = {
     AudioLib.playLoop(this._burstKey);
     const fire = () => {
       if (!this.weaponOut || !this.weapon || !this.weapon.auto) { this.stopBurst(); return; }
+      // Enrayage en cours de rafale : coupe la rafale, un seul avertissement.
+      if (this.weaponJammed) { this.stopBurst(); return; }
       if ((this.ammo[this.weapon.ammoType] || 0) <= 0) { this.stopBurst(); return; }
       this.shoot();
     };

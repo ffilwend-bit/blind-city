@@ -56,8 +56,10 @@ const WEAPON_CATALOG = {
   uzi: { name: 'UZI', label: 'uzi', legal: false, slot: 'arme', caliber: 'moyen', dmg: 18, range: 20, accuracy: 0.65, fireRate: 0.08, magazine: 25, ammoType: '9mm', price: 320000, size: 2, auto: true },
   ak47: { name: 'AK-47', label: 'AK-47', legal: false, slot: 'arme', caliber: 'gros', dmg: 32, range: 45, accuracy: 0.7, fireRate: 0.12, magazine: 30, ammoType: '762', price: 450000, size: 3, auto: true },
   m4: { name: 'M4', label: 'M4', legal: false, slot: 'arme', caliber: 'gros', dmg: 30, range: 50, accuracy: 0.78, fireRate: 0.11, magazine: 30, ammoType: '556', price: 520000, size: 3, auto: true },
-  sniper: { name: 'Sniper .338', label: 'sniper', legal: false, slot: 'arme', caliber: 'gros', dmg: 75, range: 90, accuracy: 0.92, fireRate: 1.2, magazine: 5, ammoType: '338', price: 950000, size: 4 },
-  pompe: { name: 'Fusil à pompe', label: 'fusil à pompe', legal: false, slot: 'arme', caliber: 'gros', dmg: 40, range: 16, accuracy: 0.55, fireRate: 0.8, magazine: 6, ammoType: '12cal', price: 280000, size: 3 },
+  // shotSound : son de tir RÉEL dédié (voir Game.shoot), au lieu du tir
+  // synthétisé générique (Audio.gunshot) utilisé par les autres armes.
+  sniper: { name: 'Sniper .338', label: 'sniper', legal: false, slot: 'arme', caliber: 'gros', dmg: 75, range: 90, accuracy: 0.92, fireRate: 1.2, magazine: 5, ammoType: '338', price: 950000, size: 4, shotSound: 'sfx_arme_lourd_sniper' },
+  pompe: { name: 'Fusil à pompe', label: 'fusil à pompe', legal: false, slot: 'arme', caliber: 'gros', dmg: 40, range: 16, accuracy: 0.55, fireRate: 0.8, magazine: 6, ammoType: '12cal', price: 280000, size: 3, shotSound: 'sfx_arme_lourd_pompe' },
 };
 
 const AMMO_CATALOG = {
