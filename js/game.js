@@ -2544,8 +2544,11 @@ const Game = {
     const now = Date.now();
     if (npc && npc._lastCry && now - npc._lastCry < 700) return;
     if (npc) npc._lastCry = now;
-    if (AudioLib.playVoice) AudioLib.playVoice(UTIL.pick(['cri_png_1', 'cri_png_2', 'cri_png_3', 'cri_png_4', 'cri_png_5', 'cri_png_6', 'cri_png_7']), { volume: 0.6 });
-    else AudioLib.playOnce(UTIL.pick(['cri_png_1', 'cri_png_2', 'cri_png_3', 'cri_png_4', 'cri_png_5', 'cri_png_6', 'cri_png_7']), { volume: 0.6 });
+    const key = UTIL.pick(['cri_png_1', 'cri_png_2', 'cri_png_3', 'cri_png_4', 'cri_png_5', 'cri_png_6', 'cri_png_7']);
+    if (AudioLib.playVoice) AudioLib.playVoice(key, { volume: 0.6 });
+    else AudioLib.playOnce(key, { volume: 0.6 });
+    // Les autres joueurs réels à proximité entendent aussi ce cri de douleur.
+    if (Net.connected) Net.emitSound(key, { vol: 0.5 });
   },
 
   // Réactions vocales des PNJ selon la situation (témoins de violence, PNJ
@@ -2572,6 +2575,9 @@ const Game = {
         const line = UTIL.pick(pool.length ? pool : group);
         const pan = Math.max(-1, Math.min(1, (n.x - this.x) / 15));
         AudioLib.playPositional(line.key, pan, 0.85);
+        // Comme dans GTA RP : les autres joueurs réels à proximité entendent
+        // aussi cette réaction de PNJ, pas seulement soi-même.
+        if (Net.connected) Net.emitSound(line.key, { vol: 0.6 });
       }, i * UTIL.randInt(150, 500)); // léger décalage pour éviter que les voix se superposent exactement
     });
   },
@@ -2596,6 +2602,8 @@ const Game = {
     const dist = UTIL.dist(n, this);
     const vol = UTIL.clamp(0.7 - dist / 12, 0.15, 0.7);
     AudioLib.playPositional(key, this.panForPoint(n.x, n.y), vol);
+    // Les autres joueurs réels à proximité entendent aussi cette bribe de conversation.
+    if (Net.connected) Net.emitSound(key, { vol: 0.5 });
   },
   // Random encounters
   randomEncounters() {
