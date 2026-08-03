@@ -94,7 +94,13 @@ const City = {
       { name: 'Karpala', x1: 10, y1: 80, x2: 70, y2: 130, type: 'residentiel', density: 0.35 },          // quartier en pleine expansion
       { name: 'Dassasgho', x1: 170, y1: 60, x2: 235, y2: 110, type: 'residentiel', density: 0.35 },
       { name: 'Nongr-Massom', x1: 60, y1: 10, x2: 130, y2: 50, type: 'residentiel', density: 0.35 },
-      { name: 'Zone minière', x1: 5, y1: 5, x2: 55, y2: 55, type: 'mine', density: 0.15 },
+      // type 'zone_miniere' et non 'mine' : ce type de quartier remplit TOUT son
+      // terrain (fillDistrict) avec ce nom de tuile — s'il valait 'mine', qui
+      // est aussi le type des tuiles solides des puits (voir solidTypes et
+      // generateMines), tout le quartier de 50x50 cases devenait un seul bloc
+      // solide infranchissable (c'était « le mur de la mine » qui bloquait tout
+      // itinéraire GPS passant par là).
+      { name: 'Zone minière', x1: 5, y1: 5, x2: 55, y2: 55, type: 'zone_miniere', density: 0.15 },
       { name: 'Cissin', x1: 170, y1: 120, x2: 230, y2: 160, type: 'ghetto', density: 0.4 },              // quartier populaire, plus rude
       // Deuxième grande ville : Bobo-Dioulasso, loin au sud-est, isolée par du
       // terrain sauvage — on s'y rend surtout par la voie des airs.
@@ -445,7 +451,7 @@ const City = {
 
   generateMines() {
     for (let i = 0; i < CONFIG.MINING_SITES; i++) {
-      const d = this.districts.find(x => x.type === 'mine') || this.districts[0];
+      const d = this.districts.find(x => x.type === 'zone_miniere') || this.districts[0];
       const pos = this.findFree(d.x1 + 5, d.y1 + 5, d.x2 - 5, d.y2 - 5);
       this.setTile(pos.x, pos.y, 'mine');
       for (let r = 0; r < 3; r++) this.setTile(pos.x + r, pos.y + r, 'mine');

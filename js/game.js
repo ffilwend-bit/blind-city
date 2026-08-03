@@ -7,6 +7,10 @@ const Game = {
   // autre VRAI joueur ne vient pas aider depuis l'extérieur (voir
   // helpFreeTrappedPlayer / onFreedFromVehicle).
   stuckInVehicle: false,
+  // Chute libre après avoir sauté d'un aéronef en plein vol (voir
+  // _exitAircraftInFlight / tickFreeFall) : bloque les actions normales tant
+  // qu'on n'a pas touché le sol.
+  freeFalling: false,
   // Facteur d'échelle appliqué au déplacement RÉEL des véhicules (voir
   // driveVehicle) : sans lui, à 60 images/seconde, une berline à pleine
   // vitesse roulait à l'équivalent d'environ 900 km/h — bien trop vite pour
@@ -57,6 +61,7 @@ const Game = {
   HEADING_NAMES: { 0: 'nord', 1: 'nord-est', 2: 'est', 3: 'sud-est', 4: 'sud', 5: 'sud-ouest', 6: 'ouest', 7: 'nord-ouest' },
   turn(delta) {
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
+    if (this.freeFalling) return announce('Vous êtes en chute libre, impossible d\'agir.', 'polite');
     if (this.ridingWith) return announce('Vous êtes passager. Appuyez sur Interagir pour descendre.', 'polite');
     if (this.inVehicle && this.vehicle) {
       const cls = VEHICLE_CATALOG[this.vehicle.type];
@@ -131,12 +136,14 @@ const Game = {
   },
   moveForward() {
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
+    if (this.freeFalling) return announce('Vous êtes en chute libre, impossible d\'agir.', 'polite');
     if (this.inVehicle && this.vehicle) { const { dx, dy } = this.headingToDelta(this.vehicle.heading); this.driveVehicle(dx, dy); return; }
     const { dx, dy } = this.headingToDelta(this.heading);
     this.move(dx, dy, { keepHeading: true });
   },
   moveBackward() {
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
+    if (this.freeFalling) return announce('Vous êtes en chute libre, impossible d\'agir.', 'polite');
     if (this.inVehicle && this.vehicle) { this.driveVehicle(0, 0); return; } // le frein/marche arrière véhicule reste sur Espace
     const { dx, dy } = this.headingToDelta(this.heading);
     this.move(-dx, -dy, { keepHeading: true, reverse: true });
@@ -543,18 +550,26 @@ const Game = {
       const dirOf = this._dirOf(px, py, v.autoPath[i].x, v.autoPath[i].y);
       if (dirOf >= 0) best = dirOf;
     } else if (!v.autoPath) {
-      // Repli pour le vol en altitude (jamais passé au pathfinding piéton
-      // au-dessus des bâtiments) : ancien calcul direct à vol d'oiseau.
-      let bestScore = -Infinity;
-      for (let h = 0; h < 8; h += 2) {
-        const nx = v.x + (h === 2 ? 1 : h === 6 ? -1 : 0);
-        const ny = v.y + (h === 4 ? 1 : h === 0 ? -1 : 0);
-        if (!(cls.flies && v.altitude > 0) && City.isSolid(nx, ny)) continue;
-        const ndx = dest.x - nx, ndy = dest.y - ny;
-        let score = -Math.sqrt(ndx * ndx + ndy * ndy);
-        if (City.isRoad(nx, ny)) score += 4;
-        if (h === v.heading) score += 1;
-        if (score > bestScore) { bestScore = score; best = h; }
+      if (cls.flies && v.altitude > 0) {
+        // En vol, on survole tout : cap DIRECT vers la cible (8 directions,
+        // diagonales comprises), pas un cap cardinal en escalier — sinon le
+        // pilotage automatique zigzaguait ("tournait sans arrêt") en plein ciel.
+        const ndx = dest.x - v.x, ndy = dest.y - v.y;
+        const angle = Math.atan2(ndx, -ndy) * 180 / Math.PI;
+        best = Math.round((angle < 0 ? angle + 360 : angle) / 45) % 8;
+      } else {
+        // Repli au sol (chemin introuvable) : ancien calcul direct à vol d'oiseau, cap cardinal uniquement.
+        let bestScore = -Infinity;
+        for (let h = 0; h < 8; h += 2) {
+          const nx = v.x + (h === 2 ? 1 : h === 6 ? -1 : 0);
+          const ny = v.y + (h === 4 ? 1 : h === 0 ? -1 : 0);
+          if (City.isSolid(nx, ny)) continue;
+          const ndx = dest.x - nx, ndy = dest.y - ny;
+          let score = -Math.sqrt(ndx * ndx + ndy * ndy);
+          if (City.isRoad(nx, ny)) score += 4;
+          if (h === v.heading) score += 1;
+          if (score > bestScore) { bestScore = score; best = h; }
+        }
       }
     }
     v.heading = best;
@@ -922,6 +937,20 @@ const Game = {
   interactVehicle(targetVehicle) {
     if (this.inVehicle) {
       if (this.stuckInVehicle) return announce('Vous êtes piégé(e) à l\'intérieur : les portières sont verrouillées de l\'extérieur. Il faut qu\'un autre joueur vienne vous libérer.', 'assertive');
+      const clsCheck = VEHICLE_CATALOG[this.vehicle.type];
+      // Aéronef réellement EN VOL (altitude > 0) : sortir maintenant, c'est
+      // sauter dans le vide sans parachute. On demande confirmation avant, et
+      // l'appareil livré à lui-même continue de voler (voir tickRiderlessAircraft)
+      // jusqu'à s'écraser faute de pilote.
+      if (clsCheck && clsCheck.flies && this.vehicle.altitude > 0) {
+        const alt = Math.round(this.vehicle.altitude);
+        AccessibleConfirm.open(
+          'Sortir en plein vol ?',
+          `Vous êtes en vol à ${alt} mètres d'altitude, à bord de ${this.vehicle.name}. Sortir maintenant vous fera tomber en chute libre, sans parachute — c'est très dangereux. L'appareil continuera de voler seul, sans personne aux commandes, jusqu'à s'écraser. Voulez-vous vraiment sortir ?`,
+          (confirmed) => { if (confirmed) this._exitAircraftInFlight(); }
+        );
+        return;
+      }
       const cls = VEHICLE_CATALOG[this.vehicle.type];
       this.x = Math.round(this.vehicle.x); this.y = Math.round(this.vehicle.y); this.altitude = 0;
       // Le moteur se coupe en descendant : il faudra le redémarrer (et le
@@ -956,6 +985,66 @@ const Game = {
       this.openVehicleDoorMenu(v, driver);
     }
     updateHud();
+  },
+  // Saut confirmé en plein vol (voir interactVehicle) : l'aéronef est libéré
+  // à lui-même (continue de voler seul, voir tickRiderlessAircraft) et le
+  // joueur entame une chute libre depuis l'altitude au moment du saut.
+  _exitAircraftInFlight() {
+    const v = this.vehicle; if (!v) return;
+    const fallAltitude = v.altitude;
+    v.riderless = true; v.speed = Math.max(v.speed, 0.2);
+    this.x = Math.round(v.x); this.y = Math.round(v.y);
+    this.inVehicle = false; this.vehicle = null;
+    Audio.stopEngine(); RealEngine.stop(); RealEngine2.stop(); RealElectricEngine.stop(); RealAirEngine.stop();
+    sendWorldEdit('vehicle_position', { id: v.id, x: v.x, y: v.y, locked: v.locked, riderless: true });
+    this.freeFalling = true; this.altitude = fallAltitude; this._fallStartAltitude = fallAltitude;
+    AudioLib.playOnce('bruit_chute', { volume: 0.7 });
+    announce(`Vous sautez de ${v.name} en plein vol ! Chute libre depuis ${Math.round(fallAltitude)} mètres...`, 'assertive');
+    updateHud();
+  },
+  // Chute libre en cours (voir _exitAircraftInFlight) : l'altitude diminue
+  // jusqu'à l'impact au sol, qui inflige des dégâts proportionnels à
+  // l'altitude de départ — sans parachute, sauter d'un avion en vol depuis
+  // une hauteur significative est presque toujours mortel, cohérent avec le
+  // reste du jeu (takeDamage/die gèrent déjà la suite : hôpital ou pire).
+  FALL_RATE: 5, // mètres perdus par tic (voir setInterval tickFreeFall)
+  tickFreeFall() {
+    if (!this.freeFalling) return;
+    this.altitude = Math.max(0, this.altitude - this.FALL_RATE);
+    updateHud();
+    if (this.altitude <= 0) {
+      this.freeFalling = false;
+      AudioLib.playOnce('bruit_chute', { volume: 0.9 });
+      const dmg = Math.min(150, Math.round(this._fallStartAltitude * 1.2));
+      announce('Vous vous écrasez au sol après votre chute libre !', 'assertive');
+      this.takeDamage(dmg, {});
+    }
+  },
+  // Aéronef abandonné en plein vol (voir _exitAircraftInFlight) : personne
+  // aux commandes pour le stabiliser, il dérive légèrement de cap et perd
+  // doucement de l'altitude jusqu'à s'écraser au sol.
+  RIDERLESS_ALT_LOSS: 0.6, // mètres perdus par tic (voir setInterval tickRiderlessAircraft)
+  tickRiderlessAircraft() {
+    City.vehicles.forEach(v => {
+      if (!v.riderless) return;
+      const cls = VEHICLE_CATALOG[v.type];
+      if (!cls || !cls.flies) { v.riderless = false; return; }
+      // Dérive de cap aléatoire, sans personne pour stabiliser l'appareil.
+      if (UTIL.chance(0.1)) v.heading = ((v.heading + (UTIL.chance(0.5) ? 1 : -1)) % 8 + 8) % 8;
+      const { dx, dy } = this.headingToDelta(v.heading);
+      const step = (v.speed || 0.2) * this.MOVE_SCALE;
+      v.x = UTIL.clamp(v.x + dx * step, 0, City.W - 1);
+      v.y = UTIL.clamp(v.y + dy * step, 0, City.H - 1);
+      v.altitude = Math.max(0, v.altitude - this.RIDERLESS_ALT_LOSS);
+      if (v.altitude <= 0) {
+        v.riderless = false; v.hp = 0; v.speed = 0; v.engineOn = false; v.altitude = 0;
+        const d = UTIL.dist(v, this);
+        if (d < 60) AudioLib.playPositional('sfx_explosion', this.panForPoint(v.x, v.y), Math.max(0.15, 1 - d / 60));
+        if (d < 25) announce(`${v.name} s'écrase au loin, livré à lui-même depuis que son pilote a sauté en vol !`, 'polite');
+        RPJournal.log('Aviation', `${v.name} s'écrase, sans personne aux commandes.`, 'alert');
+        sendWorldEdit('vehicle_position', { id: v.id, x: v.x, y: v.y, locked: v.locked, riderless: false, hp: 0, altitude: 0 });
+      }
+    });
   },
   // Menu des portières : le joueur choisit par où monter. La portière CONDUCTEUR
   // exige le permis ; les portières PASSAGER laissent monter sans permis (on ne
@@ -1646,13 +1735,23 @@ const Game = {
     if (!force && now - this._lastGuidanceMsg < 2500) return;
     this._lastGuidanceMsg = now;
 
-    // Guidage le long d'un VRAI chemin praticable (contourne les bâtiments et
-    // l'eau) : on ne dirige jamais quelqu'un vers un mur. Si aucun chemin n'est
-    // trouvé (destination trop lointaine ou isolée), on retombe sur l'ancien
-    // guidage direct par axe.
-    this._ensurePath(t);
-    let instruction = this._pathInstruction();
-    if (!instruction) instruction = this._axisInstruction(t);
+    // En vol (aéronef, altitude > 0) : on survole les bâtiments, donc une
+    // ligne DROITE (diagonale comprise) vers la cible, jamais le chemin au sol
+    // qui contourne les immeubles — sinon le guidage faisait "tourner" un
+    // avion en plein ciel comme s'il marchait entre des maisons.
+    const vcls = this.inVehicle && this.vehicle ? VEHICLE_CATALOG[this.vehicle.type] : null;
+    let instruction;
+    if (vcls && vcls.flies && this.vehicle.altitude > 0) {
+      instruction = this._flightInstruction(t);
+    } else {
+      // Guidage le long d'un VRAI chemin praticable (contourne les bâtiments et
+      // l'eau) : on ne dirige jamais quelqu'un vers un mur. Si aucun chemin n'est
+      // trouvé (destination trop lointaine ou isolée), on retombe sur l'ancien
+      // guidage direct par axe.
+      this._ensurePath(t);
+      instruction = this._pathInstruction();
+      if (!instruction) instruction = this._axisInstruction(t);
+    }
 
     // Détection de sur-place : si exactement la même consigne à la même
     // distance revient plusieurs fois d'affilée, c'est que le joueur ne
@@ -1772,6 +1871,20 @@ const Game = {
       if (w) instr += `, bientôt ${w}`;
     }
     return instr + '.';
+  },
+  // Guidage en vol (aéronef en altitude) : cap direct (les 8 directions, donc
+  // diagonales comprises) vers la cible, en ligne droite puisqu'on survole
+  // tout. Contrairement à _axisInstruction (qui corrige un axe puis l'autre,
+  // donc "tourne" deux fois), un seul cap diagonal suffit ici la plupart du
+  // temps — d'où beaucoup moins de virages annoncés en vol.
+  _flightInstruction(t) {
+    const dx = t.x - this.x, dy = t.y - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dx, -dy) * 180 / Math.PI;
+    const targetHeading = Math.round((angle < 0 ? angle + 360 : angle) / 45) % 8;
+    const meters = Math.max(CONFIG.METERS_PER_TILE, Math.round(dist * CONFIG.METERS_PER_TILE));
+    const diff = ((targetHeading - this.heading) % 8 + 8) % 8;
+    return this._turnInstruction(diff, meters) + '.';
   },
   // Ancien guidage direct (repli) : vise l'axe le plus urgent en ligne droite.
   _axisInstruction(t) {
@@ -2821,6 +2934,7 @@ const Game = {
   // Interactions
   interact() {
     if (this.unconscious) return announce('Vous êtes inconscient.', 'polite');
+    if (this.freeFalling) return announce('Vous êtes en chute libre, impossible d\'agir.', 'polite');
     if (this.interior) return this._interactInterior(); // dedans : on interagit avec la pièce
     // On considère qu'on est ressorti si l'on s'est éloigné du lieu où l'on
     // était entré (Ctrl+Alt+E). E n'est PLUS détourné pour rouvrir toujours le
@@ -5637,6 +5751,12 @@ const Game = {
   // sauvegardée » se répétait sans arrêt même sans action du joueur, ce qui
   // devenait vite pénible. Une sauvegarde manuelle (menu) reste annoncée.
   save(silent) {
+    // Personnage mort définitivement (permanentDeath) : ne JAMAIS réécrire la
+    // sauvegarde locale. Sans ce garde-fou, l'autosave périodique ou celui
+    // déclenché par 'beforeunload' juste avant le location.reload() de
+    // permanentDeath() ressuscitait le personnage mort dans le localStorage,
+    // et la création d'un nouveau compte juste après retombait dessus.
+    if (this._permanentlyDead) return;
     const payload = {
       x: this.x, y: this.y, altitude: this.altitude, heading: this.heading, health: this.health, money: this.money,
       bank: this.bank, dirtyMoney: this.dirtyMoney, hunger: this.hunger, thirst: this.thirst, energy: this.energy,

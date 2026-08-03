@@ -1576,6 +1576,8 @@ function startGame(seed) {
     // pas. Vérifié bien plus souvent maintenant.
     setInterval(() => Game.tickDrivingExam(), 150);
     setInterval(() => Game.tickFlightExam(), 150);
+    setInterval(() => Game.tickFreeFall(), 150);
+    setInterval(() => Game.tickRiderlessAircraft(), 300);
   } catch (e) { console.error('Mise en place des intervalles en échec :', e); }
   gameLoop();
 }

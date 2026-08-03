@@ -674,6 +674,7 @@ Game.tickUnconscious = function() {
 Game.permanentDeath = function(cause) {
   const label = cause.headshot ? 'un tir mortel à la tête' : cause.explosion ? 'une explosion' : 'une hémorragie massive après trop de blessures';
   this.unconscious = false;
+  this._permanentlyDead = true; // bloque toute sauvegarde locale future (voir Game.save) — sinon l'autosave 'beforeunload' juste avant le reload ressuscitait le personnage mort dans le localStorage
   announce(`Vous succombez à ${label}. Votre personnage est mort. C'est définitif : votre compte va être supprimé.`, 'assertive');
   const beneficiary = Police.executeWill('player', this.will?.beneficiary);
   if (beneficiary) {
