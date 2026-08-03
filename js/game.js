@@ -2164,7 +2164,11 @@ const Game = {
       if (live && !live.hostile && !live.menotte && !live.knockedOut && !live.handsUp && !live.fleeing && live.job !== 'police') {
         if (UTIL.dist(live, this) < 3) { live.handsUp = true; announce(`${live.name} lève les mains, terrifié(e).`, 'polite'); }
         else { live.fleeing = true; announce(`${live.name} prend la fuite !`, 'polite'); }
-        this.npcVoiceReaction(live.x, live.y, { group: 'panique', count: 1, radius: 12 });
+        // Réaction PERSONNELLE de la cible menacée (pas les témoins alentour) :
+        // le nouveau groupe dédié (voix homme uniquement, contenu fourni) pour
+        // un PNJ homme, l'ancien groupe générique "panique" sinon (pas de
+        // contenu équivalent en voix femme pour l'instant).
+        this.npcVoiceReaction(live.x, live.y, { group: live.gender === 'homme' ? 'menace_directe' : 'panique', count: 1, radius: 12 });
       }
     }
     updateHud();
@@ -2340,7 +2344,12 @@ const Game = {
             this.playNpcHitCry(npc);
             announce(`Touché ${target.name} à la ${this.aimPart}. ${Math.round(dmg)} dégâts.`, 'assertive');
             if (npc.health <= 0) { this.killNPC(npc); }
-            else { if (npc.hostile) npc.relation -= 40; this.npcPanicReaction(npc.x, npc.y, { count: 1 }); }
+            else {
+              if (npc.hostile) npc.relation -= 40;
+              // Le cri d'impact (playNpcHitCry, ci-dessus) reste inchangé — ceci
+              // est la réaction PARLÉE qui suit, propre à la victime elle-même.
+              this.npcPanicReaction(npc.x, npc.y, { count: 1, group: npc.gender === 'homme' ? 'menace_directe' : 'panique' });
+            }
           }
         }
       } else {
