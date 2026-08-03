@@ -924,8 +924,16 @@ const AudioLib = {
   playLoopInstance(instanceId, key, volume = 0.3, pan = 0) {
     const existing = this.instanceLoops[instanceId];
     if (existing && existing.key === key) {
-      existing.gain.gain.value = volume;
-      if (existing.panner) existing.panner.pan.value = pan;
+      // Lissage natif (Web Audio AudioParam) au lieu d'un saut instantané :
+      // ceci n'est rappelé qu'une fois par tick (~400ms, voir
+      // Game.tickAmbientVehicles), donc sans ça, un véhicule qui passe se
+      // déplaçait par à-coups au lieu de glisser en continu d'une position à
+      // l'autre. setTargetAtTime approche la nouvelle valeur en douceur,
+      // sans avoir besoin d'une boucle d'interpolation JS séparée.
+      const ctx = Audio.ensure();
+      const now = ctx.currentTime;
+      existing.gain.gain.setTargetAtTime(volume, now, 0.15);
+      if (existing.panner) existing.panner.pan.setTargetAtTime(pan, now, 0.15);
       return;
     }
     if (existing) this.stopLoopInstance(instanceId);
