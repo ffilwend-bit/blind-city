@@ -396,6 +396,8 @@ const Net = {
       onLootTake(msg.data);
     } else if (msg.type === 'search_denied') {
       announce('Cette personne n\'a plus les mains levées.', 'assertive');
+    } else if (msg.type === 'freed_from_vehicle') {
+      onFreedFromVehicle(msg.fromName);
     } else if (msg.type === 'city_edit') {
       applyCityEdit(msg.op, msg.payload);
     } else if (msg.type === 'world_edit') {
@@ -447,6 +449,7 @@ const Net = {
       convoy: (typeof Convoy !== 'undefined' ? Convoy.code : null),
       airplane: !!(typeof Phone !== 'undefined' && Phone.airplane),
       voiceOpen: !!Game.voiceOpen, handsUp: !!Game.handsUp, unconscious: !!Game.unconscious, isCuffed: !!Game.isCuffed, jailed: !!Game.jailed,
+      stuckInVehicle: !!Game.stuckInVehicle,
     });
   },
   // Émet un son du monde (audible par les joueurs proches). Ponctuel et léger :

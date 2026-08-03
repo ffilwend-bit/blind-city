@@ -317,6 +317,7 @@ function publicState(p) {
     talkieOn: p.talkieOn, talkieFrequency: p.talkieFrequency, voiceOpen: p.voiceOpen, handsUp: p.handsUp,
     convoy: p.convoy || null,
     unconscious: !!p.unconscious, isCuffed: !!p.isCuffed, accountUsername: p.accountUsername || null,
+    stuckInVehicle: !!p.stuckInVehicle,
   };
 }
 
@@ -833,6 +834,7 @@ wss.on('connection', (ws, req) => {
       if (typeof msg.handsUp === 'boolean') player.handsUp = msg.handsUp;
       if (typeof msg.unconscious === 'boolean') player.unconscious = msg.unconscious;
       if (typeof msg.isCuffed === 'boolean') player.isCuffed = msg.isCuffed;
+      if (typeof msg.stuckInVehicle === 'boolean') player.stuckInVehicle = msg.stuckInVehicle;
       if (typeof msg.policeRank === 'string' || msg.policeRank === null) player.policeRank = msg.policeRank;
       if (typeof msg.convoy === 'string' || msg.convoy === null) player.convoy = msg.convoy ? String(msg.convoy).slice(0, 6) : null;
     }
@@ -1131,6 +1133,14 @@ wss.on('connection', (ws, req) => {
       if (!target) return;
       if (msg.type === 'search_request' && !target.handsUp) { send(ws, { type: 'search_denied' }); return; }
       send(target.ws, { type: msg.type, fromId: id, data: msg.data });
+    }
+    // Libère un joueur piégé dans un véhicule volé à un PNJ (voir
+    // Game.stuckInVehicle côté client) : simple relais, comme la fouille — le
+    // joueur bloqué reste seul maître de son propre état, on ne fait que le prévenir.
+    else if (msg.type === 'free_from_vehicle') {
+      const target = players.get(msg.targetId);
+      if (!target) return;
+      send(target.ws, { type: 'freed_from_vehicle', fromName: `${player.firstName} ${player.lastName}` });
     }
     else if (msg.type === 'voice_toggle') {
       const call = calls.get(msg.callId);

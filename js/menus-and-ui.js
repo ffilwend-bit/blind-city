@@ -1428,7 +1428,7 @@ function gameLoop() {
 
 function moveNPCs() {
   for (const n of City.npcs) {
-    if (n.dead) continue;
+    if (n.dead || n.inCar) continue; // en train de conduire (voir tickNpcTraffic) : suit le véhicule, ne marche pas tout seul
     if (Math.random() < 0.3) continue;
     const dx = UTIL.randInt(-1, 1), dy = UTIL.randInt(-1, 1);
     const nx = n.x + dx, ny = n.y + dy;

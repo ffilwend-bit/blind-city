@@ -395,6 +395,25 @@ function toggleHandsUp() {
 }
 window.toggleHandsUp = toggleHandsUp;
 
+// Libère un VRAI joueur piégé après avoir volé le véhicule d'un PNJ de
+// circulation (voir Game.enterAsDriver / stuckInVehicle) : simple relais
+// serveur, comme la fouille — c'est le joueur piégé qui reste seul maître de
+// son propre état, on ne fait que le prévenir qu'on est venu l'aider.
+function helpFreeTrappedPlayer(targetId, targetName) {
+  if (!Net.connected) return announce('Nécessite une connexion au serveur.', 'assertive');
+  Net.send({ type: 'free_from_vehicle', targetId });
+  announce(`Vous ouvrez la portière de l'extérieur pour libérer ${targetName || 'cette personne'}.`, 'assertive');
+}
+window.helpFreeTrappedPlayer = helpFreeTrappedPlayer;
+// Reçu par le joueur PIÉGÉ : quelqu'un vient de le libérer depuis l'extérieur.
+function onFreedFromVehicle(fromName) {
+  if (!Game.stuckInVehicle) return;
+  Game.stuckInVehicle = false;
+  announce(`${fromName || 'Quelqu\'un'} vous libère : les portières se déverrouillent. Vous pouvez de nouveau sortir du véhicule.`, 'assertive');
+  updateHud();
+}
+window.onFreedFromVehicle = onFreedFromVehicle;
+
 // Fouille d'un vrai joueur (mains levées) : demande son inventaire, puis
 // propose le même menu de choix que pour un PNJ. Le retrait réel se fait côté
 // cible (chacun reste maître de son propre inventaire), le serveur ne relaie

@@ -2,6 +2,11 @@ const Game = {
   x: 120, y: 120, altitude: 0, floor: 0, heading: 0, health: 100, maxHealth: 100,
   money: 100000, bank: 0, dirtyMoney: 0, handsUp: false, hunger: 50, thirst: 50, energy: 100,
   inVehicle: false, vehicle: null, ownedVehicles: [], driveAssist: true,
+  // Piégé après avoir volé un véhicule conduit par un PNJ (voir enterAsDriver
+  // et tickNpcTraffic) : bloque la sortie normale (interactVehicle) tant qu'un
+  // autre VRAI joueur ne vient pas aider depuis l'extérieur (voir
+  // helpFreeTrappedPlayer / onFreedFromVehicle).
+  stuckInVehicle: false,
   // Facteur d'échelle appliqué au déplacement RÉEL des véhicules (voir
   // driveVehicle) : sans lui, à 60 images/seconde, une berline à pleine
   // vitesse roulait à l'équivalent d'environ 900 km/h — bien trop vite pour
@@ -661,18 +666,30 @@ const Game = {
   // restait pour toujours, sans qu'aucun PNJ ne le conduise jamais). Rayon
   // limité au voisinage du joueur : inutile de simuler du trafic à l'autre
   // bout de la ville, que personne ne peut voir ni entendre.
+  // Libère le PNJ conducteur d'un véhicule de trafic : redevient un piéton
+  // normal (marche aléatoire, voir moveNPCs) à l'endroit où le véhicule s'arrête.
+  _releaseTrafficDriver(v) {
+    if (v.driverNpcId) {
+      const npc = City.npcs.find(n => n.id === v.driverNpcId);
+      if (npc) { npc.inCar = false; npc.drivingVehicleId = null; npc.x = Math.round(v.x); npc.y = Math.round(v.y); }
+      v.driverNpcId = null;
+    }
+    v.aiTraffic = false; v.aiPath = null; v.speed = 0;
+  },
   tickNpcTraffic() {
     const MAX_TRAFFIC = 4, RADIUS = 35;
     if (!this._trafficVehicleIds) this._trafficVehicleIds = new Set();
     for (const id of Array.from(this._trafficVehicleIds)) {
       const v = City.vehicles.find(vv => vv.id === id);
-      if (!v || v.owner || (this.inVehicle && this.vehicle === v) || !v.aiTraffic) { this._trafficVehicleIds.delete(id); if (v) { v.aiTraffic = false; v.aiPath = null; } continue; }
+      if (!v || v.owner || (this.inVehicle && this.vehicle === v) || !v.aiTraffic) { this._trafficVehicleIds.delete(id); if (v) this._releaseTrafficDriver(v); continue; }
       if (!v.aiPath || v.aiPathIdx >= v.aiPath.length || UTIL.dist(v, this) > RADIUS * 1.5) {
-        v.aiTraffic = false; v.aiPath = null; v.speed = 0; this._trafficVehicleIds.delete(id); continue;
+        this._releaseTrafficDriver(v); this._trafficVehicleIds.delete(id); continue;
       }
       const step = v.aiPath[v.aiPathIdx];
       v.x = step.x; v.y = step.y; v.aiPathIdx++;
       v.speed = (VEHICLE_CATALOG[v.type]?.maxSpeed || 1) * 0.4;
+      // Le PNJ conducteur suit le véhicule (il ne marche plus tout seul tant qu'il conduit).
+      if (v.driverNpcId) { const npc = City.npcs.find(n => n.id === v.driverNpcId); if (npc) { npc.x = v.x; npc.y = v.y; } }
     }
     if (this._trafficVehicleIds.size < MAX_TRAFFIC && UTIL.chance(0.3)) {
       const candidates = City.vehicles.filter(v => {
@@ -681,11 +698,19 @@ const Game = {
       });
       if (candidates.length) {
         const v = UTIL.pick(candidates);
+        // Il faut un VRAI PNJ pour conduire : sans ça le véhicule reste tel
+        // quel (pas de voiture fantôme qui roule sans personne dedans).
+        const driver = City.npcs.find(n => !n.dead && !n.inCar && !n.hostile && !n.menotte && !n.knockedOut && !n.handsUp && UTIL.dist(n, v) < 6);
+        if (!driver) return;
         const d = UTIL.randInt(8, 20), angle = Math.random() * Math.PI * 2;
         const destX = UTIL.clamp(Math.round(v.x + Math.cos(angle) * d), 0, City.W - 1);
         const destY = UTIL.clamp(Math.round(v.y + Math.sin(angle) * d), 0, City.H - 1);
         const path = this.computePath(v.x, v.y, destX, destY);
-        if (path && path.length > 2) { v.aiTraffic = true; v.aiPath = path; v.aiPathIdx = 1; this._trafficVehicleIds.add(v.id); }
+        if (path && path.length > 2) {
+          v.aiTraffic = true; v.aiPath = path; v.aiPathIdx = 1; v.driverNpcId = driver.id;
+          driver.inCar = true; driver.drivingVehicleId = v.id; driver.x = v.x; driver.y = v.y;
+          this._trafficVehicleIds.add(v.id);
+        }
       }
     }
   },
@@ -896,6 +921,7 @@ const Game = {
   // la même chose et il était impossible d'atteindre le second véhicule.
   interactVehicle(targetVehicle) {
     if (this.inVehicle) {
+      if (this.stuckInVehicle) return announce('Vous êtes piégé(e) à l\'intérieur : les portières sont verrouillées de l\'extérieur. Il faut qu\'un autre joueur vienne vous libérer.', 'assertive');
       const cls = VEHICLE_CATALOG[this.vehicle.type];
       this.x = Math.round(this.vehicle.x); this.y = Math.round(this.vehicle.y); this.altitude = 0;
       // Le moteur se coupe en descendant : il faudra le redémarrer (et le
@@ -993,10 +1019,26 @@ const Game = {
       if (Net.connected) Net.emitSound('veh1_ouverture_porte', { vol: 0.5 }); // porte audible par les joueurs proches
       setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_ceinture_in', { volume: 0.6 }); }, 350);
     }
-    // Si ce véhicule était animé par la circulation de PNJ (voir
-    // tickNpcTraffic), on lui rend la main immédiatement : c'est le joueur qui conduit maintenant.
-    if (v.aiTraffic) { v.aiTraffic = false; v.aiPath = null; if (this._trafficVehicleIds) this._trafficVehicleIds.delete(v.id); }
+    // Ce véhicule est occupé par un PNJ (circulation, voir tickNpcTraffic) :
+    // monter dedans, c'est le lui voler de force. Il en est éjecté (redevient
+    // un piéton normal), mais dans la panique peut verrouiller les portières
+    // de l'extérieur en représailles avant de fuir — piégeant le voleur à
+    // l'intérieur, jusqu'à ce qu'un autre VRAI joueur vienne l'aider depuis
+    // l'extérieur (voir stuckInVehicle / helpFreeTrappedPlayer).
+    let carjackedDriverName = null;
+    if (v.aiTraffic) {
+      const driver = v.driverNpcId ? City.npcs.find(n => n.id === v.driverNpcId) : null;
+      carjackedDriverName = driver ? driver.name : null;
+      this._releaseTrafficDriver(v);
+      if (this._trafficVehicleIds) this._trafficVehicleIds.delete(v.id);
+      if (carjackedDriverName) {
+        this.reportCrimeToPolice('vol_vehicule', v.name);
+        this.wanted = Math.min(100, this.wanted + 20);
+      }
+    }
     this.vehicle = v; this.inVehicle = true; this.altitude = v.altitude || 0; this.floor = 0;
+    const trappedByCarjack = carjackedDriverName && UTIL.chance(0.4);
+    if (trappedByCarjack) this.stuckInVehicle = true;
     // On conduit TOUT DE SUITE avec les flèches, librement, sans qu'aucun menu
     // ne s'impose : c'était la principale source de confusion (« impossible
     // d'avancer sans choisir de destination d'abord »). Pour un guidage vers
@@ -1006,7 +1048,11 @@ const Game = {
     // montée, sans quoi les touches (crochet droit/gauche du clavier, sans
     // rapport avec le cap) restaient invisibles pour le joueur.
     const gearboxHint = cls?.manualGearbox ? ` Boîte manuelle à ${this.GEAR_RATIOS.length} rapports : les deux touches à droite du clavier, juste avant la touche Entrée (crochet fermant pour monter d'un rapport, celle juste avant pour redescendre), plafonnent votre vitesse tant que vous ne passez pas le rapport suivant.` : '';
-    if (cls?.human) announce(`Vous enfourchez ${v.name}. Flèches pour pédaler et tourner, espace pour freiner.`, 'assertive');
+    if (trappedByCarjack) {
+      announce(`Vous arrachez ${carjackedDriverName} de son véhicule et prenez le volant ! Mais ${carjackedDriverName} verrouille les portières de l'extérieur avant de fuir : vous êtes piégé(e) à l'intérieur.${gearboxHint} Il faudra qu'un autre joueur vienne vous libérer depuis l'extérieur.`, 'assertive');
+    } else if (carjackedDriverName) {
+      announce(`Vous arrachez ${carjackedDriverName} de son véhicule et prenez le volant !${gearboxHint}`, 'assertive');
+    } else if (cls?.human) announce(`Vous enfourchez ${v.name}. Flèches pour pédaler et tourner, espace pour freiner.`, 'assertive');
     else if (cls?.doors === 0) announce(`Vous enfourchez ${v.name}. Flèche haut pour démarrer le moteur, puis accélérer et tourner, espace pour freiner.${gearboxHint}`, 'assertive'); // moto / scooter / quad : on accélère, on ne pédale pas
     else announce(`Vous montez au volant de ${v.name}. Flèche haut pour démarrer le moteur${cls?.flies ? ' et le laisser se stabiliser' : ''}, puis conduire. Espace pour freiner.${gearboxHint}`, 'assertive');
     if (this.activeMission && this.activeMission.type === 'convoyage' && this.activeMission.vehicleId === v.id && !this.deliveryState) this.startVehicleDelivery(this.activeMission);
@@ -2852,7 +2898,10 @@ const Game = {
       const d = UTIL.dist(p, this);
       if (d >= 3) return;
       const np = { id: p.id, name: `${p.firstName} ${p.lastName}`, gender: p.gender, outfit: p.outfit, isPlayer: true, x: p.x, y: p.y, role: p.role, policeRank: p.policeRank, accountUsername: p.accountUsername || null };
-      targets.push({ d, label: `🧍 ${np.name} (joueur)`, act: () => { this.describePerson(np); this.greetPlayer(np); } });
+      // Piégé dans un véhicule volé à un PNJ (voir stuckInVehicle) : on peut
+      // l'aider à sortir depuis l'extérieur, plutôt que la salutation habituelle.
+      if (p.stuckInVehicle) targets.push({ d, label: `🔓 Aider ${np.name} à sortir du véhicule (piégé(e) à l'intérieur)`, act: () => helpFreeTrappedPlayer(np.id, np.name) });
+      else targets.push({ d, label: `🧍 ${np.name} (joueur)`, act: () => { this.describePerson(np); this.greetPlayer(np); } });
     });
     City.npcs.filter(n => !n.dead && UTIL.dist(n, this) < 3).forEach(n => {
       targets.push({ d: UTIL.dist(n, this), label: `🧍 ${n.name}`, act: () => { this.describePerson(n); this.talkTo(n); } });
