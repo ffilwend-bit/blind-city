@@ -5802,7 +5802,12 @@ const Game = {
   // Applique un objet de sauvegarde (venant du stockage local OU d'un compte
   // serveur) — doit être appelé APRÈS City.generate(), puisque la
   // resynchronisation des missions/véhicules a besoin que la ville existe déjà.
-  applySaveData(d) {
+  // fromAccount=true : la sauvegarde vient d'une RECONNEXION à un compte
+  // serveur, dont la ville est régénérée avec une graine différente à chaque
+  // redémarrage du serveur (voir WORLD_SEED côté server.js) — contrairement
+  // au solo, où la graine est mémorisée sur l'appareil et la ville reste
+  // identique d'une session à l'autre.
+  applySaveData(d, fromAccount) {
     try {
       Object.assign(this, d);
       // Une sauvegarde (locale ou de compte) vient d'être restaurée : ce joueur
@@ -5861,7 +5866,17 @@ const Game = {
       // Restaure la mission active (juste son assignation ; l'état de combat
       // éphémère d'une action en cours — braquage, assaut, etc. — n'est
       // volontairement pas conservé, il faudrait recommencer cette tentative).
-      if (d.activeMissionId) {
+      // Reconnexion à un compte serveur : la ville a pu être régénérée entre
+      // temps (redémarrage du serveur = nouvelle graine), donc la mission
+      // active pointerait peut-être vers un lieu qui n'a plus rien à voir
+      // (un site minier ailleurs, une banque devenue une maison...). On
+      // l'annule proprement plutôt que de risquer d'envoyer le joueur vers un
+      // lieu fictif. En solo, la graine est stable sur l'appareil : la ville
+      // est identique d'une session à l'autre, la mission reste donc valable.
+      if (d.activeMissionId && fromAccount) {
+        this.activeMission = null;
+        announce('La mission que vous aviez en cours a été annulée suite à votre reconnexion (la ville a pu changer entre-temps). Vous pouvez en reprendre une nouvelle.', 'polite');
+      } else if (d.activeMissionId) {
         const m = City.missions.find(mm => mm.id === d.activeMissionId && !mm.completed);
         this.activeMission = m || null;
         if (m) announce(`Mission en cours retrouvée : ${m.title}.`, 'polite');

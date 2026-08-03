@@ -761,6 +761,22 @@ const City = {
         this.vehicles.push({ id: vid, type: vType, name: VEHICLE_CATALOG[vType].name, x: pos.x, y: pos.y, fuel: 1, hp: 100, locked: true, owner: null, inventory: [], auto: false, altitude: 0, speed: 0, heading: 0, autoDest: null, price: 0, trunk: VEHICLE_CATALOG[vType].trunk });
         extra = { vehicleId: vid, vehicleTypeName: VEHICLE_CATALOG[vType].name, dropX: drop.x, dropY: drop.y, dropName: drop.name || 'le garage clandestin' };
       }
+      // Une mission "mine" (Extraction/Exploration minière) DOIT pointer vers
+      // un vrai site minier généré (this.miningSites, voir generateMines) —
+      // sinon elle envoyait le joueur sur un point totalement quelconque
+      // (souvent en pleine zone résidentielle), un lieu fictif où il n'y a
+      // jamais eu la moindre mine.
+      else if (t.type === 'mine' && this.miningSites.length) {
+        const site = UTIL.pick(this.miningSites);
+        pos = { x: site.x, y: site.y };
+        extra = { miningSiteId: site.id };
+      }
+      // "Pêche au port" doit se dérouler près du VRAI quartier portuaire, pas
+      // n'importe où en ville (même raison : un lieu fictif, sans eau ni port).
+      else if (t.type === 'fishing') {
+        const d = this.districts.find(x => x.type === 'port') || UTIL.pick(this.districts);
+        pos = this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1);
+      }
       else { const d = UTIL.pick(this.districts); pos = this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1); }
       this.missions.push({ id: 'mission_' + i, ...t, x: pos.x, y: pos.y, ...extra, active: false, completed: false, giver: UTIL.pick(this.npcs).name });
     }

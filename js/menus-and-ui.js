@@ -1468,7 +1468,7 @@ function startGame(seed) {
   // sur la sauvegarde locale (elle vient s'appliquer après la génération de la
   // ville, comme Game.load(), puisque la resynchronisation en a besoin).
   if (Game._pendingAccountSaveData) {
-    try { Game.applySaveData(Game._pendingAccountSaveData); } catch (e) { console.error('applySaveData (compte) a échoué :', e); }
+    try { Game.applySaveData(Game._pendingAccountSaveData, true); } catch (e) { console.error('applySaveData (compte) a échoué :', e); }
     Game._pendingAccountSaveData = null;
   } else {
     try { Game.load(); } catch (e) { console.error('Game.load() a échoué :', e); }
