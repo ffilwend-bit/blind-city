@@ -43,6 +43,30 @@ const path = require('path');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 
+// --- Relais TURN Cloudflare (dernier recours) ---
+// Utilisé UNIQUEMENT si la connexion directe ET le relais TURN gratuit
+// (Metered/openrelay, voir /ice-servers ci-dessous) échouent tous les deux —
+// pour ne pas gaspiller son quota. Jamais de secret codé en dur ici (comme
+// pour SUPABASE_SERVICE_KEY plus bas) : sans ces deux variables d'environnement
+// définies sur Render, ce relais est simplement absent de la liste, sans planter.
+const CF_TURN_KEY_ID = process.env.CF_TURN_KEY_ID || '';
+const CF_TURN_API_TOKEN = process.env.CF_TURN_API_TOKEN || '';
+async function getCloudflareIceServers() {
+  if (!CF_TURN_KEY_ID || !CF_TURN_API_TOKEN) return null;
+  try {
+    const res = await fetch(
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${CF_TURN_KEY_ID}/credentials/generate-ice-servers`,
+      { method: 'POST', headers: { 'Authorization': `Bearer ${CF_TURN_API_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ttl: 86400 }) }
+    );
+    if (!res.ok) { console.error('[TURN] Erreur Cloudflare :', await res.text()); return null; }
+    const data = await res.json();
+    return data.iceServers || null;
+  } catch (e) {
+    console.error('[TURN] Impossible de contacter Cloudflare :', e.message);
+    return null;
+  }
+}
+
 // --- Persistance des données (comptes joueurs + données staff) ---
 // Par défaut, tout est stocké dans des fichiers JSON locaux. MAIS sur un
 // hébergeur gratuit comme Render, le disque est "éphémère" : il est effacé à
@@ -199,7 +223,7 @@ function serveStaticFile(res, filePath) {
     res.end(data);
   });
 }
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   let reqPath;
   try { reqPath = decodeURIComponent((req.url || '/').split('?')[0]); }
   catch (e) { res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Requête invalide.'); return; }
@@ -230,6 +254,26 @@ const server = http.createServer((req, res) => {
     };
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(status, null, 2));
+    return;
+  }
+  // Serveurs ICE pour la voix (appel direct, proximité, talkie) : STUN et
+  // relais TURN gratuit toujours renvoyés ; le relais Cloudflare (dernier
+  // recours) s'y ajoute seulement s'il est configuré côté serveur.
+  if (reqPath === '/ice-servers') {
+    try {
+      const baseServers = [
+        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
+        { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
+      ];
+      const cloudflareServers = await getCloudflareIceServers();
+      if (cloudflareServers && cloudflareServers.length) baseServers.push(...cloudflareServers);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ iceServers: baseServers }));
+    } catch (e) {
+      console.error('[TURN]', e.message);
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
     return;
   }
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });

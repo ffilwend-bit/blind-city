@@ -1597,13 +1597,34 @@ function startGame(seed) {
    D'où le serveur TURN de secours ci-dessous, qui relaie l'audio
    quand la connexion directe pair-à-pair est impossible.
 ============================================================ */
-const ICE_SERVERS = [
+// Repli utilisé tant que /ice-servers (voir server.js) n'a pas encore répondu,
+// ou si la requête échoue — jamais de voix cassée en attendant.
+let ICE_SERVERS = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
   { urls: 'stun:openrelay.metered.ca:80' },
   { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
 ];
+// Remplacé dès que possible par la liste du serveur, qui ajoute le relais
+// Cloudflare (dernier recours) SEULEMENT s'il est configuré côté serveur —
+// voir server.js /ice-servers. ICE_SERVERS est lu au moment de l'appel (pas
+// figé), donc cette mise à jour profite à tout appel lancé après coup.
+async function loadIceServers() {
+  try {
+    const res = await fetch('/ice-servers');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.iceServers && data.iceServers.length) ICE_SERVERS = data.iceServers;
+  } catch (e) {
+    console.warn('[TURN] Liste ICE du serveur indisponible, on garde le repli local.', e);
+  }
+}
+// En local (file://), ce fetch échoue toujours (politique CORS du navigateur,
+// même raison que le repli HTMLAudio des boucles sonores plus haut dans
+// audio-engine.js) — on ne le tente donc qu'en vrai déploiement (http/https),
+// pour ne pas polluer la console d'erreurs inutiles en local.
+if (typeof location !== 'undefined' && location.protocol !== 'file:') loadIceServers();
 // Demande l'accès au micro en prévenant d'abord l'utilisateur, une seule fois
 // par session : la fenêtre d'autorisation du navigateur est une fenêtre système
 // que le jeu ne peut pas rendre accessible lui-même, et certains lecteurs
