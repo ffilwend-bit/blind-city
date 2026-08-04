@@ -2286,6 +2286,14 @@ const Game = {
         this.npcVoiceReaction(live.x, live.y, { group: live.gender === 'homme' ? 'menace_directe' : 'panique', count: 1, radius: 12 });
       }
     }
+    // Verrouiller un VRAI joueur, arme sortie : intention de tirer. Il
+    // reçoit une alerte sonore distincte (voir Audio.targetedWarning /
+    // onPlayerTargetedMe) pour pouvoir réagir — se mettre à couvert, fuir,
+    // riposter — au lieu de se faire tirer dessus sans le moindre signe
+    // avant-coureur.
+    if (this.weaponOut && n.isPlayer && Net.connected) {
+      Net.send({ type: 'player_targeted', targetId: n.id });
+    }
     updateHud();
   },
   // Résout la cible verrouillée EN DIRECT plutôt que d'utiliser la photo
@@ -2335,6 +2343,18 @@ const Game = {
     const hp = typeof live.health === 'number' ? `, santé ${Math.round(live.health)} pour cent` : '';
     announce(`Cible : ${this.lockedTarget.name || live.name}, ${d} mètres vers le ${bearing}${hp}${state}. Visée : ${this.aimPart}.`, 'assertive');
     if (window.Audio && Audio.tone) Audio.tone({ freq: 700, type: 'sine', duration: 0.12, gain: 0.1, pan: this.panForPoint(live.x, live.y) });
+  },
+  // Marcher vers la cible verrouillée : cette localisation-là (pour SE
+  // DÉPLACER, pas pour tirer) est toujours fiable à 100%, quelle que soit la
+  // distance — seule la précision au TIR (voir shoot) dépend de la distance.
+  // Avant, ce n'était possible qu'en passant par le chien guide
+  // (GuideDog.guideToCurrentTarget) ; désormais accessible à tout le monde.
+  guideToLockedTarget() {
+    const live = this.getLiveTarget();
+    if (!live) return announce('Aucune cible verrouillée ou repérable. Scannez, puis tapez 1 à 9 pour en choisir une.', 'assertive');
+    const name = this.lockedTarget?.name || live.name || 'la cible';
+    this.setGuidance({ name, x: live.x, y: live.y });
+    announce(`Guidage activé vers ${name}.`, 'assertive');
   },
   // Invalidation automatique : si la cible verrouillée n'est plus repérable
   // (disparue/déconnectée), on la déverrouille au lieu de la garder figée.
@@ -2445,7 +2465,17 @@ const Game = {
     const effRange = this.climbedOn ? w.range * 1.6 : w.range;
     let acc = w.accuracy;
     if (this.aimPart === 'tete') acc *= 0.75; else if (this.aimPart === 'jambes') acc *= 0.85;
-    if (range > effRange) acc *= 0.3;
+    if (range > effRange) {
+      acc *= 0.3; // au-delà de la portée effective : très imprécis
+    } else {
+      // Comme dans la vraie vie : plus la cible est proche, plus elle est
+      // facile à toucher ; plus elle est loin (jusqu'à la portée de l'arme),
+      // plus c'est difficile. Avant, seule la limite de portée comptait — un
+      // tir à bout portant et un tir à la limite de portée avaient exactement
+      // la même précision, ce qui ne visait jamais que 100% ou presque.
+      const distRatio = effRange > 0 ? UTIL.clamp(range / effRange, 0, 1) : 0;
+      acc *= (1 - distRatio * 0.55); // jusqu'à -55% de précision à portée max
+    }
     acc += heightBonus + floorBonus + climbBonus;
     this.ammo[w.ammoType]--;
     // Armes lourdes avec un son de tir réel dédié (voir WEAPON_CATALOG) :
@@ -5789,7 +5819,7 @@ const Game = {
     });
   },
   help() {
-    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B lecture rapide de l\'inventaire, N ouvrir le menu d\'inventaire (utiliser, porter, donner, vendre, déposer), L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Maj+V faire sonner mon véhicule pour le repérer à l\'oreille (utile si deux véhicules identiques sont côte à côte), Alt+H se planquer ou sortir de la planque près d\'une couverture (rend bien plus difficile à repérer et permet de semer une poursuite), Maj+G arrêter le guidage, boîte manuelle des motos et voitures sport : les deux touches à droite du clavier juste avant Entrée (crochet fermant pour monter d\'un rapport, celle juste avant pour redescendre), Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, F7 joueurs connectés et type de connexion (Wi-Fi ou données mobiles), F8 mission active et son identifiant, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
+    announce('Commandes : flèches pour se déplacer, E interagir, T tirer, R recharger, A arme, P téléphone, K ordinateur, B lecture rapide de l\'inventaire, N ouvrir le menu d\'inventaire (utiliser, porter, donner, vendre, déposer), L position, C boussole, F radar de balayage, D balise sonore de la porte la plus proche, Maj+E monter d\'un étage, Alt+E descendre d\'un étage, V micro de proximité, S maintenue pour parler au talkie, Maj+C visite guidée, Maj+B balises sonores, Maj+F retrouver mon véhicule (guidage GPS vers sa dernière position connue), Maj+V faire sonner mon véhicule pour le repérer à l\'oreille (utile si deux véhicules identiques sont côte à côte), Alt+H se planquer ou sortir de la planque près d\'une couverture (rend bien plus difficile à repérer et permet de semer une poursuite), Maj+G arrêter le guidage, boîte manuelle des motos et voitures sport : les deux touches à droite du clavier juste avant Entrée (crochet fermant pour monter d\'un rapport, celle juste avant pour redescendre), Maj+N basculer le guidage GPS entre voix et bips sonores directionnels, Maj+P fouiller sa poche, Maj+U faire suivre une cible menottée, X coup de poing, Y porter, Shift+Z installer dans véhicule, Shift+T testament au commissariat, Ctrl+J menu véhicule, Ctrl+F fouille cible, Alt+F fouille soi, Ctrl+L verrouiller son véhicule, Ctrl+S sirène, Ctrl+M acheter une machine d\'extraction minière, Ctrl+O ma tenue, Ctrl+Z marcher vers la cible verrouillée, Ctrl+A mode staff, F6 bilan santé/faim/soif/énergie/argent/essence, F7 joueurs connectés et type de connexion (Wi-Fi ou données mobiles), F8 mission active et son identifiant, Alt+V infos du véhicule, F9-F12 raccourcis, Ctrl+1-9 ciblage rapide. Chien guide (Maj+Alt+chiffre) : 0 prendre ou lâcher la laisse, 1 menu du chien, 2 guider vers la destination, 3 nourrir, 4 abreuver, 5 état, 6 rappeler, 7 rester sur place, 8 envoyer au véhicule, 9 désactiver ou réactiver, Maj+Alt+F7 repos. Achat du chien et de sa nourriture à l\'animalerie, soins chez le vétérinaire. Dans les menus et pour choisir une quantité à donner ou déposer : flèches Haut/Bas pour ±1 ou se déplacer, Gauche/Droite pour ±5, Entrée pour valider, Échap pour annuler. Sur mobile, le même geste de glissement sert à naviguer et à ajuster une quantité, et le double-tap valide.', 'polite');
   },
 
   // Save / load

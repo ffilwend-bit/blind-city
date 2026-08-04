@@ -398,6 +398,8 @@ const Net = {
       announce('Cette personne n\'a plus les mains levées.', 'assertive');
     } else if (msg.type === 'freed_from_vehicle') {
       onFreedFromVehicle(msg.fromName);
+    } else if (msg.type === 'you_are_targeted') {
+      onPlayerTargetedMe(msg.fromName);
     } else if (msg.type === 'city_edit') {
       applyCityEdit(msg.op, msg.payload);
     } else if (msg.type === 'world_edit') {

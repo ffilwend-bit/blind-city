@@ -414,6 +414,17 @@ function onFreedFromVehicle(fromName) {
 }
 window.onFreedFromVehicle = onFreedFromVehicle;
 
+// Reçu par le joueur VISÉ : un autre vrai joueur, arme sortie, vient de le
+// verrouiller comme cible (voir Game.target). Son distinct pour être
+// reconnu immédiatement, façon avertissement de verrouillage — permet de
+// réagir (fuir, se planquer, riposter) au lieu de se faire tirer dessus sans
+// le moindre signe avant-coureur.
+function onPlayerTargetedMe(fromName) {
+  if (window.Audio && Audio.targetedWarning) Audio.targetedWarning(0);
+  announce(`${fromName || 'Quelqu\'un'} vous vise avec une arme !`, 'assertive');
+}
+window.onPlayerTargetedMe = onPlayerTargetedMe;
+
 // Fouille d'un vrai joueur (mains levées) : demande son inventaire, puis
 // propose le même menu de choix que pour un PNJ. Le retrait réel se fait côté
 // cible (chacun reste maître de son propre inventaire), le serveur ne relaie
