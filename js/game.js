@@ -2102,6 +2102,20 @@ const Game = {
   // (bâtiment ou véhicule) et la fait « sonner » avec spatialisation stéréo,
   // puis annonce la direction et la distance en pas. Touche D.
   pingNearestDoor() {
+    // À L'INTÉRIEUR d'un lieu avec un comptoir/guichet (banque, etc.) : rien
+    // ne guidait jusque-là vers ce point de service une fois entré — seuls
+    // les noms de pièce étaient annoncés en marchant, sans direction ni
+    // distance, ce qui rendait le guichet introuvable à l'aveugle (« aucune
+    // réaction »). Même touche D, réutilisée pour guider vers le service.
+    if (this.interior && this.interior.service) {
+      const it = this.interior, svc = it.service;
+      const dx = svc.x - it.ix, dy = svc.y - it.iy;
+      if (dx === 0 && dy === 0) { announce(`${svc.label}, juste devant vous.`, 'assertive'); return; }
+      const pas = Math.max(1, Math.abs(dx) + Math.abs(dy)); // cases réelles à franchir, comme dehors
+      this.doorCue(UTIL.clamp(dx, -1, 1) * 0.6);
+      announce(`${svc.label}, ${UTIL.bearing(dx, dy)}, ${pas} pas.`, 'assertive');
+      return;
+    }
     const candidates = [];
     const R = 20; // rayon de recherche en tuiles
     // Points d'intérêt (bâtiments) avec une porte.
