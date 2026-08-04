@@ -414,7 +414,7 @@ function openStaffGangMarketAssignMenu(gangId) {
     { id: 'aucun', title: '🚫 Aucun marché', desc: 'Retire tout marché à ce gang.' },
     ...Object.entries(City.MARKET_TYPES).map(([type, def]) => {
       const holder = City.getMarketHolder(type);
-      return { id: type, title: def.label, desc: holder && holder.id !== gangId ? `Actuellement tenu par ${holder.name} : le lui retirera.` : (holder ? 'Déjà tenu par ce gang.' : 'Non attribué.') };
+      return { id: type, title: def.label, desc: holder && holder.id !== gangId ? `Actuellement tenu par ${holder.leader}, président des ${holder.name} : le lui retirera.` : (holder ? `Déjà tenu par ${holder.leader}, président de ce gang.` : 'Non attribué.') };
     }),
   ];
   renderMenu(items, (sel) => {

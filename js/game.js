@@ -2295,6 +2295,21 @@ const Game = {
     announce(msg, 'assertive');
     if (people.length || vehicles.length) announce('Tapez 1 à 9 pour cibler une personne ou un véhicule.', 'polite');
   },
+  // Repère un tireur (PNJ) sans avoir à refaire un scan complet : à chaque
+  // tir essuyé, une chance croissante de révéler sa position exacte et de
+  // pouvoir le verrouiller directement — avant, rien ne permettait de
+  // retrouver qui tirait si le dernier scan ne l'avait pas repéré (embuscade
+  // apparue après coup, tireur hors du dernier balayage...).
+  revealShooter(npc) {
+    if (!npc || npc.dead) return;
+    this.scannedTargets = this.scannedTargets || [];
+    if (this.scannedTargets.some(t => t.id === npc.id)) return; // déjà repéré
+    const dist = UTIL.dist(npc, this) * CONFIG.METERS_PER_TILE;
+    const bearing = UTIL.bearing(npc.x - this.x, npc.y - this.y);
+    this.scannedTargets.push({ ...npc, dist, bearing });
+    Audio.beep(0, 900);
+    announce(`Tir repéré : ${npc.name}, ${Math.round(dist)} m, ${bearing}. Touche ${this.scannedTargets.length} pour le verrouiller.`, 'assertive');
+  },
   target(index) {
     const n = this.scannedTargets[index - 1];
     if (!n) return announce('Cible invalide.', 'assertive');
@@ -3855,7 +3870,7 @@ const Game = {
     this.money -= total; it.q -= qty;
     this.addItem({ ...it, q: qty });
     Audio.cash();
-    const gangNote = gangHolder ? ` (majoration : ce marché est tenu par le gang ${City.getMarketHolder(gangHolder).name})` : '';
+    const gangNote = gangHolder ? ` (majoration : ce marché est tenu par ${City.getMarketHolder(gangHolder).leader}, président des ${City.getMarketHolder(gangHolder).name})` : '';
     announce(`Vous achetez ${qty > 1 ? qty + ' ' : ''}${it.name} pour ${UTIL.formatMoney(total)}${heatSurcharge > 0.02 ? ' (majoration locale liée à l\'insécurité)' : ''}${gangNote}.`, 'assertive');
     updateHud();
   },
@@ -4601,6 +4616,9 @@ const Game = {
         const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
         this.takeDamage(dmg, { headshot: this.rollHeadshot() });
         announce(`${n.name} vous touche avec son ${weapon.name} ! ${dmg} dégâts.`, 'assertive');
+        // Chaque tir essuyé augmente la chance de le repérer précisément.
+        n._shotsAtPlayer = (n._shotsAtPlayer || 0) + 1;
+        if (UTIL.chance(Math.min(0.9, 0.25 + n._shotsAtPlayer * 0.15))) this.revealShooter(n);
       }
     });
   },
@@ -6057,7 +6075,7 @@ const Game = {
     if (this.money < price) return announce(`Casque de protection : ${UTIL.formatMoney(price)}. Fonds insuffisants.`, 'assertive');
     this.money -= price; this.hasHelmet = true;
     Audio.cash();
-    announce(`Casque de protection porté${holder ? ` (marché tenu par le gang ${holder.name})` : ''}. Il vous protège d'un tir ou d'un coup à la tête qui serait autrement mortel.`, 'assertive');
+    announce(`Casque de protection porté${holder ? ` (marché tenu par ${holder.leader}, président des ${holder.name})` : ''}. Il vous protège d'un tir ou d'un coup à la tête qui serait autrement mortel.`, 'assertive');
     updateHud();
   },
   hasVest: false,
@@ -6069,7 +6087,7 @@ const Game = {
     if (this.money < price) return announce(`Gilet pare-balles : ${UTIL.formatMoney(price)}. Fonds insuffisants.`, 'assertive');
     this.money -= price; this.hasVest = true;
     Audio.cash();
-    announce(`Gilet pare-balles porté${holder ? ` (marché tenu par le gang ${holder.name})` : ''}. Il réduit les dégâts d'un tir au corps.`, 'assertive');
+    announce(`Gilet pare-balles porté${holder ? ` (marché tenu par ${holder.leader}, président des ${holder.name})` : ''}. Il réduit les dégâts d'un tir au corps.`, 'assertive');
     updateHud();
   },
   // Numéros de téléphone : chaque téléphone a le sien, purement pour
