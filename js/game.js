@@ -2114,7 +2114,12 @@ const Game = {
     }
     candidates.sort((a, b) => a.d - b.d);
     const t = candidates[0];
-    const pas = Math.max(1, Math.round(UTIL.dist(t, this) * CONFIG.METERS_PER_TILE / 0.3)); // 1 pas = 30 cm
+    // « pas » = nombre réel de déplacements (cases) à franchir pour y
+    // arriver, pas une fausse unité de 30 cm sans rapport avec le
+    // déplacement réel (qui avance d'une case entière par pression) — sinon
+    // le compte annoncé ne correspondait jamais au nombre d'actions
+    // nécessaires pour y arriver.
+    const pas = Math.max(1, Math.round(t.d));
     // Direction relative au cap du joueur pour spatialiser + décrire.
     const pan = this.panForPoint(t.x, t.y);         // -1 gauche … +1 droite
     const rel = this.relativeAngle(t.x, t.y);        // 0 devant … PI derrière
