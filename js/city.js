@@ -602,7 +602,10 @@ const City = {
     for (let i = 0; i < Math.min(templates.length, CONFIG.MISSION_COUNT); i++) {
       const t = templates[i];
       let pos, extra = {};
-      if (t.type === 'combat' && this.gangs.length) { pos = UTIL.pick(this.gangs); }
+      // "Traque nocturne" (hunt) réutilise le vrai repaire de gang et le
+      // même déroulé que "combat" (voir checkMission/beginGangRaid) : c'est
+      // littéralement un raid de repaire, juste sous un autre habillage.
+      if ((t.type === 'combat' || t.type === 'hunt') && this.gangs.length) { pos = UTIL.pick(this.gangs); }
       else if (t.type === 'heist' && this.pois.some(p => p.type === 'banque')) { pos = UTIL.pick(this.pois.filter(p => p.type === 'banque')); }
       else if (t.type === 'convoyage') {
         const d = UTIL.pick(this.districts);
@@ -624,7 +627,10 @@ const City = {
           extra = { dropX: drop.x, dropY: drop.y, dropName: this.getDistrictAt(drop.x, drop.y).name };
         }
       }
-      else if (t.type === 'taxi_soigne') {
+      else if (t.type === 'taxi_soigne' || t.type === 'taxi') {
+        // "Chauffeur VIP" (taxi) réutilise exactement le vrai client et le
+        // même déroulé que "Course VIP soignée" : un client réel à charger,
+        // pas juste un point vide.
         const d = UTIL.pick(this.districts);
         pos = this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1);
         const d2 = UTIL.pick(this.districts);
@@ -659,7 +665,9 @@ const City = {
         const drop = this.findFree(d2.x1 + 1, d2.y1 + 1, d2.x2 - 1, d2.y2 - 1);
         extra = { dropX: drop.x, dropY: drop.y, dropName: this.getDistrictAt(drop.x, drop.y).name, cargo: UTIL.pick(['armes', 'drogue']) };
       }
-      else if (t.type === 'urgence_medicale') {
+      else if (t.type === 'urgence_medicale' || t.type === 'medical') {
+        // "Sauvetage médical" (medical) réutilise le vrai blessé et le même
+        // déroulé que "Urgence médicale" : un vrai blessé à transporter.
         const d = UTIL.pick(this.districts);
         pos = this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1);
         const victimId = 'mission_victime_' + i;
@@ -667,7 +675,9 @@ const City = {
         this.npcs.push({ id: victimId, name: `${UTIL.pick(['Un blessé', 'Une blessée'])}`, job: 'victime', x: pos.x, y: pos.y, health: 60, relation: 0, money: 0, inCar: false, dialogue: [], home: pos, hostile: false, gender, outfit: generateNPCAppearance('civil') });
         extra = { victimId };
       }
-      else if (t.type === 'course_clandestine') {
+      else if (t.type === 'course_clandestine' || t.type === 'race') {
+        // "Course de rue"/"Course de moto" (race) réutilisent le vrai rival
+        // et le même déroulé que "Course clandestine".
         const d = UTIL.pick(this.districts);
         pos = this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1);
         const d2 = UTIL.pick(this.districts);
@@ -809,6 +819,50 @@ const City = {
       else if (t.type === 'fishing') {
         const d = this.districts.find(x => x.type === 'port') || UTIL.pick(this.districts);
         pos = this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1);
+      }
+      // "Patrouille de police"/"Saisie de drogue" (police) : un vrai suspect
+      // armé et hostile à gérer, pas un point vide.
+      else if (t.type === 'police') {
+        const d = UTIL.pick(this.districts);
+        pos = this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1);
+        const suspectId = 'police_suspect_' + i;
+        const gender = UTIL.pick(['homme', 'femme']);
+        this.npcs.push({ id: suspectId, name: `${UTIL.pick(['Suspect', 'Individu'])} armé`, job: 'suspect', x: pos.x, y: pos.y, health: 100, relation: -60, money: 0, inCar: false, dialogue: [], home: pos, hostile: true, weapon: UTIL.pick(['pistolet_9', 'revolver_38']), gender, outfit: generateNPCAppearance('civil') });
+        extra = { suspectId };
+      }
+      // "Marché noir" (trade) doit se dérouler au VRAI marché noir de la
+      // ville, avec un vrai contact à qui parler, pas un point quelconque.
+      else if (t.type === 'trade') {
+        const markets = this.pois.filter(p => p.type === 'marche_noir' || p.type === 'marche_noir_lointain');
+        const market = markets.length ? UTIL.pick(markets) : (() => { const d = UTIL.pick(this.districts); return this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1); })();
+        pos = { x: market.x, y: market.y };
+        const dealerId = 'trade_dealer_' + i;
+        const gender = UTIL.pick(['homme', 'femme']);
+        this.npcs.push({ id: dealerId, name: `${UTIL.pick(['Revendeur', 'Contact'])} du marché noir`, job: 'dealer', x: pos.x, y: pos.y, health: 100, relation: 0, money: 0, inCar: false, dialogue: ['J\'ai ce qu\'il te faut, si le prix est bon.'], home: pos, hostile: false, gender, outfit: generateNPCAppearance('civil') });
+        extra = { dealerId };
+      }
+      // "Livraison express"/"Escorte convoi" (transport) : point de départ
+      // ancré à un vrai entrepôt ou magasin, pas un point quelconque.
+      else if (t.type === 'transport') {
+        const spots = this.pois.filter(p => p.type === 'entrepot' || p.type === 'magasin');
+        const spot = spots.length ? UTIL.pick(spots) : (() => { const d = UTIL.pick(this.districts); return this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1); })();
+        pos = { x: spot.x, y: spot.y };
+        extra = { locationName: spot.name };
+      }
+      // "Transport aérien"/"Surveillance aérienne" (air) : ancré à un vrai
+      // aéroport ou héliport, pas un point quelconque.
+      else if (t.type === 'air') {
+        const spots = this.pois.filter(p => p.type === 'aeroport' || p.type === 'heliport');
+        const spot = spots.length ? UTIL.pick(spots) : (() => { const d = UTIL.pick(this.districts); return this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1); })();
+        pos = { x: spot.x, y: spot.y };
+        extra = { locationName: spot.name };
+      }
+      // "Réparation urgente" (repair) : ancré à un vrai atelier.
+      else if (t.type === 'repair') {
+        const spots = this.pois.filter(p => p.type === 'atelier');
+        const spot = spots.length ? UTIL.pick(spots) : (() => { const d = UTIL.pick(this.districts); return this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1); })();
+        pos = { x: spot.x, y: spot.y };
+        extra = { locationName: spot.name };
       }
       else { const d = UTIL.pick(this.districts); pos = this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1); }
       this.missions.push({ id: 'mission_' + i, ...t, x: pos.x, y: pos.y, ...extra, active: false, completed: false, giver: UTIL.pick(this.npcs).name });
