@@ -817,9 +817,14 @@ const Game = {
       // Changement de quartier.
       const dName = City.getDistrictAt(tx, ty).name;
       if (dName !== p.district) { p.district = dName; announce(`Vous entrez dans ${dName}.`, 'polite'); }
-      // Passage route / hors-route.
+      // Passage route / hors-route : ne s'applique qu'au sol — un aéronef EN
+      // VOL (altitude > 0) survole tout, la notion de route au sol ne le
+      // concerne plus (sinon « vous quittez la route » sonnait à tort en
+      // plein ciel, dès que le sol survolé n'était pas une route).
+      const cls = VEHICLE_CATALOG[v.type];
       const onRoad = City.isRoad(tx, ty);
-      if (onRoad !== p.road) { p.road = onRoad; announce(onRoad ? 'Vous êtes sur la route.' : 'Attention, vous quittez la route.', 'polite'); }
+      if (!(cls.flies && v.altitude > 0) && onRoad !== p.road) { p.road = onRoad; announce(onRoad ? 'Vous êtes sur la route.' : 'Attention, vous quittez la route.', 'polite'); }
+      else if (cls.flies && v.altitude > 0) p.road = onRoad; // garde l'état à jour sans l'annoncer, pour ne pas annoncer faussement au posé
     }
     // Rappel périodique de cap et de vitesse (sensation de progression continue).
     if (moving && now - p.lastMsg > 7000) {
