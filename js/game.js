@@ -3218,7 +3218,11 @@ const Game = {
     // de connu. La tenue visible (hors visage/coiffure), elle, continue
     // toujours d'être décrite en entier — un masque ne cache pas les habits.
     if (o.masque) {
-      let desc = `${sujet} masqué${estFemme ? 'e' : ''} est arrêté${estFemme ? 'e' : ''} droit devant vous. Impossible d'identifier qui c'est. `;
+      // "se trouve" plutôt que "est arrêté(e)" : ce dernier se comprend à
+      // l'oreille comme une arrestation policière, alors qu'il ne s'agissait
+      // que de dire que la personne est immobile, juste devant vous — ambigu
+      // en particulier si elle est assise dans un véhicule.
+      let desc = `${sujet} masqué${estFemme ? 'e' : ''} se trouve droit devant vous. Impossible d'identifier qui c'est. `;
       const parts = [];
       if (o.haut) parts.push(`un ${o.haut}${o.couleurHaut ? ' de couleur ' + o.couleurHaut : ''}`);
       if (o.bas) parts.push(`un ${o.bas}${o.couleurBas ? ' ' + o.couleurBas : ''}`);
@@ -3239,7 +3243,7 @@ const Game = {
     // quelqu'un à son visage plutôt qu'à une pièce d'identité qu'on ne voit pas.
     const contactMatch = this.resolveContactName(npc);
     const displayName = contactMatch ? contactMatch.label : npc.name;
-    let desc = `${sujet} est arrêté droit devant vous : ${displayName}, ${qualif}. `;
+    let desc = `${sujet} se trouve droit devant vous : ${displayName}, ${qualif}. `;
     if (contactMatch?.ambiguous) desc += `Attention : cette personne correspond à plusieurs de vos contacts enregistrés sous des noms différents — impossible de savoir lequel c'est vraiment sans lui parler. `;
     if (o.isPolice) {
       desc += `${pronom} l'uniforme de la police. `;
