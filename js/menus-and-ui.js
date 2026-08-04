@@ -958,6 +958,7 @@ function openInfoMenu() {
     { id: 'searchself', title: '🔍 Fouiller son inventaire sur soi (F9)', desc: 'Récapitulatif rapide de ce que vous portez.' },
     { id: 'guidetotarget', title: '🚶 Marcher vers la cible verrouillée (Ctrl+Z)', desc: 'Vous guide vocalement vers la personne actuellement verrouillée (touches 1-9), sans avoir besoin d\'un chien guide.' },
     { id: 'time', title: '🕐 Heure dans la ville', desc: 'Heure actuelle et phase du cycle jour/nuit (aube, journée, crépuscule, nuit).' },
+    { id: 'myid', title: '🆔 Mon identifiant (Ctrl+I)', desc: 'Rappelle votre identifiant de connexion, à communiquer à votre équipe.' },
   ];
   renderMenu(items, (it) => {
     closeMenu();
@@ -970,6 +971,7 @@ function openInfoMenu() {
     else if (it.id === 'searchself') Game.searchSelf();
     else if (it.id === 'guidetotarget') Game.guideToLockedTarget();
     else if (it.id === 'time') Game.announceTime();
+    else if (it.id === 'myid') Game.announceMyId();
   });
 }
 function openMapMenu() {
