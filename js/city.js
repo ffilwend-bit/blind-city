@@ -467,8 +467,12 @@ const City = {
       const pos = this.findFree(d.x1 + 3, d.y1 + 3, d.x2 - 3, d.y2 - 3);
       this.setTile(pos.x, pos.y, 'gang_hideout');
       // market : marché noir tenu par ce gang (voir MARKET_TYPES/assignGangMarket),
-      // attribué par le staff — null tant que personne ne le détient.
-      this.gangs.push({ id: 'gang_' + i, name: names[i % names.length], x: pos.x, y: pos.y, power: UTIL.randInt(20, 80), relation: -20, members: UTIL.randInt(3, 8), market: null });
+      // attribué par le staff — null tant que personne ne le détient. En
+      // pratique attribué à une PERSONNE réelle du gang (le président), pas
+      // au gang comme entité abstraite — c'est lui qui gère ensuite avec ses
+      // membres, comme dans un vrai GTA RP.
+      const leader = `${UTIL.pick(['Rasmané', 'Sibiri', 'Wendkuni', 'Alizèta', 'Poko', 'Fanta'])} ${UTIL.pick(['Sawadogo', 'Yaméogo', 'Kafando', 'Tapsoba'])}`;
+      this.gangs.push({ id: 'gang_' + i, name: names[i % names.length], leader, x: pos.x, y: pos.y, power: UTIL.randInt(20, 80), relation: -20, members: UTIL.randInt(3, 8), market: null });
     }
   },
   // ===== Marchés noirs tenus par un gang (attribué par le staff) =====
