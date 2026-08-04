@@ -189,6 +189,7 @@ function openMainMenu() {
     { id: 'talkie', title: '📻 Talkie-walkie', desc: 'Acheter, allumer, régler la fréquence, recharger, parler.' },
     { id: 'infos', title: 'ℹ️ Infos rapides', desc: 'Radar sonore, boussole, bilan santé, joueurs connectés, mission active, porte la plus proche — utile si une touche clavier ne répond pas (téléphone).' },
     { id: 'rptalk', title: '💬 Parler (RP)', desc: 'Dire un message audible par les joueurs réels proches de vous.' },
+    { id: 'rpaction', title: '🎭 Agir (RP libre)', desc: 'Décrire une action ou une attitude de votre personnage (ex. « lève lentement les mains »), visible par les joueurs réels proches — pour tout ce qu\'aucune touche ne couvre.' },
     { id: 'map', title: '🗺️ Carte', desc: 'Liste des lieux et navigation.' },
     { id: 'places', title: '📍 Lieux utiles', desc: 'Station-service la plus proche, boutique de vêtements, restaurant.' },
     { id: 'burnerphone', title: '📱 Acheter un téléphone prépayé', desc: 'Un numéro de plus, renommable.' },
@@ -271,6 +272,7 @@ function handleMenuItem(it) {
   else if (it.id === 'talkie') { openTalkieMenu(); }
   else if (it.id === 'infos') { openInfoMenu(); }
   else if (it.id === 'rptalk') { Game.rpTalk(); closeMenu(); }
+  else if (it.id === 'rpaction') { Game.rpAction(); closeMenu(); }
   else if (it.id === 'map') openMapMenu();
   else if (it.id === 'help') { Game.help(); closeMenu(); }
   else if (it.id === 'role') { openRoleMenu(); }

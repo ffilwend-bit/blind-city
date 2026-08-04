@@ -302,6 +302,12 @@ const Net = {
       const d = from ? Math.round(UTIL.dist(from, Game) * CONFIG.METERS_PER_TILE) : null;
       speak(`${msg.fromName}${d !== null ? ', ' + d + ' mètres' : ''} dit : ${msg.text}`, 'polite');
       log(`💬 ${msg.fromName} : ${msg.text}`, 'chat');
+    } else if (msg.type === 'rp_action') {
+      // RP libre ("/me") : une ACTION narrée, pas une réplique — pas de "dit :".
+      const from = this.remotePlayers.get(msg.fromId);
+      const d = from ? Math.round(UTIL.dist(from, Game) * CONFIG.METERS_PER_TILE) : null;
+      speak(`${msg.fromName}${d !== null ? ', ' + d + ' mètres' : ''} ${msg.text}`, 'polite');
+      log(`🎭 ${msg.fromName} ${msg.text}`, 'chat');
     } else if (msg.type === 'world_sound') {
       Game.playRemoteSound(msg);
     } else if (msg.type === 'talkie_message') {
@@ -468,6 +474,7 @@ const Net = {
     this.send({ type: 'world_sound', key, vol: opts.vol });
   },
   chat(text) { this.send({ type: 'chat', text }); },
+  rpAction(text) { this.send({ type: 'rp_action', text }); },
   talkiePTT(text) { this.send({ type: 'talkie_ptt', text, frequency: Game.talkie.frequency }); },
   giveTalkieTo(targetId) { this.send({ type: 'talkie_give', targetId, payload: { frequency: Game.talkie.frequency } }); },
   giveItemTo(targetId, item) { this.send({ type: 'item_give', targetId, payload: item }); },
