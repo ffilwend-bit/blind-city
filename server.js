@@ -1142,6 +1142,14 @@ wss.on('connection', (ws, req) => {
       if (!target) return;
       send(target.ws, { type: 'freed_from_vehicle', fromName: `${player.firstName} ${player.lastName}` });
     }
+    // Alerte « vous êtes pris pour cible » (voir Game.target côté client) :
+    // simple relais, comme la libération d'un véhicule — le joueur visé
+    // décide lui-même comment réagir (fuir, riposter, se planquer).
+    else if (msg.type === 'player_targeted') {
+      const target = players.get(msg.targetId);
+      if (!target) return;
+      send(target.ws, { type: 'you_are_targeted', fromName: `${player.firstName} ${player.lastName}` });
+    }
     else if (msg.type === 'voice_toggle') {
       const call = calls.get(msg.callId);
       if (!call || (call.callerId !== id && call.targetId !== id)) return;

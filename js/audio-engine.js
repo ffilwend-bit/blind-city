@@ -178,6 +178,16 @@ const Audio = {
     this.tone({ freq: 80 + base, type: 'sawtooth', duration: 0.12, gain: 0.18, pan, attack: 0.005, release: 0.1, fm: true });
   },
   shellDrop(pan = 0) { this.tone({ freq: 1200 + Math.random() * 400, type: 'sine', duration: 0.07, gain: 0.05, pan, attack: 0.005, release: 0.06 }); },
+  // Alerte « vous êtes pris pour cible » (voir Game.target / onPlayerTargetedMe) :
+  // un vrai joueur qui vous vise arme sortie, dans l'intention de tirer. Son
+  // volontairement distinct de tout le reste — trois bips aigus, montants et
+  // rapprochés, façon avertissement de verrouillage — pour être reconnu
+  // instantanément, sans confusion possible avec un autre son du jeu.
+  targetedWarning(pan = 0) {
+    [0, 90, 180].forEach((delay, i) => {
+      setTimeout(() => this.tone({ freq: 1000 + i * 220, type: 'square', duration: 0.09, gain: 0.16, pan, attack: 0.003, release: 0.06 }), delay);
+    });
+  },
   impact(pan = 0) { this.noise({ duration: 0.1, gain: 0.15, pan, filterFreq: 600, attack: 0.005, release: 0.06 }); },
   // Le joueur encaisse un coup : protected = casque (tête) ou gilet (corps) a
   // absorbé le choc -> son sourd et étouffé (grave, filtré bas) ; sinon, impact

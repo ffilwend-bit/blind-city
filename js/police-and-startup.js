@@ -24,6 +24,7 @@ function setupExtraInput() {
     else if (key === 'x' && !ctrl && !alt) { e.preventDefault(); Game.punch(); }
     else if (key === 'y' && !ctrl && !alt) { e.preventDefault(); Game.carryPlayer(); }
     else if (shift && key === 'z') { e.preventDefault(); Game.putInVehicle(); }
+    else if (ctrl && key === 'z') { e.preventDefault(); Game.guideToLockedTarget(); } // marcher vers la cible verrouillée, sans avoir besoin d'un chien guide
     else if (shift && key === 't') { e.preventDefault(); Game.declareWillAtStation(); }
     else if (ctrl && key === 'j') { e.preventDefault(); Game.openVehicleMenu(); }
     else if (ctrl && key === 'f') { e.preventDefault(); Game.searchTarget(); }

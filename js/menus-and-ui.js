@@ -954,6 +954,7 @@ function openInfoMenu() {
     { id: 'missionid', title: '🎯 Mission active (F8)', desc: 'Rappel de la mission en cours et de son identifiant.' },
     { id: 'door', title: '🚪 Porte la plus proche (D)', desc: 'Balise sonore vers la porte la plus proche.' },
     { id: 'searchself', title: '🔍 Fouiller son inventaire sur soi (F9)', desc: 'Récapitulatif rapide de ce que vous portez.' },
+    { id: 'guidetotarget', title: '🚶 Marcher vers la cible verrouillée (Ctrl+Z)', desc: 'Vous guide vocalement vers la personne actuellement verrouillée (touches 1-9), sans avoir besoin d\'un chien guide.' },
   ];
   renderMenu(items, (it) => {
     closeMenu();
@@ -964,6 +965,7 @@ function openInfoMenu() {
     else if (it.id === 'missionid') Game.announceActiveMissionId();
     else if (it.id === 'door') Game.pingNearestDoor();
     else if (it.id === 'searchself') Game.searchSelf();
+    else if (it.id === 'guidetotarget') Game.guideToLockedTarget();
   });
 }
 function openMapMenu() {
