@@ -3054,7 +3054,7 @@ const Game = {
     }
     // Client de la mission "Course VIP soignée" : prioritaire, même en
     // véhicule (on l'invite à monter sans en descendre).
-    if (this.activeMission && this.activeMission.type === 'taxi_soigne' && !this.taxiState) {
+    if (this.activeMission && (this.activeMission.type === 'taxi_soigne' || this.activeMission.type === 'taxi') && !this.taxiState) {
       const client = City.npcs.find(n => n.id === this.activeMission.clientId && !n.dead);
       const myPos = this.inVehicle && this.vehicle ? this.vehicle : this;
       if (client && UTIL.dist(client, myPos) < 3) return this.openTaxiBoardMenu(client, this.activeMission);
@@ -4242,16 +4242,16 @@ const Game = {
       }
       return;
     }
-    if (m.type === 'combat') return;
+    if (m.type === 'combat' || m.type === 'hunt') return;
     if (m.type === 'convoyage') return;
     if (m.type === 'colis_fragile') return this.tickFragileDelivery(m);
-    if (m.type === 'taxi_soigne') return this.tickTaxiSoigne(m);
+    if (m.type === 'taxi_soigne' || m.type === 'taxi') return this.tickTaxiSoigne(m);
     if (m.type === 'objet_perdu') return this.tickObjetPerdu(m);
     if (m.type === 'filature') return this.tickFilature(m);
     if (m.type === 'escorte') return this.tickEscorte(m);
     if (m.type === 'contrebande') return this.tickContrebande(m);
-    if (m.type === 'urgence_medicale') return this.tickUrgenceMedicale(m);
-    if (m.type === 'course_clandestine') return this.tickCourseClandestine(m);
+    if (m.type === 'urgence_medicale' || m.type === 'medical') return this.tickUrgenceMedicale(m);
+    if (m.type === 'course_clandestine' || m.type === 'race') return this.tickCourseClandestine(m);
     if (m.type === 'sabotage') return this.tickSabotage(m);
     if (m.type === 'chasse_primes') return this.tickChassePrimes(m);
     if (m.type === 'defense_territoire') return this.tickDefenseTerritoire(m);
@@ -4490,7 +4490,7 @@ const Game = {
      est du VRAI butin (armes + munitions), pas de l'argent.
      ========================================================== */
   beginGangRaid(gang) {
-    if (!this.activeMission || this.activeMission.type !== 'combat') {
+    if (!this.activeMission || (this.activeMission.type !== 'combat' && this.activeMission.type !== 'hunt')) {
       return announce(`Repaire des ${gang.name} repéré. Activez une mission de combat depuis la tablette pour tenter un assaut ici.`, 'polite');
     }
     if (this.gangRaidState) return announce('L\'assaut est déjà en cours.', 'assertive');
