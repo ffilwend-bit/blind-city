@@ -466,8 +466,41 @@ const City = {
       const d = this.districts.find(x => x.type === 'ghetto') || this.districts[0];
       const pos = this.findFree(d.x1 + 3, d.y1 + 3, d.x2 - 3, d.y2 - 3);
       this.setTile(pos.x, pos.y, 'gang_hideout');
-      this.gangs.push({ id: 'gang_' + i, name: names[i % names.length], x: pos.x, y: pos.y, power: UTIL.randInt(20, 80), relation: -20, members: UTIL.randInt(3, 8) });
+      // market : marché noir tenu par ce gang (voir MARKET_TYPES/assignGangMarket),
+      // attribué par le staff — null tant que personne ne le détient.
+      this.gangs.push({ id: 'gang_' + i, name: names[i % names.length], x: pos.x, y: pos.y, power: UTIL.randInt(20, 80), relation: -20, members: UTIL.randInt(3, 8), market: null });
     }
+  },
+  // ===== Marchés noirs tenus par un gang (attribué par le staff) =====
+  // Un gang qui détient un marché prélève une "taxe" de fait : les articles
+  // de cette catégorie sont plus chers au marché noir, où qu'on l'achète.
+  // Un seul gang à la fois par marché (l'attribuer à un nouveau le retire à
+  // l'ancien détenteur).
+  MARKET_TYPES: {
+    armes: { label: 'Marché des armes', categories: ['arme', 'munition'], surcharge: 0.2 },
+    drogue: { label: 'Marché de la drogue', categories: ['stupefiant', 'graine'], surcharge: 0.2 },
+    protection: { label: 'Marché des casques et gilets pare-balles', categories: ['protection'], surcharge: 0.2 },
+  },
+  assignGangMarket(gangId, marketType) {
+    const gang = this.gangs.find(g => g.id === gangId);
+    if (!gang) return null;
+    if (marketType && !this.MARKET_TYPES[marketType]) return null;
+    // Retire ce marché à quiconque le détenait déjà (un seul détenteur à la fois).
+    if (marketType) this.gangs.forEach(g => { if (g.market === marketType) g.market = null; });
+    gang.market = marketType || null;
+    return gang;
+  },
+  // Gang détenant un type de marché donné, ou null si personne.
+  getMarketHolder(marketType) {
+    return this.gangs.find(g => g.market === marketType) || null;
+  },
+  // Surcharge de prix (0 = aucune) pour un article, selon sa catégorie et le
+  // gang qui en détient éventuellement le marché.
+  getGangMarketSurcharge(category) {
+    for (const [type, def] of Object.entries(this.MARKET_TYPES)) {
+      if (def.categories.includes(category) && this.getMarketHolder(type)) return def.surcharge;
+    }
+    return 0;
   },
 
   generateNPCs() {

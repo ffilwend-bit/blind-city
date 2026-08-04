@@ -365,6 +365,7 @@ function openAdminMenu() {
     items.push({ id: 'players', title: '🧭 Superviser les joueurs connectés', desc: `Position en temps réel et inventaire de chacun (${Net.connected ? Net.remotePlayers.size + 1 : 0} connecté(s)).` });
     items.push({ id: 'recruiter', title: '🧑‍💼 Nommer un recruteur', desc: 'Autoriser une personne à valider les candidatures d\'un métier précis (chaque patron peut recruter ses employés).' });
     items.push({ id: 'pendingaccounts', title: '🎭 Comptes en attente (entretien RP)', desc: 'Voir les nouveaux comptes dont l\'entretien RP n\'a pas été assez concluant, et décider de les accepter ou non.' });
+    items.push({ id: 'gangmarkets', title: '🏴 Marchés tenus par les gangs', desc: 'Attribuer à un gang le contrôle du marché des armes, de la drogue, ou des casques/gilets — il en majore alors les prix au marché noir.' });
   }
   renderMenu(items, (it) => {
     if (it.id === 'toggle') {
@@ -383,6 +384,41 @@ function openAdminMenu() {
     else if (it.id === 'jobrequests') { openStaffJobRequestsMenu(); }
     else if (it.id === 'pendingaccounts') { openStaffPendingAccountsMenu(); }
     else if (it.id === 'players') { openStaffPlayersMenu(); }
+    else if (it.id === 'gangmarkets') { openStaffGangMarketsMenu(); }
+  });
+}
+// Attribution du contrôle d'un marché noir (armes, drogue, protection) à un
+// gang : liste les gangs, puis pour celui choisi, le marché à lui attribuer
+// (ou à lui retirer). Un seul gang à la fois par marché (voir
+// City.assignGangMarket, qui le retire automatiquement à l'ancien détenteur).
+function openStaffGangMarketsMenu() {
+  el('menuTitle').textContent = 'Marchés tenus par les gangs';
+  const items = City.gangs.map(g => ({
+    id: g.id,
+    title: g.name,
+    desc: g.market ? `Détient actuellement : ${City.MARKET_TYPES[g.market].label}.` : 'Ne détient aucun marché pour l\'instant.',
+  }));
+  if (!items.length) items.push({ id: 'none', title: 'Aucun gang dans cette ville', desc: '' });
+  renderMenu(items, (sel) => {
+    if (sel.id === 'none') return;
+    openStaffGangMarketAssignMenu(sel.id);
+  });
+}
+function openStaffGangMarketAssignMenu(gangId) {
+  const gang = City.gangs.find(g => g.id === gangId);
+  if (!gang) return closeMenu();
+  el('menuTitle').textContent = `Marché de ${gang.name}`;
+  const items = [
+    { id: 'aucun', title: '🚫 Aucun marché', desc: 'Retire tout marché à ce gang.' },
+    ...Object.entries(City.MARKET_TYPES).map(([type, def]) => {
+      const holder = City.getMarketHolder(type);
+      return { id: type, title: def.label, desc: holder && holder.id !== gangId ? `Actuellement tenu par ${holder.name} : le lui retirera.` : (holder ? 'Déjà tenu par ce gang.' : 'Non attribué.') };
+    }),
+  ];
+  renderMenu(items, (sel) => {
+    closeMenu();
+    City.assignGangMarket(gangId, sel.id === 'aucun' ? null : sel.id);
+    announce(sel.id === 'aucun' ? `${gang.name} ne détient plus aucun marché.` : `${gang.name} détient désormais ${City.MARKET_TYPES[sel.id].label}.`, 'assertive');
   });
 }
 // Supervision staff : liste tous les joueurs connectés avec leur position en

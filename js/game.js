@@ -3758,7 +3758,13 @@ const Game = {
     // Un commerce dans un quartier où ça braque souvent se couvre en
     // augmentant ses prix (jusqu'à +25% si le quartier est très "chaud").
     const districtName = ctx.poi ? City.getDistrictAt(ctx.poi.x, ctx.poi.y).name : null;
-    const surcharge = districtName ? Math.min(0.25, City.getDistrictEconomy(districtName).heat / 200) : 0;
+    const heatSurcharge = districtName ? Math.min(0.25, City.getDistrictEconomy(districtName).heat / 200) : 0;
+    // Un gang qui tient le marché de cette catégorie (armes, drogue,
+    // protection — voir City.MARKET_TYPES, attribué par le staff) prélève sa
+    // propre majoration, où que l'article soit acheté.
+    const gangSurcharge = City.getGangMarketSurcharge(it.category);
+    const gangHolder = gangSurcharge ? Object.entries(City.MARKET_TYPES).find(([, def]) => def.categories.includes(it.category))?.[0] : null;
+    const surcharge = heatSurcharge + gangSurcharge;
     const unitPrice = Math.round(it.price * (1 + surcharge));
     const total = unitPrice * qty;
     if (this.money < total) return announce(`Pas assez d'argent pour ${qty} ${it.name} (${UTIL.formatMoney(total)}).`, 'assertive');
@@ -3768,7 +3774,8 @@ const Game = {
     this.money -= total; it.q -= qty;
     this.addItem({ ...it, q: qty });
     Audio.cash();
-    announce(`Vous achetez ${qty > 1 ? qty + ' ' : ''}${it.name} pour ${UTIL.formatMoney(total)}${surcharge > 0.02 ? ' (majoration locale liée à l\'insécurité)' : ''}.`, 'assertive');
+    const gangNote = gangHolder ? ` (majoration : ce marché est tenu par le gang ${City.getMarketHolder(gangHolder).name})` : '';
+    announce(`Vous achetez ${qty > 1 ? qty + ' ' : ''}${it.name} pour ${UTIL.formatMoney(total)}${heatSurcharge > 0.02 ? ' (majoration locale liée à l\'insécurité)' : ''}${gangNote}.`, 'assertive');
     updateHud();
   },
   sellItem() {
@@ -5963,21 +5970,25 @@ const Game = {
   hasHelmet: false,
   buyHelmet() {
     if (this.hasHelmet) return announce('Vous portez déjà un casque de protection.', 'polite');
-    const price = 120000;
+    const gangSurcharge = City.getGangMarketSurcharge('protection');
+    const holder = gangSurcharge ? City.getMarketHolder('protection') : null;
+    const price = Math.round(120000 * (1 + gangSurcharge));
     if (this.money < price) return announce(`Casque de protection : ${UTIL.formatMoney(price)}. Fonds insuffisants.`, 'assertive');
     this.money -= price; this.hasHelmet = true;
     Audio.cash();
-    announce('Casque de protection porté. Il vous protège d\'un tir ou d\'un coup à la tête qui serait autrement mortel.', 'assertive');
+    announce(`Casque de protection porté${holder ? ` (marché tenu par le gang ${holder.name})` : ''}. Il vous protège d'un tir ou d'un coup à la tête qui serait autrement mortel.`, 'assertive');
     updateHud();
   },
   hasVest: false,
   buyVest() {
     if (this.hasVest) return announce('Vous portez déjà un gilet pare-balles.', 'polite');
-    const price = 150000;
+    const gangSurcharge = City.getGangMarketSurcharge('protection');
+    const holder = gangSurcharge ? City.getMarketHolder('protection') : null;
+    const price = Math.round(150000 * (1 + gangSurcharge));
     if (this.money < price) return announce(`Gilet pare-balles : ${UTIL.formatMoney(price)}. Fonds insuffisants.`, 'assertive');
     this.money -= price; this.hasVest = true;
     Audio.cash();
-    announce('Gilet pare-balles porté. Il réduit les dégâts d\'un tir au corps.', 'assertive');
+    announce(`Gilet pare-balles porté${holder ? ` (marché tenu par le gang ${holder.name})` : ''}. Il réduit les dégâts d'un tir au corps.`, 'assertive');
     updateHud();
   },
   // Numéros de téléphone : chaque téléphone a le sien, purement pour
