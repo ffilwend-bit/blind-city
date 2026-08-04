@@ -187,6 +187,7 @@ function openMainMenu() {
     { id: 'missions', title: '🎯 Missions', desc: 'Voir et activer des missions.' },
     { id: 'shops', title: '🛒 Boutiques', desc: 'Magasins, marché noir, concessionnaire.' },
     { id: 'talkie', title: '📻 Talkie-walkie', desc: 'Acheter, allumer, régler la fréquence, recharger, parler.' },
+    { id: 'infos', title: 'ℹ️ Infos rapides', desc: 'Radar sonore, boussole, bilan santé, joueurs connectés, mission active, porte la plus proche — utile si une touche clavier ne répond pas (téléphone).' },
     { id: 'rptalk', title: '💬 Parler (RP)', desc: 'Dire un message audible par les joueurs réels proches de vous.' },
     { id: 'map', title: '🗺️ Carte', desc: 'Liste des lieux et navigation.' },
     { id: 'places', title: '📍 Lieux utiles', desc: 'Station-service la plus proche, boutique de vêtements, restaurant.' },
@@ -268,6 +269,7 @@ function handleMenuItem(it) {
   else if (it.id === 'missions') { Game.openMissions(); closeMenu(); }
   else if (it.id === 'shops') openShopsMenu();
   else if (it.id === 'talkie') { openTalkieMenu(); }
+  else if (it.id === 'infos') { openInfoMenu(); }
   else if (it.id === 'rptalk') { Game.rpTalk(); closeMenu(); }
   else if (it.id === 'map') openMapMenu();
   else if (it.id === 'help') { Game.help(); closeMenu(); }
@@ -898,6 +900,35 @@ function guideToPoi(poi) {
     return;
   }
   Game.setGuidance({ name: poi.name, x: poi.x, y: poi.y });
+}
+// Menu d'accès aux commandes normalement disponibles uniquement au clavier
+// (F, C, D, F6, F7, F8, F9...) : sur téléphone avec clavier externe, certaines
+// touches de fonction (F1-F12) sont interceptées par le système d'exploitation
+// (luminosité, volume, médias) et n'atteignent jamais la page — impossible à
+// contourner en JavaScript. Ce menu, purement tactile, donne un accès
+// garanti à ces informations essentielles quel que soit l'appareil.
+function openInfoMenu() {
+  ensureMenuOpen();
+  el('menuTitle').textContent = 'Infos rapides';
+  const items = [
+    { id: 'radar', title: '📡 Radar sonore (F)', desc: 'Photo sonore de tout ce qui vous entoure : personnes, véhicules, lieux.' },
+    { id: 'compass', title: '🧭 Boussole (C)', desc: 'Votre cap actuel.' },
+    { id: 'status', title: '❤️ Bilan (F6)', desc: 'Santé, faim, soif, énergie, argent, essence.' },
+    { id: 'serverinfo', title: '🌐 Joueurs connectés (F7)', desc: 'Nombre de joueurs réels connectés et type de connexion.' },
+    { id: 'missionid', title: '🎯 Mission active (F8)', desc: 'Rappel de la mission en cours et de son identifiant.' },
+    { id: 'door', title: '🚪 Porte la plus proche (D)', desc: 'Balise sonore vers la porte la plus proche.' },
+    { id: 'searchself', title: '🔍 Fouiller son inventaire sur soi (F9)', desc: 'Récapitulatif rapide de ce que vous portez.' },
+  ];
+  renderMenu(items, (it) => {
+    closeMenu();
+    if (it.id === 'radar') Game.soundRadar();
+    else if (it.id === 'compass') Game.soundCompass();
+    else if (it.id === 'status') Game.announceStatus();
+    else if (it.id === 'serverinfo') Game.announceServerInfo();
+    else if (it.id === 'missionid') Game.announceActiveMissionId();
+    else if (it.id === 'door') Game.pingNearestDoor();
+    else if (it.id === 'searchself') Game.searchSelf();
+  });
 }
 function openMapMenu() {
   ensureMenuOpen();
