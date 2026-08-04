@@ -22,7 +22,7 @@ function setupExtraInput() {
     else if (key === 'a' && !ctrl && !alt && !shift) { e.preventDefault(); Game.toggleWeapon(); } // sortir/ranger la dernière arme
     else if (shift && key === 'a') { e.preventDefault(); openWeaponsMenu(); } // menu de sélection d'arme
     else if (key === 'x' && !ctrl && !alt) { e.preventDefault(); Game.punch(); }
-    else if (key === 'y' && !ctrl && !alt) { e.preventDefault(); Game.carryPlayer(); }
+    else if (key === 'y' && !ctrl && !alt && !shift) { e.preventDefault(); Game.carryPlayer(); }
     else if (shift && key === 'z') { e.preventDefault(); Game.putInVehicle(); }
     else if (ctrl && key === 'z') { e.preventDefault(); Game.guideToLockedTarget(); } // marcher vers la cible verrouillée, sans avoir besoin d'un chien guide
     else if (shift && key === 't') { e.preventDefault(); Game.declareWillAtStation(); }
@@ -58,6 +58,7 @@ function setupExtraInput() {
     else if (ctrl && alt && key === 't') { e.preventDefault(); Game.requisitionTank(); }
     else if (ctrl && key === 't') { e.preventDefault(); openTalkieMenu(); }
     else if (ctrl && key === 'y') { e.preventDefault(); Game.rpTalk(); }
+    else if (shift && key === 'y') { e.preventDefault(); Game.rpAction(); } // RP libre ("/me") : décrire une action, pas une réplique
     else if (ctrl && alt && (key === 'e' || e.code === 'KeyE')) { e.preventDefault(); Game.toggleIndoor(); } // entrer / sortir d'un lieu (e.code : sur AZERTY, AltGr+E donne « € », pas « e »)
     else if (ctrl && key === 'e') { e.preventDefault(); Game.throwGrenade(); }
     else if (shift && key === 'e') { e.preventDefault(); Game.changeFloor(1); }   // monter d'un étage

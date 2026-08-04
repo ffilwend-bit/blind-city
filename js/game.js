@@ -3275,6 +3275,20 @@ const Game = {
       log(`💬 Vous : ${text}`, 'chat');
     });
   },
+  // RP libre ("/me") : décrit une ACTION ou une attitude de son personnage,
+  // pas une réplique parlée (voir rpTalk ci-dessus). Sert à jouer tout ce
+  // qu'aucune touche ou mécanique du jeu ne couvre (lever les mains d'un air
+  // nerveux, sortir un objet, hocher la tête...) — audible par les mêmes
+  // joueurs réels proches, avec la même portée que la parole RP.
+  rpAction() {
+    if (!Net.connected) return announce('Vous n\'êtes pas connecté à un serveur multijoueur.', 'assertive');
+    AccessibleTextPrompt.open('Action RP libre', 'Que fait votre personnage, visible par les joueurs proches ? (ex. « lève lentement les mains »)', '', (text) => {
+      if (!text) return;
+      Net.rpAction(text);
+      announce(`Vous ${text}`, 'polite');
+      log(`🎭 Vous ${text}`, 'chat');
+    });
+  },
   talkTo(npc) {
     Audio.voiceHint(0);
     const line = UTIL.pick(npc.dialogue);

@@ -881,6 +881,19 @@ wss.on('connection', (ws, req) => {
       }
     }
 
+    // RP libre ("/me") : décrit une ACTION du personnage plutôt qu'une
+    // réplique parlée (voir 'chat' juste au-dessus, même portée de diffusion).
+    else if (msg.type === 'rp_action') {
+      const text = safeName(msg.text, '', 300);
+      if (!text) return;
+      for (const other of players.values()) {
+        if (other.id === id || !other.joined) continue;
+        if (dist(player, other) <= CHAT_RADIUS) {
+          send(other.ws, { type: 'rp_action', fromId: id, fromName: `${player.firstName} ${player.lastName}`, text });
+        }
+      }
+    }
+
     // Sons du monde (moteur, pas, tir, klaxon, sirène, portes, collisions…) :
     // relayés aux joueurs assez proches pour les entendre, avec la position de
     // l'émetteur pour que chaque client les spatialise. Volontairement léger :
