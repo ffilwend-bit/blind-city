@@ -199,6 +199,12 @@ function hashPassword(password, salt) {
 
 const PORT = process.env.PORT || 3000;
 const WORLD_SEED = Math.floor(Math.random() * 2147483647); // même ville pour tout le monde, tant que le serveur tourne
+// Cycle jour/nuit PARTAGÉ par tout le monde (même principe que WORLD_SEED et
+// la météo, voir weatherState) : une journée complète dure DAY_LENGTH_MS de
+// temps réel, calculée depuis le démarrage du serveur — purement
+// déterministe, rien à stocker ni à sauvegarder. 1h réelle = 24h en jeu.
+const SERVER_START_MS = Date.now();
+const DAY_LENGTH_MS = 60 * 60 * 1000;
 const CHAT_RADIUS = 15;      // distance (en cases) pour s'entendre parler en RP "de vive voix"
 const SOUND_RADIUS = 30;     // distance (en cases, ~120 m) pour entendre les sons du monde d'un autre joueur
 const FREQ_TOLERANCE = 0.05; // tolérance de fréquence pour le talkie-walkie (en MHz)
@@ -308,6 +314,31 @@ function weatherTick() {
   if (weatherState !== before) broadcast({ type: 'weather_change', state: weatherState });
 }
 setInterval(weatherTick, 90000);
+
+// Heure de jeu actuelle (0-24, fractionnaire) et phase correspondante.
+function getGameHour() {
+  const elapsed = (Date.now() - SERVER_START_MS) % DAY_LENGTH_MS;
+  return (elapsed / DAY_LENGTH_MS) * 24;
+}
+function getDayPhase(hour) {
+  if (hour >= 5 && hour < 7) return 'aube';
+  if (hour >= 7 && hour < 18) return 'jour';
+  if (hour >= 18 && hour < 20) return 'crepuscule';
+  return 'nuit';
+}
+let dayPhase = getDayPhase(getGameHour());
+// Vérifié chaque minute réelle (largement assez fin, la phase la plus
+// courte — l'aube ou le crépuscule — dure 2h en jeu, soit 5 minutes
+// réelles) : ne diffuse qu'au changement de PHASE, pas à chaque minute.
+function dayNightTick() {
+  const hour = getGameHour();
+  const phase = getDayPhase(hour);
+  if (phase !== dayPhase) {
+    dayPhase = phase;
+    broadcast({ type: 'daynight_change', phase, hour });
+  }
+}
+setInterval(dayNightTick, 60000);
 
 function publicState(p) {
   return {
@@ -795,7 +826,7 @@ wss.on('connection', (ws, req) => {
       player.gender = msg.gender === 'femme' ? 'femme' : 'homme';
       player.joined = true;
       send(ws, {
-        type: 'welcome', id, seed: WORLD_SEED, weather: weatherState,
+        type: 'welcome', id, seed: WORLD_SEED, weather: weatherState, dayPhase, gameHour: getGameHour(),
         players: Array.from(players.values()).filter(p => p.id !== id && p.joined).map(publicState),
         cityEdits: staffData.cityEdits || [],
         worldEdits: staffData.worldEdits || [],

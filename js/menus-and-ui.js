@@ -955,6 +955,7 @@ function openInfoMenu() {
     { id: 'door', title: '🚪 Porte la plus proche (D)', desc: 'Balise sonore vers la porte la plus proche.' },
     { id: 'searchself', title: '🔍 Fouiller son inventaire sur soi (F9)', desc: 'Récapitulatif rapide de ce que vous portez.' },
     { id: 'guidetotarget', title: '🚶 Marcher vers la cible verrouillée (Ctrl+Z)', desc: 'Vous guide vocalement vers la personne actuellement verrouillée (touches 1-9), sans avoir besoin d\'un chien guide.' },
+    { id: 'time', title: '🕐 Heure dans la ville', desc: 'Heure actuelle et phase du cycle jour/nuit (aube, journée, crépuscule, nuit).' },
   ];
   renderMenu(items, (it) => {
     closeMenu();
@@ -966,6 +967,7 @@ function openInfoMenu() {
     else if (it.id === 'door') Game.pingNearestDoor();
     else if (it.id === 'searchself') Game.searchSelf();
     else if (it.id === 'guidetotarget') Game.guideToLockedTarget();
+    else if (it.id === 'time') Game.announceTime();
   });
 }
 function openMapMenu() {
@@ -1624,6 +1626,7 @@ function startGame(seed) {
     setInterval(() => Game.talkieTick(), 5000);
     setInterval(() => Net.sendState(), 300);
     setInterval(() => Weather.tick(), 90000);
+    setInterval(() => DayNight.tick(), 90000);
     setInterval(() => AmbientZones.check(), 3000);
     setInterval(() => Game.tickPassersby(), 4000);
     setInterval(() => Game.tickNpcTraffic(), 1000);

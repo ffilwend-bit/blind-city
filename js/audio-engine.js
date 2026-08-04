@@ -1312,6 +1312,45 @@ const Weather = {
     else { if (UTIL.chance(0.6)) this.applyState('clair', true); }
   },
 };
+// Cycle jour/nuit : même principe que Weather (voir ci-dessus) — en
+// multijoueur, l'heure vient DU SERVEUR (Net.handleMessage, 'daynight_change'
+// + welcome), partagée par tout le monde ; en solo, calculée localement
+// depuis l'heure de lancement de la partie. Une journée complète dure
+// DAY_LENGTH_MS de temps réel (1h réelle = 24h en jeu).
+const DayNight = {
+  phase: 'jour', // 'aube' | 'jour' | 'crepuscule' | 'nuit'
+  hour: 12,
+  DAY_LENGTH_MS: 60 * 60 * 1000,
+  _localStart: Date.now(),
+  PHASE_LABELS: {
+    aube: 'Le jour se lève sur la ville.',
+    jour: 'Il fait grand jour.',
+    crepuscule: 'Le crépuscule tombe, la nuit approche.',
+    nuit: 'La nuit est tombée sur la ville.',
+  },
+  computePhase(hour) {
+    if (hour >= 5 && hour < 7) return 'aube';
+    if (hour >= 7 && hour < 18) return 'jour';
+    if (hour >= 18 && hour < 20) return 'crepuscule';
+    return 'nuit';
+  },
+  applyState(newPhase, hour, sayIt) {
+    if (typeof hour === 'number') this.hour = hour;
+    if (newPhase === this.phase) return;
+    this.phase = newPhase;
+    if (sayIt) announce(this.PHASE_LABELS[newPhase] || '', 'polite');
+    if (typeof AmbientZones !== 'undefined') AmbientZones.current = null; // force une réévaluation de l'ambiance sonore au prochain tick
+  },
+  // Repli SOLO uniquement (pas connecté à un serveur) : calcul local, comme
+  // pour la météo. Dès qu'un serveur est connecté, c'est lui qui décide (voir
+  // Net.handleMessage) et ce calcul local ne s'exécute plus.
+  tick() {
+    if (Net.connected) return;
+    const elapsed = (Date.now() - this._localStart) % this.DAY_LENGTH_MS;
+    const hour = (elapsed / this.DAY_LENGTH_MS) * 24;
+    this.applyState(this.computePhase(hour), hour, true);
+  },
+};
 const AmbientZones = {
   current: null,
   ZONE_KEYS: ['amb_aeroport', 'amb_foret', 'amb_oiseaux', 'sfx_grillade', 'amb_feu', 'amb_matin', 'amb_ville', 'amb_centre_ville_route', 'amb_interieur_couloir'],
@@ -1322,8 +1361,11 @@ const AmbientZones = {
     const nearMine = City.miningSites.some(m => UTIL.dist(m, Game) < 10);
     const nearHouse = City.houses.some(h => UTIL.dist(h, Game) < 5);
     const onRoad = City.isRoad(Game.x, Game.y);
-    const hour = new Date().getHours();
-    const isMorning = hour >= 5 && hour < 10;
+    // Phase du cycle jour/nuit PARTAGÉ (voir DayNight), pas l'heure brute de
+    // l'appareil : avant, "le matin" dépendait de l'horloge du téléphone —
+    // pas la même pour deux joueurs dans des fuseaux différents, et sans
+    // aucun lien avec le cycle jour/nuit désormais partagé par tout le monde.
+    const phase = (typeof DayNight !== 'undefined') ? DayNight.phase : 'jour';
 
     let zone = null;
     if (d && d.type === 'aeroport') zone = 'aeroport';
@@ -1332,7 +1374,8 @@ const AmbientZones = {
     else if (nearMine) zone = 'feu';
     else if (nearHouse) zone = 'interieur';
     else if (d && (d.type === 'centre' || d.type === 'commercial') && onRoad) zone = 'centre_route';
-    else if (isMorning) zone = 'matin';
+    else if (phase === 'aube') zone = 'matin';
+    else if (phase === 'nuit') zone = 'nuit';
     else zone = 'ville'; // ambiance de fond par défaut, partout ailleurs en extérieur
 
     if (zone !== this.current) this.switchTo(zone);
@@ -1347,10 +1390,14 @@ const AmbientZones = {
     else if (zone === 'matin') { AudioLib.playLoop('amb_matin', 0.5); AudioLib.playLoop('amb_oiseaux', 0.35); }
     else if (zone === 'interieur') AudioLib.playLoop('amb_interieur_couloir', 0.5);
     else if (zone === 'centre_route') AudioLib.playLoop('amb_centre_ville_route', 0.3);
+    // Nuit : la même ambiance de ville, mais bien plus étouffée — une ville
+    // qui dort. Pas de fichier dédié à la nuit pour l'instant, donc on rejoue
+    // amb_ville à faible volume plutôt que d'ajouter un silence complet.
+    else if (zone === 'nuit') AudioLib.playLoop('amb_ville', 0.12);
     else if (zone === 'ville') AudioLib.playLoop('amb_ville', 0.26);
   },
 };
-window.Weather = Weather; window.AmbientZones = AmbientZones;
+window.Weather = Weather; window.AmbientZones = AmbientZones; window.DayNight = DayNight;
 
 /* ============================================================
    LECTEUR DE MUSIQUE PERSONNELLE (fichier local du joueur)
