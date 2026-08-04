@@ -1490,6 +1490,15 @@ const Game = {
     const etage = (!this.inVehicle && this.floor > 0) ? `, étage ${this.floor}` : '';
     announce(`Vous êtes dans ${d.name}, ${street}, cap vers le ${bearing}${etage}${alt}.`, 'polite');
   },
+  // Heure et phase du cycle jour/nuit (voir DayNight) : partagée par tout le
+  // monde en multijoueur, calculée localement en solo.
+  announceTime() {
+    if (typeof DayNight === 'undefined') return announce('Cycle jour/nuit indisponible.', 'assertive');
+    const h = Math.floor(DayNight.hour);
+    const m = Math.floor((DayNight.hour - h) * 60);
+    const phaseLabel = { aube: 'l\'aube', jour: 'la journée', crepuscule: 'le crépuscule', nuit: 'la nuit' }[DayNight.phase] || DayNight.phase;
+    announce(`Il est ${h} heure${h > 1 ? 's' : ''} ${m > 0 ? m + ' ' : ''}dans la ville : c'est ${phaseLabel}.`, 'polite');
+  },
 
   /* ==========================================================
      OUTILS DE NAVIGATION PIÉTONNE (accessibilité non-voyants)

@@ -48,6 +48,10 @@ const Net = {
         // n'est pas un "changement" pour ce joueur qui vient d'arriver, juste
         // l'état actuel qu'il découvre en rejoignant).
         if (msg.weather && typeof Weather !== 'undefined') Weather.applyState(msg.weather, false);
+        // Cycle jour/nuit déjà en cours sur ce serveur : appliqué
+        // silencieusement, comme la météo (ce n'est pas un "changement" pour
+        // ce joueur qui vient d'arriver, juste l'état actuel du monde).
+        if (msg.dayPhase && typeof DayNight !== 'undefined') DayNight.applyState(msg.dayPhase, msg.gameHour, false);
         const displayId = msg.id.replace(/^p/, '');
         setTimeout(() => announce(`Votre identifiant de connexion est le ${displayId}. Communiquez-le à votre équipe pour les missions à IDs. Il change à chaque reconnexion.`, 'polite'), 4000);
         onReady(msg.seed);
@@ -70,6 +74,8 @@ const Net = {
   handleMessage(msg) {
     if (msg.type === 'weather_change') {
       Weather.applyState(msg.state, true);
+    } else if (msg.type === 'daynight_change') {
+      DayNight.applyState(msg.phase, msg.hour, true);
     } else if (msg.type === 'dial_result') {
       if (this._pendingDialCallback) { const cb = this._pendingDialCallback; this._pendingDialCallback = null; cb(msg); }
       if (!msg.ok) announce(msg.reason || 'Numéro injoignable.', 'assertive');
