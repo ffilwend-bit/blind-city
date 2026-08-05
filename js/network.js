@@ -567,12 +567,14 @@ function _splitSpeech(text, max) {
 }
 // Lit une suite de morceaux : le suivant ne part qu'à la fin (onend) du
 // précédent, pour une parole continue et fiable, sans troncature.
-function _speakChunks(chunks) {
-  if (!('speechSynthesis' in window)) return;
+// `onAllDone` est appelé une fois TOUS les morceaux lus (sert à enchaîner sur
+// la file d'annonces urgentes en attente, voir speak()).
+function _speakChunks(chunks, onAllDone) {
+  if (!('speechSynthesis' in window)) { if (onAllDone) onAllDone(); return; }
   const synth = window.speechSynthesis;
   let i = 0;
   const next = () => {
-    if (i >= chunks.length) return;
+    if (i >= chunks.length) { if (onAllDone) onAllDone(); return; }
     const u = new SpeechSynthesisUtterance(chunks[i]);
     u.lang = 'fr-FR'; u.rate = CONFIG.SPEECH_RATE; u.pitch = CONFIG.SPEECH_PITCH;
     u.onend = () => { i++; next(); };
@@ -581,18 +583,39 @@ function _speakChunks(chunks) {
   };
   next();
 }
+// File d'attente des annonces URGENTES ('assertive') encore à lire, et
+// priorité de ce qui est en train d'être parlé actuellement. Avant, une
+// nouvelle annonce assertive coupait TOUJOURS celle en cours — en combat,
+// où les événements s'enchaînent vite (dégâts, arme enrayée, alertes...),
+// chaque annonce coupait la précédente au milieu d'un mot : on ne comprenait
+// plus rien, et on n'entendait jamais une phrase entière. Désormais, une
+// annonce assertive n'interrompt que du contenu 'polite' (routine) ; si une
+// autre annonce importante est déjà en cours, elle attend son tour (limitée
+// à 3 en attente, pour ne pas prendre un retard interminable en rafale).
+let _assertiveQueue = [];
+let _currentSpeakPriority = null;
+function _playNextAssertive() {
+  if (!_assertiveQueue.length) { _currentSpeakPriority = null; return; }
+  const chunks = _assertiveQueue.shift();
+  _currentSpeakPriority = 'assertive';
+  _speakChunks(chunks, _playNextAssertive);
+}
 function speak(text, priority = 'polite') {
   if ('speechSynthesis' in window) {
     const synth = window.speechSynthesis;
     const busy = synth.speaking || synth.pending;
     // Trois niveaux de priorité :
-    // - 'interrupt' : navigation dans les menus. Coupe TOUT immédiatement et
-    //   parle sans le moindre délai, pour que chaque flèche lise l'élément
-    //   suivant instantanément, sans attendre la fin de l'annonce précédente.
-    // - 'assertive' : information urgente (danger, alerte). Coupe aussi, mais
-    //   avec un léger délai de sécurité pour la fiabilité sur mobile.
-    // - 'polite' : routine (déplacement...). Ne coupe pas une phrase en cours,
-    //   pour ne pas hacher la parole quand les annonces s'enchaînent vite.
+    // - 'interrupt' : navigation dans les menus. Coupe TOUT immédiatement (y
+    //   compris la file d'annonces urgentes en attente) et parle sans le
+    //   moindre délai, pour que chaque flèche lise l'élément suivant
+    //   instantanément.
+    // - 'assertive' : information urgente (danger, alerte). Coupe une
+    //   annonce 'polite' (routine) en cours, mais n'interrompt PLUS une
+    //   autre annonce urgente déjà en train d'être lue — elle attend son
+    //   tour (file plafonnée à 3), pour qu'une rafale d'événements en combat
+    //   ne rende plus chaque phrase incompréhensible en la coupant au milieu.
+    // - 'polite' : routine (déplacement...). Ne coupe rien, pour ne pas
+    //   hacher la parole quand les annonces s'enchaînent vite.
     if (priority === 'polite' && busy) {
       const a = el('announcerPolite'); if (a) { a.textContent = ''; a.textContent = text; }
       return;
@@ -602,10 +625,18 @@ function speak(text, priority = 'polite') {
     if (priority === 'interrupt') {
       // Instantané, sans setTimeout : indispensable pour une navigation fluide.
       try { synth.cancel(); } catch (e) { /* ignore */ }
-      _speakChunks(chunks);
-    } else if (busy) {
-      synth.cancel();
-      setTimeout(() => _speakChunks(chunks), 30);
+      _assertiveQueue = [];
+      _currentSpeakPriority = 'interrupt';
+      _speakChunks(chunks, () => { _currentSpeakPriority = null; _playNextAssertive(); });
+    } else if (priority === 'assertive') {
+      if (busy && (_currentSpeakPriority === 'assertive' || _currentSpeakPriority === 'interrupt')) {
+        if (_assertiveQueue.length >= 3) _assertiveQueue.shift(); // garde les annonces les plus récentes
+        _assertiveQueue.push(chunks);
+      } else {
+        try { synth.cancel(); } catch (e) { /* ignore */ } // coupe une annonce 'polite' en cours, elle
+        _currentSpeakPriority = 'assertive';
+        _speakChunks(chunks, _playNextAssertive);
+      }
     } else {
       _speakChunks(chunks);
     }
