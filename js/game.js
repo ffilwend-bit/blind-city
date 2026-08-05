@@ -364,7 +364,19 @@ const Game = {
           v.altitude = Math.max(0, v.altitude + climbRate);
         }
       } else if (Game.keys.has('control')) {
-        v.altitude = Math.max(0, v.altitude - climbRate);
+        // Dernier mètre avant de toucher le sol : on vérifie qu'il n'y a
+        // personne pile en dessous (PNJ ou joueur réel), pour ne pas
+        // atterrir sur quelqu'un — avant, rien n'empêchait de se poser
+        // n'importe où, au hasard. Un obstacle bloque juste la toute
+        // dernière portion de descente ; le reste de la descente n'est pas
+        // concerné (uniquement dangereux au ras du sol).
+        if (v.altitude - climbRate <= 0 && this.groundOccupiedAt(v.x, v.y)) {
+          const now = Date.now();
+          if (now - (v._lastLandingWarn || 0) > 2500) { v._lastLandingWarn = now; announce('Impossible d\'atterrir ici : quelqu\'un se trouve juste en dessous. Déplacez-vous avant de vous poser.', 'assertive'); }
+          v.altitude = Math.max(climbRate, v.altitude - climbRate * 0.3); // freine la descente sans se poser
+        } else {
+          v.altitude = Math.max(0, v.altitude - climbRate);
+        }
       }
       this.altitude = v.altitude;
     }
@@ -2175,6 +2187,35 @@ const Game = {
       Audio.tone({ freq: 480 + (1 - vol) * -160 + 220 * vol, type: 'triangle', duration: 0.18, gain: 0.14, pan });
     }
     announce(`Porte de ${t.name}, ${cote}, ${pas} pas.`, 'assertive');
+  },
+
+  // Y a-t-il quelqu'un DE VIVANT pile à cet endroit (PNJ ou joueur réel) ?
+  // Sert à empêcher un aéronef de se poser directement sur quelqu'un.
+  groundOccupiedAt(x, y) {
+    const nx = Math.round(x), ny = Math.round(y);
+    if (City.npcs.some(n => !n.dead && Math.round(n.x) === nx && Math.round(n.y) === ny)) return true;
+    if (Net.connected && Array.from(Net.remotePlayers.values()).some(p => Math.round(p.x) === nx && Math.round(p.y) === ny)) return true;
+    return false;
+  },
+  // Scan manuel du point d'atterrissage (touche dédiée), pour savoir AVANT
+  // de descendre ce qu'il y a au sol, plutôt que de le découvrir en
+  // atterrissant dessus au hasard — demandé explicitement : impossible
+  // jusque-là de savoir ce qu'il y avait sous un avion/hélicoptère en vol.
+  scanLandingZone() {
+    if (!this.inVehicle || !this.vehicle) return announce('Vous n\'êtes pas en véhicule.', 'assertive');
+    const cls = VEHICLE_CATALOG[this.vehicle.type];
+    if (!cls || !cls.flies) return announce('Cette balise ne concerne que le pilotage d\'un aéronef.', 'assertive');
+    const v = this.vehicle;
+    const occupant = City.npcs.find(n => !n.dead && UTIL.dist(n, v) < 1)
+      || (Net.connected ? Array.from(Net.remotePlayers.values()).find(p => UTIL.dist(p, v) < 1) : null);
+    if (occupant) {
+      const name = occupant.firstName ? `${occupant.firstName} ${occupant.lastName}` : occupant.name;
+      return announce(`Attention : ${name} se trouve juste en dessous. N'atterrissez pas ici.`, 'assertive');
+    }
+    const solid = City.isSolid(Math.round(v.x), Math.round(v.y));
+    const tile = City.getTile(Math.round(v.x), Math.round(v.y));
+    if (solid) announce(`Sous vous : toit ou structure (${tile}). Personne détecté à cet endroit, mais un atterrissage sur un bâtiment reste risqué pour l'appareil.`, 'assertive');
+    else announce(`Sous vous : ${tile}, dégagé. Vous pouvez vous poser ici en toute sécurité.`, 'assertive');
   },
 
   // Positions surélevées (étages). On peut monter dans un bâtiment à étages

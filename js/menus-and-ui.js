@@ -190,6 +190,7 @@ function openMainMenu() {
     { id: 'infos', title: 'ℹ️ Infos rapides', desc: 'Radar sonore, boussole, bilan santé, joueurs connectés, mission active, porte la plus proche — utile si une touche clavier ne répond pas (téléphone).' },
     { id: 'rptalk', title: '💬 Parler (RP)', desc: 'Dire un message audible par les joueurs réels proches de vous.' },
     { id: 'rpaction', title: '🎭 Agir (RP libre)', desc: 'Décrire une action ou une attitude de votre personnage (ex. « lève lentement les mains »), visible par les joueurs réels proches — pour tout ce qu\'aucune touche ne couvre.' },
+    { id: 'hostage', title: '🤝 Tenir par la main / otage', desc: 'Tenir une personne par la main pour qu\'elle vous suive (prise d\'otage) — la cible verrouillée, ou la personne juste devant vous.' },
     { id: 'map', title: '🗺️ Carte', desc: 'Liste des lieux et navigation.' },
     { id: 'places', title: '📍 Lieux utiles', desc: 'Station-service la plus proche, boutique de vêtements, restaurant.' },
     { id: 'burnerphone', title: '📱 Acheter un téléphone prépayé', desc: 'Un numéro de plus, renommable.' },
@@ -273,6 +274,7 @@ function handleMenuItem(it) {
   else if (it.id === 'infos') { openInfoMenu(); }
   else if (it.id === 'rptalk') { Game.rpTalk(); closeMenu(); }
   else if (it.id === 'rpaction') { Game.rpAction(); closeMenu(); }
+  else if (it.id === 'hostage') { closeMenu(); if (Game.heldHostage) Game.releaseHostage(); else Game.holdHostage(); }
   else if (it.id === 'map') openMapMenu();
   else if (it.id === 'help') { Game.help(); closeMenu(); }
   else if (it.id === 'role') { openRoleMenu(); }
@@ -965,6 +967,7 @@ function openInfoMenu() {
     { id: 'guidetotarget', title: '🚶 Marcher vers la cible verrouillée (Ctrl+Z)', desc: 'Vous guide vocalement vers la personne actuellement verrouillée (touches 1-9), sans avoir besoin d\'un chien guide.' },
     { id: 'time', title: '🕐 Heure dans la ville', desc: 'Heure actuelle et phase du cycle jour/nuit (aube, journée, crépuscule, nuit).' },
     { id: 'myid', title: '🆔 Mon identifiant (Ctrl+I)', desc: 'Rappelle votre identifiant de connexion, à communiquer à votre équipe.' },
+    { id: 'landingscan', title: '🛬 Scanner la zone d\'atterrissage', desc: 'En avion/hélicoptère : dit ce qu\'il y a juste en dessous de vous, avant de vous poser.' },
   ];
   renderMenu(items, (it) => {
     closeMenu();
@@ -972,6 +975,7 @@ function openInfoMenu() {
     else if (it.id === 'compass') Game.soundCompass();
     else if (it.id === 'status') Game.announceStatus();
     else if (it.id === 'serverinfo') Game.announceServerInfo();
+    else if (it.id === 'landingscan') Game.scanLandingZone();
     else if (it.id === 'missionid') Game.announceActiveMissionId();
     else if (it.id === 'door') Game.pingNearestDoor();
     else if (it.id === 'searchself') Game.searchSelf();
@@ -1425,6 +1429,8 @@ function gameLoop() {
     if (el('menuOverlay').style.display !== 'flex') Game.tickManualDrive();
     // Auto-drive step
     if (Game.inVehicle && Game.vehicle?.auto) Game.autoDriveStep();
+    // Otage/prise par la main : suit le joueur tant qu'il n'est pas relâché.
+    if (Game.heldHostage) Game.tickHostage();
 
     // En véhicule, la POSITION et le CAP du joueur suivent le véhicule. Sans
     // ça, la position du joueur restait figée à l'endroit où il était monté :
