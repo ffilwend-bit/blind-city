@@ -2517,6 +2517,11 @@ const Game = {
   // réagissait (voir target()), tous les autres PNJ à côté restaient
   // totalement indifférents à une arme brandie devant eux.
   reactNearbyToWeapon() {
+    // En plein vol (aéronef en altitude), les PNJ sont au sol, bien trop
+    // loin pour voir ni entendre une arme sortie dans le cockpit — sinon
+    // ils réagissaient à tort comme si l'arme était brandie juste devant eux.
+    const vcls = this.inVehicle && this.vehicle ? VEHICLE_CATALOG[this.vehicle.type] : null;
+    if (vcls && vcls.flies && this.altitude > 5) return;
     const nearby = City.npcs.filter(n => !n.dead && !n.hostile && !n.menotte && !n.knockedOut && !n.handsUp && !n.fleeing && n.job !== 'police' && UTIL.dist(n, this) < 6);
     if (!nearby.length) return;
     nearby.forEach(n => { n.fleeing = true; });
@@ -3945,7 +3950,7 @@ const Game = {
     this.money -= total; it.q -= qty;
     this.addItem({ ...it, q: qty });
     Audio.cash();
-    const gangNote = gangHolder ? ` (majoration : ce marché est tenu par ${City.getMarketHolder(gangHolder).leader}, président des ${City.getMarketHolder(gangHolder).name})` : '';
+    const gangNote = gangHolder ? ` (majoration : ce marché est tenu par ${City.getMarketHolder(gangHolder).leaderName || 'quelqu\'un'}, président des ${City.getMarketHolder(gangHolder).name})` : '';
     announce(`Vous achetez ${qty > 1 ? qty + ' ' : ''}${it.name} pour ${UTIL.formatMoney(total)}${heatSurcharge > 0.02 ? ' (majoration locale liée à l\'insécurité)' : ''}${gangNote}.`, 'assertive');
     updateHud();
   },
@@ -6150,7 +6155,7 @@ const Game = {
     if (this.money < price) return announce(`Casque de protection : ${UTIL.formatMoney(price)}. Fonds insuffisants.`, 'assertive');
     this.money -= price; this.hasHelmet = true;
     Audio.cash();
-    announce(`Casque de protection porté${holder ? ` (marché tenu par ${holder.leader}, président des ${holder.name})` : ''}. Il vous protège d'un tir ou d'un coup à la tête qui serait autrement mortel.`, 'assertive');
+    announce(`Casque de protection porté${holder ? ` (marché tenu par ${holder.leaderName || 'quelqu\'un'}, président des ${holder.name})` : ''}. Il vous protège d'un tir ou d'un coup à la tête qui serait autrement mortel.`, 'assertive');
     updateHud();
   },
   hasVest: false,
@@ -6162,7 +6167,7 @@ const Game = {
     if (this.money < price) return announce(`Gilet pare-balles : ${UTIL.formatMoney(price)}. Fonds insuffisants.`, 'assertive');
     this.money -= price; this.hasVest = true;
     Audio.cash();
-    announce(`Gilet pare-balles porté${holder ? ` (marché tenu par ${holder.leader}, président des ${holder.name})` : ''}. Il réduit les dégâts d'un tir au corps.`, 'assertive');
+    announce(`Gilet pare-balles porté${holder ? ` (marché tenu par ${holder.leaderName || 'quelqu\'un'}, président des ${holder.name})` : ''}. Il réduit les dégâts d'un tir au corps.`, 'assertive');
     updateHud();
   },
   // Numéros de téléphone : chaque téléphone a le sien, purement pour

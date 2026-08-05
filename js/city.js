@@ -467,12 +467,11 @@ const City = {
       const pos = this.findFree(d.x1 + 3, d.y1 + 3, d.x2 - 3, d.y2 - 3);
       this.setTile(pos.x, pos.y, 'gang_hideout');
       // market : marché noir tenu par ce gang (voir MARKET_TYPES/assignGangMarket),
-      // attribué par le staff — null tant que personne ne le détient. En
-      // pratique attribué à une PERSONNE réelle du gang (le président), pas
-      // au gang comme entité abstraite — c'est lui qui gère ensuite avec ses
-      // membres, comme dans un vrai GTA RP.
-      const leader = `${UTIL.pick(['Rasmané', 'Sibiri', 'Wendkuni', 'Alizèta', 'Poko', 'Fanta'])} ${UTIL.pick(['Sawadogo', 'Yaméogo', 'Kafando', 'Tapsoba'])}`;
-      this.gangs.push({ id: 'gang_' + i, name: names[i % names.length], leader, x: pos.x, y: pos.y, power: UTIL.randInt(20, 80), relation: -20, members: UTIL.randInt(3, 8), market: null });
+      // attribué par le staff — null tant que personne ne le détient.
+      // leaderPlayerId/leaderName : le président qui détient ce marché est un
+      // VRAI joueur connecté, choisi par le staff — jamais un nom inventé,
+      // conformément au principe du jeu (tout est joué par de vrais humains).
+      this.gangs.push({ id: 'gang_' + i, name: names[i % names.length], leaderPlayerId: null, leaderName: null, x: pos.x, y: pos.y, power: UTIL.randInt(20, 80), relation: -20, members: UTIL.randInt(3, 8), market: null });
     }
   },
   // ===== Marchés noirs tenus par un gang (attribué par le staff) =====
@@ -485,13 +484,18 @@ const City = {
     drogue: { label: 'Marché de la drogue', categories: ['stupefiant', 'graine'], surcharge: 0.2 },
     protection: { label: 'Marché des casques et gilets pare-balles', categories: ['protection'], surcharge: 0.2 },
   },
-  assignGangMarket(gangId, marketType) {
+  // leaderPlayerId/leaderName : identité du VRAI joueur qui devient président
+  // de ce gang en recevant ce marché — obligatoire dès qu'un marché est
+  // attribué (sans joueur réel, ça n'a pas de sens de l'attribuer).
+  assignGangMarket(gangId, marketType, leaderPlayerId, leaderName) {
     const gang = this.gangs.find(g => g.id === gangId);
     if (!gang) return null;
     if (marketType && !this.MARKET_TYPES[marketType]) return null;
     // Retire ce marché à quiconque le détenait déjà (un seul détenteur à la fois).
-    if (marketType) this.gangs.forEach(g => { if (g.market === marketType) g.market = null; });
+    if (marketType) this.gangs.forEach(g => { if (g.market === marketType) { g.market = null; g.leaderPlayerId = null; g.leaderName = null; } });
     gang.market = marketType || null;
+    gang.leaderPlayerId = marketType ? (leaderPlayerId || null) : null;
+    gang.leaderName = marketType ? (leaderName || null) : null;
     return gang;
   },
   // Gang détenant un type de marché donné, ou null si personne.
