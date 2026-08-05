@@ -745,7 +745,7 @@ function openStaffRoleTestMenu() {
 function openStaffCheatMenu() {
   el('menuTitle').textContent = 'Accès total (staff)';
   const items = [
-    { id: 'money', title: '💰 Ajouter de l\'argent', desc: 'Ajoute 500 000 FCFA à votre compte.' },
+    { id: 'money', title: '💰 Ajouter de l\'argent', desc: 'Choisissez le montant à ajouter à votre compte.' },
     { id: 'heal', title: '❤️ Soin complet', desc: 'Rétablit votre santé au maximum.' },
     { id: 'weapons', title: '🔫 Débloquer toutes les armes', desc: 'Ajoute chaque arme du jeu à votre inventaire.' },
     { id: 'vehicle', title: '🚗 Faire apparaître un véhicule', desc: 'Fait apparaître une voiture juste à côté de vous.' },
@@ -753,7 +753,18 @@ function openStaffCheatMenu() {
     { id: 'wanted', title: '🚓 Remettre le niveau de recherche à zéro', desc: 'Efface votre niveau de recherche policière.' },
   ];
   renderMenu(items, (it) => {
-    if (it.id === 'money') { Game.money += 500000; announce('500 000 FCFA ajoutés.', 'assertive'); updateHud(); closeMenu(); }
+    if (it.id === 'money') {
+      // Avant, un montant fixe (500 000) ajouté à chaque clic, et le menu se
+      // refermait après coup — pour ajouter une grosse somme, il fallait
+      // rouvrir le panneau et re-cliquer autant de fois que nécessaire. On
+      // demande maintenant directement le montant voulu, en une seule saisie.
+      closeMenu();
+      AccessibleTextPrompt.open('Ajouter de l\'argent', 'Montant en FCFA à ajouter à votre compte. Exemple : 500000.', '500000', (input) => {
+        const amount = parseInt(String(input || '').replace(/[^\d]/g, ''), 10);
+        if (!isNaN(amount) && amount > 0) { Game.money += amount; announce(`${UTIL.formatMoney(amount)} ajoutés.`, 'assertive'); updateHud(); }
+        else announce('Montant invalide.', 'assertive');
+      });
+    }
     else if (it.id === 'heal') { Game.health = 100; announce('Santé rétablie au maximum.', 'assertive'); updateHud(); closeMenu(); }
     else if (it.id === 'weapons') {
       Game.weapons = Game.weapons || [];
