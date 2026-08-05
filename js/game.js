@@ -2822,6 +2822,19 @@ const Game = {
     return Math.random() < 0.08;
   },
   takeDamage(amount, opts = {}) {
+    // Être À L'INTÉRIEUR d'un véhicule protège des tirs, selon son blindage
+    // (armor du catalogue) — un char ou un fourgon blindé absorbe l'essentiel
+    // d'un tir, une voiture normale un peu (carrosserie de base), une moto
+    // ou un véhicule sans portières (doors: 0) aucune protection. Avant,
+    // rien ne différenciait être dans un véhicule blindé d'être à découvert
+    // à pied : on se faisait tirer dessus pareil, sans même être sorti.
+    if (this.inVehicle && this.vehicle && !opts.explosion) {
+      const vcls = VEHICLE_CATALOG[this.vehicle.type];
+      if (vcls && !vcls.human && vcls.doors > 0) {
+        const reduction = Math.max(vcls.armor || 0, 0.2); // au moins une carrosserie de base
+        amount = Math.round(amount * (1 - reduction));
+      }
+    }
     // Le gilet pare-balles réduit les dégâts d'un tir au corps (pas à la
     // tête — c'est le casque qui protège ça — ni d'une explosion).
     const vestAbsorbs = this.hasVest && !opts.headshot && !opts.explosion;
@@ -2832,7 +2845,11 @@ const Game = {
     // Casque/gilet qui absorbent le choc -> son étouffé plutôt qu'invisible.
     if (amount >= 1 && window.Audio && Audio.playerHit) {
       const protectedHit = (opts.headshot && this.hasHelmet) || vestAbsorbs;
-      Audio.playerHit(protectedHit);
+      // Spatialisé vers le tireur quand sa position est connue (opts.attackerX/Y) :
+      // avant, playerHit() était toujours appelé sans pan, donc toujours entendu
+      // pile au centre, sans indication de la direction réelle du tir.
+      const pan = (typeof opts.attackerX === 'number') ? this.panForPoint(opts.attackerX, opts.attackerY) : 0;
+      Audio.playerHit(protectedHit, pan);
     }
     // Suivi des dégâts récents (15 dernières secondes) pour repérer une vraie
     // hémorragie massive : beaucoup trop d'impacts en peu de temps, pas juste
@@ -2844,7 +2861,16 @@ const Game = {
     if (this.health <= 0) {
       const fatalHeadshot = opts.headshot && !this.hasHelmet;
       const fatalExplosion = !!opts.explosion;
-      const bledOut = recentTotal > 200;
+      // Seuil relevé (200 -> 450) : dans une mission à plusieurs adversaires
+      // armés (repaire de gang, convoi, planque gardée...), 200 dégâts en 15
+      // secondes s'atteignaient très facilement avec des tirs au corps tout
+      // à fait normaux — un simple échange de tirs se terminait en mort
+      // DÉFINITIVE au lieu de juste tomber inconscient (voir die()), ce qui
+      // n'a rien de réaliste façon GTA RP : on doit pouvoir survivre à une
+      // vraie fusillade tant qu'on n'est pas achevé (tête sans casque,
+      // explosion). Le seuil reste néanmoins réel, pour une hémorragie
+      // vraiment massive et prolongée.
+      const bledOut = recentTotal > 450;
       if (fatalHeadshot || fatalExplosion || bledOut) {
         this.permanentDeath({ headshot: fatalHeadshot, explosion: fatalExplosion, bledOut });
       } else {
@@ -4680,6 +4706,12 @@ const Game = {
   updateGangCombat() {
     const rs = this.gangRaidState; if (!rs) return;
     if (this.health <= 0) { this.gangRaidState = null; return; } // die() gère déjà l'hôpital
+    // Des gardes au sol, armés d'armes de poing/fusils, ne peuvent pas
+    // toucher efficacement quelqu'un en plein vol (aéronef en altitude) —
+    // avant, ils vous tiraient dessus même en hélicoptère, avant même d'avoir
+    // atterri, ce qui n'a aucun sens.
+    const myVcls = this.inVehicle && this.vehicle ? VEHICLE_CATALOG[this.vehicle.type] : null;
+    if (myVcls && myVcls.flies && this.altitude > 5) return;
     const squad = rs.npcIds.map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
     if (!squad.length) return this.finishGangCombat(rs.gang, true);
     if (UTIL.dist(rs.gang, this) > 20) {
@@ -4694,7 +4726,7 @@ const Game = {
       const fireChance = Math.max(0.05, 0.35 - d * 0.015);
       if (weapon && UTIL.chance(fireChance)) {
         const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
-        this.takeDamage(dmg, { headshot: this.rollHeadshot() });
+        this.takeDamage(dmg, { headshot: this.rollHeadshot(), attackerX: n.x, attackerY: n.y });
         announce(`${n.name} vous touche avec son ${weapon.name} ! ${dmg} dégâts.`, 'assertive');
         // Chaque tir essuyé augmente la chance de le repérer précisément.
         n._shotsAtPlayer = (n._shotsAtPlayer || 0) + 1;
