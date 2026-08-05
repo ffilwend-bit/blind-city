@@ -590,11 +590,13 @@ Game.holdHostage = function() {
   if (this.heldHostage) return announce(`Vous tenez déjà ${this.heldHostage.name} par la main.`, 'assertive');
   const npc = this.getLiveTarget() || City.npcs.find(n => !n.dead && !n.hostile && !n.menotte && !n.knockedOut && UTIL.dist(n, this) < 2);
   if (!npc || npc.health <= 0) return announce('Personne à portée de main pour ça.', 'assertive');
+  // Tenir quelqu'un par la main n'est PAS en soi un acte illégal (guider
+  // quelqu'un, marcher ensemble...) — contrairement à une vraie prise
+  // d'otage armée (voir takeHostage, pendant un braquage), ça ne déclenche
+  // donc ni recherche ni signalement automatique à la police.
   this.heldHostage = npc;
   npc.hostage = true; npc.fleeing = false; npc.handsUp = false;
   announce(`Vous tenez ${npc.name} par la main. Il/elle vous suit tant que vous ne le/la relâchez pas.`, 'assertive');
-  this.reportCrimeToPolice('prise_otage', `Prise d'otage : ${npc.name}`);
-  this.wanted = Math.min(100, this.wanted + 20);
   updateHud();
 };
 Game.releaseHostage = function() {

@@ -416,13 +416,41 @@ function openStaffGangMarketAssignMenu(gangId) {
     { id: 'aucun', title: '🚫 Aucun marché', desc: 'Retire tout marché à ce gang.' },
     ...Object.entries(City.MARKET_TYPES).map(([type, def]) => {
       const holder = City.getMarketHolder(type);
-      return { id: type, title: def.label, desc: holder && holder.id !== gangId ? `Actuellement tenu par ${holder.leader}, président des ${holder.name} : le lui retirera.` : (holder ? `Déjà tenu par ${holder.leader}, président de ce gang.` : 'Non attribué.') };
+      return { id: type, title: def.label, desc: holder && holder.id !== gangId ? `Actuellement tenu par ${holder.leaderName || '(personne)'}, président des ${holder.name} : le lui retirera.` : (holder ? `Déjà tenu par ${holder.leaderName || '(personne)'}, président de ce gang.` : 'Non attribué.') };
     }),
   ];
   renderMenu(items, (sel) => {
+    if (sel.id === 'aucun') {
+      closeMenu();
+      City.assignGangMarket(gangId, null);
+      sendWorldEdit('gang_market', { gangId, market: null });
+      announce(`${gang.name} ne détient plus aucun marché.`, 'assertive');
+      return;
+    }
+    // Le marché est attribué à une PERSONNE réelle (le président), jamais à
+    // un nom inventé — donc on choisit ensuite QUI, parmi les joueurs
+    // connectés, plutôt que d'attribuer directement au gang.
+    openStaffGangMarketPresidentMenu(gangId, sel.id);
+  });
+}
+// Choisit le JOUEUR RÉEL (connecté) qui devient président du gang et détient
+// ce marché — jamais un nom généré, conformément au principe du jeu : tout
+// est joué par de vrais humains.
+function openStaffGangMarketPresidentMenu(gangId, marketType) {
+  const gang = City.gangs.find(g => g.id === gangId);
+  if (!gang) return closeMenu();
+  el('menuTitle').textContent = `${City.MARKET_TYPES[marketType].label} — choisir le président (${gang.name})`;
+  const players = (typeof Net !== 'undefined' && Net.connected) ? Array.from(Net.remotePlayers.values()) : [];
+  const items = players.map(p => ({ id: 'p_' + p.id, title: `${p.firstName} ${p.lastName}`, desc: `Devient président des ${gang.name} et détient ${City.MARKET_TYPES[marketType].label}.`, personId: p.id, personName: `${p.firstName} ${p.lastName}` }));
+  if (!items.length) items.push({ id: 'none', title: 'Aucun joueur connecté', desc: 'Il faut un joueur réel connecté pour cette attribution — impossible d\'attribuer à quelqu\'un d\'inventé.' });
+  items.push({ id: 'back', title: '↩️ Retour', desc: '' });
+  renderMenu(items, (it) => {
+    if (it.id === 'back') return openStaffGangMarketAssignMenu(gangId);
+    if (it.id === 'none') return;
     closeMenu();
-    City.assignGangMarket(gangId, sel.id === 'aucun' ? null : sel.id);
-    announce(sel.id === 'aucun' ? `${gang.name} ne détient plus aucun marché.` : `${gang.name} détient désormais ${City.MARKET_TYPES[sel.id].label}.`, 'assertive');
+    City.assignGangMarket(gangId, marketType, it.personId, it.personName);
+    sendWorldEdit('gang_market', { gangId, market: marketType, leaderId: it.personId, leaderName: it.personName });
+    announce(`${it.personName} devient président des ${gang.name} et détient désormais ${City.MARKET_TYPES[marketType].label}.`, 'assertive');
   });
 }
 // Supervision staff : liste tous les joueurs connectés avec leur position en
@@ -605,6 +633,11 @@ function applyWorldEdit(op, payload) {
   } else if (op === 'vehicle_remove') {
     const idx = City.vehicles.findIndex(v => v.id === payload.id);
     if (idx !== -1) City.vehicles.splice(idx, 1);
+  } else if (op === 'gang_market') {
+    // Attribution du marché noir d'un gang à un président (vrai joueur) par
+    // le staff : sans ça, l'attribution ne restait visible que sur l'écran
+    // du staff qui l'avait faite, jamais chez les autres joueurs.
+    City.assignGangMarket(payload.gangId, payload.market, payload.leaderId, payload.leaderName);
   }
 }
 function sendWorldEdit(op, payload) {
