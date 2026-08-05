@@ -4766,6 +4766,25 @@ const Game = {
     announce(`Repaire des ${gang.name} neutralisé !`, 'assertive');
     this.grantGangLoot(gang, 1);
   },
+  // Throttle partagé pour la résolution de tir des PNJ dans les tick* de
+  // mission (tickSabotage, tickEscorte, tickConvoiBlinde, tickDepotArmesGang,
+  // tickExtractionVip, tickPlanqueGardee, tickDefenseTerritoire), tous
+  // appelés depuis checkMission() — lui-même exécuté à CHAQUE frame
+  // (~60 fois/seconde, via requestAnimationFrame dans la boucle de jeu), et
+  // non toutes les ~1,5 s comme updateGangCombat()/updateWantedResponseCombat()
+  // (throttlés en setInterval). Sans ce throttle, un garde avec ne serait-ce
+  // que 20-30% de "chance de tir" par appel tirait en réalité des dizaines de
+  // fois par seconde : aucun gilet, casque ou blindage ne pouvait absorber un
+  // tel volume de tirs, et la synthèse vocale, submergée d'annonces de tir en
+  // boucle, ne pouvait plus rien annoncer d'autre (verrouillage de cible,
+  // etc.). Même cadence que les combats déjà throttlés ailleurs.
+  missionCombatTick(key) {
+    this._missionCombatCooldowns = this._missionCombatCooldowns || {};
+    const now = Date.now();
+    if (now - (this._missionCombatCooldowns[key] || 0) < 1500) return false;
+    this._missionCombatCooldowns[key] = now;
+    return true;
+  },
 
   /* ==========================================================
      TROIS MISSIONS FACILES — légales, sans combat, pour découvrir les
@@ -4960,7 +4979,7 @@ const Game = {
     if (es.npcIds.length) {
       const squad = es.npcIds.map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
       if (!squad.length) { es.npcIds = []; announce('Les assaillants sont neutralisés. La route est libre.', 'assertive'); }
-      else {
+      else if (this.missionCombatTick('escorte')) {
         squad.forEach(n => {
           const d = UTIL.dist(n, this.vehicle);
           if (d > 12) return;
@@ -5146,6 +5165,7 @@ const Game = {
     if (this.sabotageState?.combat) {
       const squad = guards.filter(g => UTIL.dist(g, this) < 14);
       if (!squad.length || !guards.length) { this.sabotageState.combat = false; announce('Les gardes ne vous poursuivent plus.', 'polite'); return; }
+      if (!this.missionCombatTick('sabotage')) return;
       squad.forEach(g => {
         const d = UTIL.dist(g, this);
         const weapon = WEAPON_CATALOG[g.weapon];
@@ -5245,7 +5265,7 @@ const Game = {
     }
     const ds = this.defenseState;
     const squad = ds.npcIds.map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
-    squad.forEach(n => {
+    if (this.missionCombatTick('defense')) squad.forEach(n => {
       const d = UTIL.dist(n, this);
       if (d > 12) return;
       const weapon = WEAPON_CATALOG[n.weapon];
@@ -5353,7 +5373,7 @@ const Game = {
     }
     const frontSquad = (m.frontIds || []).map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
     const rearSquad = (m.rearIds || []).map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
-    [...frontSquad, ...rearSquad].forEach(n => {
+    if (this.missionCombatTick('convoi')) [...frontSquad, ...rearSquad].forEach(n => {
       const d = UTIL.dist(n, this);
       if (d > 10) return;
       const weapon = WEAPON_CATALOG[n.weapon];
@@ -5427,7 +5447,7 @@ const Game = {
       const d = UTIL.dist(guard, this);
       if (d < 8) {
         const weapon = WEAPON_CATALOG[guard.weapon];
-        if (weapon && UTIL.chance(Math.max(0.05, 0.2 - d * 0.015))) {
+        if (weapon && this.missionCombatTick('depot') && UTIL.chance(Math.max(0.05, 0.2 - d * 0.015))) {
           const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
           this.takeDamage(dmg, { headshot: this.rollHeadshot() });
           announce(`${guard.name} vous repère et tire ! ${dmg} dégâts.`, 'assertive');
@@ -5474,7 +5494,7 @@ const Game = {
       const attacker = City.npcs.find(n => n.id === this.vipState.lastAttackerId);
       if (attacker && !attacker.dead) {
         const d = UTIL.dist(attacker, this);
-        if (d < 8 && UTIL.chance(0.3)) {
+        if (d < 8 && this.missionCombatTick('vip') && UTIL.chance(0.3)) {
           const weapon = WEAPON_CATALOG[attacker.weapon];
           if (UTIL.chance(0.3)) { vip.health -= UTIL.randInt(10, 25); announce(`${vip.name} est touché ! Santé : ${Math.round(vip.health)}%.`, 'assertive'); }
           else { const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6)); this.takeDamage(dmg, { headshot: this.rollHeadshot() }); announce(`${attacker.name} vous touche ! ${dmg} dégâts.`, 'assertive'); }
@@ -5604,6 +5624,10 @@ const Game = {
       const d = UTIL.dist(n, this);
       if (d > 12) return;
       if (d < 8 && !this.stashState) { this.stashState = 'engaged'; this.reportCrimeToPolice('coups_de_feu', 'Fusillade sur une planque gardée'); announce('Les vigiles vous repèrent et ouvrent le feu !', 'assertive'); }
+    });
+    if (this.missionCombatTick('planque')) squad.forEach(n => {
+      const d = UTIL.dist(n, this);
+      if (d > 12) return;
       const weapon = WEAPON_CATALOG[n.weapon];
       if (weapon && UTIL.chance(Math.max(0.05, 0.28 - d * 0.015))) {
         const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
