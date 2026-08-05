@@ -2453,15 +2453,29 @@ const Game = {
       // sinon la première de la liste.
       const id = (this.lastWeaponId && this.weapons.includes(this.lastWeaponId)) ? this.lastWeaponId : this.weapons[0];
       this.weapon = WEAPON_CATALOG[id] || null; this.lastWeaponId = id; this.weaponOut = !!this.weapon;
-      if (this.weapon) announce(`${this.weapon.name} sorti. ${this._weaponAmmoStatus(this.weapon)}`, 'assertive');
+      if (this.weapon) { announce(`${this.weapon.name} sorti. ${this._weaponAmmoStatus(this.weapon)}`, 'assertive'); this.reactNearbyToWeapon(); }
     }
     updateHud();
   },
   selectWeapon(id) {
     if (!this.weapons.includes(id)) return announce('Arme non possédée.', 'assertive');
+    const alreadyOut = this.weaponOut;
     this.weapon = WEAPON_CATALOG[id]; this.lastWeaponId = id; this.weaponOut = true;
     this.weaponJammed = false; // une autre arme qu'on prend en main n'est jamais déjà enrayée
     announce(`${this.weapon.name} équipé. ${this._weaponAmmoStatus(this.weapon)}`, 'assertive'); updateHud();
+    if (!alreadyOut) this.reactNearbyToWeapon();
+  },
+  // PNJ civils qui REMARQUENT une arme sortie à proximité, même sans être
+  // verrouillés comme cible : avant, seule la cible explicitement verrouillée
+  // réagissait (voir target()), tous les autres PNJ à côté restaient
+  // totalement indifférents à une arme brandie devant eux.
+  reactNearbyToWeapon() {
+    const nearby = City.npcs.filter(n => !n.dead && !n.hostile && !n.menotte && !n.knockedOut && !n.handsUp && !n.fleeing && n.job !== 'police' && UTIL.dist(n, this) < 6);
+    if (!nearby.length) return;
+    nearby.forEach(n => { n.fleeing = true; });
+    const closest = nearby.reduce((a, b) => UTIL.dist(a, this) < UTIL.dist(b, this) ? a : b);
+    this.npcVoiceReaction(closest.x, closest.y, { group: 'panique', count: Math.min(3, nearby.length), radius: 8 });
+    announce(`${nearby.length > 1 ? nearby.length + ' personnes proches paniquent' : `${closest.name} panique`} en voyant votre arme.`, 'polite');
   },
   reload() {
     if (!this.weapon) return;
