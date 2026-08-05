@@ -404,16 +404,51 @@ Game.openTrunkMenu = function(targetVehicle) {
   const v = targetVehicle || this.vehicle;
   if (!v) return announce('Montez d\'abord dans un véhicule, ou approchez-vous d\'un véhicule déverrouillé, pour accéder au coffre.', 'assertive');
   el('menuTitle').textContent = `Coffre${v !== this.vehicle ? ' de ' + v.name : ' du véhicule'}`;
+  // Deux actions rapides en un seul appui (tout déposer / tout récupérer),
+  // en plus du choix objet par objet : avant, même vider entièrement ses
+  // poches dans le coffre exigeait de cocher chaque objet un par un.
   const items = [
-    { id: 'store', title: '📦 Déposer des objets', desc: 'Cocher un ou plusieurs objets de votre inventaire à ranger dans le coffre.' },
-    { id: 'retrieve', title: '🎒 Récupérer des objets', desc: `Cocher un ou plusieurs objets à reprendre (${(v.inventory || []).length} objet(s) dedans).` },
+    { id: 'storeAll', title: '📥 Tout déposer', desc: `Range en une fois tout votre inventaire (${this.inventory.length} objet(s)) dans le coffre.` },
+    { id: 'retrieveAll', title: '📤 Tout récupérer', desc: `Reprend en une fois tout le contenu du coffre (${(v.inventory || []).length} objet(s)).` },
+    { id: 'store', title: '📦 Déposer certains objets', desc: 'Cocher un ou plusieurs objets précis de votre inventaire à ranger dans le coffre.' },
+    { id: 'retrieve', title: '🎒 Récupérer certains objets', desc: `Cocher un ou plusieurs objets précis à reprendre (${(v.inventory || []).length} objet(s) dedans).` },
   ];
   el('menuOverlay').style.display = 'flex';
   renderMenu(items, (sel) => {
     closeMenu();
-    if (sel.id === 'store') this.openTrunkStoreMenu(v);
+    if (sel.id === 'storeAll') this.storeAllInTrunk(v);
+    else if (sel.id === 'retrieveAll') this.retrieveAllFromTrunk(v);
+    else if (sel.id === 'store') this.openTrunkStoreMenu(v);
     else this.openTrunkRetrieveMenu(v);
   });
+};
+// Vide en une fois tout l'inventaire du joueur dans le coffre.
+Game.storeAllInTrunk = function(targetVehicle) {
+  const v = targetVehicle || this.vehicle;
+  if (!v) return announce('Montez d\'abord dans un véhicule, ou approchez-vous d\'un véhicule déverrouillé.', 'assertive');
+  if (!this.inventory.length) return announce('Votre inventaire est déjà vide.', 'assertive');
+  const ids = this.inventory.map(it => it.id);
+  let count = 0;
+  ids.forEach(id => { const it = this.inventory.find(i => i.id === id); if (it) { this.storeInTrunk(id, it.q || 1, v); count++; } });
+  announce(`${count} objet${count > 1 ? 's' : ''} rangé${count > 1 ? 's' : ''} dans le coffre${v !== this.vehicle ? ' de ' + v.name : ''}.`, 'assertive');
+};
+// Reprend en une fois tout le contenu du coffre — dans la limite de la place
+// disponible dans les poches (les objets restants restent dans le coffre).
+Game.retrieveAllFromTrunk = function(targetVehicle) {
+  const v = targetVehicle || this.vehicle;
+  if (!v) return announce('Montez d\'abord dans un véhicule, ou approchez-vous d\'un véhicule déverrouillé.', 'assertive');
+  const inv = (v.inventory || []).slice();
+  if (!inv.length) return announce('Le coffre est vide.', 'assertive');
+  let count = 0, skipped = 0;
+  inv.forEach(it => {
+    const stillThere = (v.inventory || []).find(i => i.id === it.id);
+    if (!stillThere) return;
+    if (!this.canAdd({ ...stillThere, q: stillThere.q || 1 })) { skipped++; return; }
+    this.retrieveFromTrunk(it.id, stillThere.q || 1, v);
+    count++;
+  });
+  if (count) announce(`${count} objet${count > 1 ? 's' : ''} récupéré${count > 1 ? 's' : ''}.${skipped ? ` ${skipped} laissé(s) dans le coffre, poches pleines.` : ''}`, 'assertive');
+  else announce('Poches pleines : impossible de récupérer quoi que ce soit.', 'assertive');
 };
 // Menu à cases à cocher : on peut sélectionner plusieurs objets avant de
 // confirmer, plutôt que de devoir répéter l'opération un par un.
