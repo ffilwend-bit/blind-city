@@ -600,15 +600,35 @@ function _playNextAssertive() {
   _currentSpeakPriority = 'assertive';
   _speakChunks(chunks, _playNextAssertive);
 }
+// Une annonce 'combat' (on vous tire dessus, on vous vise, cible verrouillée)
+// passe devant toute annonce 'assertive' déjà en file (santé/faim, etc.) sans
+// jamais couper une annonce déjà en train d'être lue — sinon, en plein
+// échange de tirs, l'info vitale ("on vous vise !") pouvait rester coincée
+// derrière des annonces bien moins urgentes déjà en attente.
+function _enqueueUrgent(chunks, isCombat) {
+  if (isCombat) {
+    if (_assertiveQueue.length >= 3) _assertiveQueue.pop(); // retire la moins prioritaire en fin de file
+    _assertiveQueue.unshift(chunks);
+  } else {
+    if (_assertiveQueue.length >= 3) _assertiveQueue.shift(); // garde les annonces 'assertive' les plus récentes
+    _assertiveQueue.push(chunks);
+  }
+}
 function speak(text, priority = 'polite') {
   if ('speechSynthesis' in window) {
     const synth = window.speechSynthesis;
     const busy = synth.speaking || synth.pending;
-    // Trois niveaux de priorité :
+    // Quatre niveaux de priorité :
     // - 'interrupt' : navigation dans les menus. Coupe TOUT immédiatement (y
     //   compris la file d'annonces urgentes en attente) et parle sans le
     //   moindre délai, pour que chaque flèche lise l'élément suivant
     //   instantanément.
+    // - 'combat' : danger IMMÉDIAT et déterminant pour la survie (on vous
+    //   vise, on vous tire dessus, cible verrouillée). Comme 'assertive',
+    //   n'interrompt jamais une autre annonce urgente déjà en train d'être
+    //   lue — mais passe DEVANT toute annonce 'assertive' moins critique déjà
+    //   en attente (santé/faim...), pour ne jamais rester coincée derrière
+    //   pendant un échange de tirs.
     // - 'assertive' : information urgente (danger, alerte). Coupe une
     //   annonce 'polite' (routine) en cours, mais n'interrompt PLUS une
     //   autre annonce urgente déjà en train d'être lue — elle attend son
@@ -628,13 +648,12 @@ function speak(text, priority = 'polite') {
       _assertiveQueue = [];
       _currentSpeakPriority = 'interrupt';
       _speakChunks(chunks, () => { _currentSpeakPriority = null; _playNextAssertive(); });
-    } else if (priority === 'assertive') {
-      if (busy && (_currentSpeakPriority === 'assertive' || _currentSpeakPriority === 'interrupt')) {
-        if (_assertiveQueue.length >= 3) _assertiveQueue.shift(); // garde les annonces les plus récentes
-        _assertiveQueue.push(chunks);
+    } else if (priority === 'assertive' || priority === 'combat') {
+      if (busy && (_currentSpeakPriority === 'assertive' || _currentSpeakPriority === 'interrupt' || _currentSpeakPriority === 'combat')) {
+        _enqueueUrgent(chunks, priority === 'combat');
       } else {
         try { synth.cancel(); } catch (e) { /* ignore */ } // coupe une annonce 'polite' en cours, elle
-        _currentSpeakPriority = 'assertive';
+        _currentSpeakPriority = priority;
         _speakChunks(chunks, _playNextAssertive);
       }
     } else {

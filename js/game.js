@@ -2380,7 +2380,13 @@ const Game = {
       updateHud();
       return;
     }
-    announce(`Cible verrouillée : ${n.name}, ${n.isPlayer ? 'joueur réel' : n.job}, ${Math.round(n.dist)} mètres, ${n.bearing}.`, 'assertive');
+    // Verrouiller un VRAI joueur (potentiellement un allié venu avec vous, pas
+    // forcément un ennemi) mérite une confirmation qu'on ne peut pas louper :
+    // priorité 'combat' (passe devant les annonces moins urgentes en attente)
+    // + un bip distinct, pour éviter de tirer par erreur sur quelqu'un de son
+    // groupe faute d'avoir bien entendu qui vient d'être verrouillé.
+    if (n.isPlayer && window.Audio && Audio.beep) Audio.beep(0, 500);
+    announce(`Cible verrouillée : ${n.name}, ${n.isPlayer ? 'joueur réel' : n.job}, ${Math.round(n.dist)} mètres, ${n.bearing}.`, n.isPlayer ? 'combat' : 'assertive');
     // Braquer une arme en verrouillant : la cible PNJ réagit tout de suite
     // (mains en l'air si acculée, sinon fuite) — le reste est géré par npcTick.
     if (this.weaponOut && !n.isPlayer) {
@@ -4727,7 +4733,7 @@ const Game = {
       if (weapon && UTIL.chance(fireChance)) {
         const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
         this.takeDamage(dmg, { headshot: this.rollHeadshot(), attackerX: n.x, attackerY: n.y });
-        announce(`${n.name} vous touche avec son ${weapon.name} ! ${dmg} dégâts.`, 'assertive');
+        announce(`${n.name} vous touche avec son ${weapon.name} ! ${dmg} dégâts.`, 'combat');
         // Chaque tir essuyé augmente la chance de le repérer précisément.
         n._shotsAtPlayer = (n._shotsAtPlayer || 0) + 1;
         if (UTIL.chance(Math.min(0.9, 0.25 + n._shotsAtPlayer * 0.15))) this.revealShooter(n);
