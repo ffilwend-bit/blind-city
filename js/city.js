@@ -62,6 +62,12 @@ const POI_INTERIORS = {
   ] },
 };
 
+// Répliques des gardes/vigiles (missions avec gardes armés : sabotage,
+// convoi blindé, dépôt d'armes, planque gardée) — jusque-là dialogue: []
+// vide (rien à entendre en leur parlant) et aucune réplique audio du groupe
+// "énervé", contrairement aux membres de gang qui en ont déjà.
+const GUARD_DIALOGUE = ['Zone interdite, dégagez immédiatement !', 'Vous n\'avez rien à faire ici.', 'Reculez, ou j\'utilise la force.', 'Dernier avertissement, partez !'];
+
 const City = {
   W: CONFIG.W, H: CONFIG.H,
   grid: new Map(), // "x,y" -> tile type
@@ -703,7 +709,7 @@ const City = {
           const wp2 = this.findFree(d.x1 + 1, d.y1 + 1, d.x2 - 1, d.y2 - 1);
           const guardId = `mission_guard_${i}_${g}`;
           const gender = UTIL.pick(['homme', 'femme']);
-          this.npcs.push({ id: guardId, name: `${UTIL.pick(['Garde', 'Vigile'])} ${g + 1}`, job: 'garde', x: wp1.x, y: wp1.y, health: 100, relation: -30, money: 0, inCar: false, dialogue: [], home: wp1, hostile: true, weapon: 'pistolet_9', gender, outfit: generateNPCAppearance('garde'), patrol: [wp1, wp2], patrolIdx: 0 });
+          this.npcs.push({ id: guardId, name: `${UTIL.pick(['Garde', 'Vigile'])} ${g + 1}`, job: 'garde', x: wp1.x, y: wp1.y, health: 100, relation: -30, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: wp1, hostile: true, weapon: 'pistolet_9', gender, outfit: generateNPCAppearance('garde'), patrol: [wp1, wp2], patrolIdx: 0 });
           guardIds.push(guardId);
         }
         extra = { objectiveX: objective.x, objectiveY: objective.y, guardIds };
@@ -742,10 +748,10 @@ const City = {
         const frontIds = [], rearIds = [];
         for (let g = 0; g < 2; g++) {
           const gender1 = UTIL.pick(['homme', 'femme']);
-          const fnpc = { id: `convoy_front_${i}_${g}`, name: `Garde avant ${g + 1}`, job: 'garde', gender: gender1, x: frontPoint.x, y: frontPoint.y, health: 100, relation: -80, money: 0, inCar: false, dialogue: [], home: frontPoint, hostile: true, weapon: UTIL.pick(['pistolet_9', 'pompe']), outfit: generateNPCAppearance('garde') };
+          const fnpc = { id: `convoy_front_${i}_${g}`, name: `Garde avant ${g + 1}`, job: 'garde', gender: gender1, x: frontPoint.x, y: frontPoint.y, health: 100, relation: -80, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: frontPoint, hostile: true, weapon: UTIL.pick(['pistolet_9', 'pompe']), outfit: generateNPCAppearance('garde') };
           this.npcs.push(fnpc); frontIds.push(fnpc.id);
           const gender2 = UTIL.pick(['homme', 'femme']);
-          const rnpc = { id: `convoy_rear_${i}_${g}`, name: `Garde arrière ${g + 1}`, job: 'garde', gender: gender2, x: rearPoint.x, y: rearPoint.y, health: 100, relation: -80, money: 0, inCar: false, dialogue: [], home: rearPoint, hostile: true, weapon: UTIL.pick(['uzi', 'ak47']), outfit: generateNPCAppearance('garde') };
+          const rnpc = { id: `convoy_rear_${i}_${g}`, name: `Garde arrière ${g + 1}`, job: 'garde', gender: gender2, x: rearPoint.x, y: rearPoint.y, health: 100, relation: -80, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: rearPoint, hostile: true, weapon: UTIL.pick(['uzi', 'ak47']), outfit: generateNPCAppearance('garde') };
           this.npcs.push(rnpc); rearIds.push(rnpc.id);
         }
         extra = { frontPoint, rearPoint, frontIds, rearIds };
@@ -759,7 +765,7 @@ const City = {
         const vaultPoint = { x: UTIL.clamp(base.x - 7, 0, this.W - 1), y: base.y };
         const guardId = 'depot_guard_' + i;
         const gender = UTIL.pick(['homme', 'femme']);
-        this.npcs.push({ id: guardId, name: 'Garde de patrouille', job: 'garde', gender, x: patrolPoint.x, y: patrolPoint.y, health: 100, relation: -80, money: 0, inCar: false, dialogue: [], home: patrolPoint, hostile: true, weapon: 'pompe', outfit: generateNPCAppearance('garde') });
+        this.npcs.push({ id: guardId, name: 'Garde de patrouille', job: 'garde', gender, x: patrolPoint.x, y: patrolPoint.y, health: 100, relation: -80, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: patrolPoint, hostile: true, weapon: 'pompe', outfit: generateNPCAppearance('garde') });
         extra = { camPoint, patrolPoint, vaultPoint, guardId };
       }
       else if (t.type === 'extraction_vip') {
@@ -796,7 +802,7 @@ const City = {
         const count = UTIL.randInt(2, 4);
         for (let g = 0; g < count; g++) {
           const gender = UTIL.pick(['homme', 'femme']);
-          const npc = { id: `stash_guard_${i}_${g}`, name: `Vigile ${g + 1}`, job: 'garde', gender, x: UTIL.clamp(base.x + UTIL.randInt(-2, 2), 0, this.W - 1), y: UTIL.clamp(base.y + UTIL.randInt(-2, 2), 0, this.H - 1), health: 100, relation: -90, money: 0, inCar: false, dialogue: [], home: base, hostile: true, weapon: UTIL.pick(['uzi', 'ak47', 'pompe']), outfit: generateNPCAppearance('garde') };
+          const npc = { id: `stash_guard_${i}_${g}`, name: `Vigile ${g + 1}`, job: 'garde', gender, x: UTIL.clamp(base.x + UTIL.randInt(-2, 2), 0, this.W - 1), y: UTIL.clamp(base.y + UTIL.randInt(-2, 2), 0, this.H - 1), health: 100, relation: -90, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: base, hostile: true, weapon: UTIL.pick(['uzi', 'ak47', 'pompe']), outfit: generateNPCAppearance('garde') };
           this.npcs.push(npc); guardIds.push(npc.id);
         }
         extra = { guardIds };
