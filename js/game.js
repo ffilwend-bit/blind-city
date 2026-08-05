@@ -2626,6 +2626,12 @@ const Game = {
     if (target && range <= effRange) {
       if (Math.random() < acc) {
         let dmg = w.dmg * (this.aimPart === 'tete' ? 2 : this.aimPart === 'jambes' ? 0.6 : 1);
+        // Comme dans la vraie vie : un projectile perd de la vitesse (donc de
+        // l'énergie/du pouvoir d'arrêt) en parcourant de la distance — un tir
+        // à bout portant fait plus mal qu'un tir à la limite de portée
+        // effective de l'arme, tête comprise (jusqu'à -35 % à portée max ;
+        // au-delà, déjà très imprécis, voir le calcul de acc ci-dessus).
+        if (effRange > 0) dmg *= (1 - UTIL.clamp(range / effRange, 0, 1) * 0.35);
         if (target.isVehicle) {
           const v = City.vehicles.find(vv => vv.id === target.id);
           if (v) {
@@ -2845,6 +2851,13 @@ const Game = {
     // tête — c'est le casque qui protège ça — ni d'une explosion).
     const vestAbsorbs = this.hasVest && !opts.headshot && !opts.explosion;
     if (vestAbsorbs) amount = Math.round(amount * 0.65);
+    // Le casque réduisait déjà le RISQUE de mort immédiate lors d'un tir à la
+    // tête (voir plus bas, fatalHeadshot), mais n'amortissait jamais le
+    // moindre point de dégâts : on encaissait le même choc brutal qu'à nu,
+    // casque ou pas — il ne « protégeait » donc pas vraiment. Il réduit
+    // maintenant aussi les dégâts eux-mêmes, comme le gilet pour le corps.
+    const helmetAbsorbs = this.hasHelmet && opts.headshot && !opts.explosion;
+    if (helmetAbsorbs) amount = Math.round(amount * 0.5);
     this.health = Math.max(0, this.health - amount); updateHud();
     // Retour sonore de l'impact : on ignore l'usure passive (faim/soif, très
     // faibles montants) pour ne jouer un son que lors d'un vrai coup/explosion.
@@ -3448,8 +3461,11 @@ const Game = {
     Audio.voiceHint(0);
     const line = UTIL.pick(npc.dialogue);
     announce(`${npc.name}, ${npc.job} : « ${line} »`, 'polite');
-    if (npc.job === 'ganger') {
-      // Réplique audio du groupe "énervé" pour renforcer l'hostilité des membres de gang.
+    if (npc.job === 'ganger' || npc.job === 'garde') {
+      // Réplique audio du groupe "énervé" pour renforcer l'hostilité — déjà
+      // utilisée pour les membres de gang, étendue aux gardes/vigiles armés
+      // (sabotage, convoi blindé, dépôt d'armes, planque gardée), qui n'en
+      // profitaient pas du tout jusque-là.
       const pool = NPCVoiceGroups.enerve.filter(l => l.gender === npc.gender);
       const voice = UTIL.pick(pool.length ? pool : NPCVoiceGroups.enerve);
       const pan = Math.max(-1, Math.min(1, (npc.x - this.x) / 15));
@@ -4731,7 +4747,9 @@ const Game = {
       const weapon = WEAPON_CATALOG[n.weapon];
       const fireChance = Math.max(0.05, 0.35 - d * 0.015);
       if (weapon && UTIL.chance(fireChance)) {
-        const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
+        // Même principe que pour les tirs du joueur : moins de dégâts à
+        // distance (jusqu'à -35 % à la limite d'engagement de 14 cases).
+        const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6) * (1 - UTIL.clamp(d / 14, 0, 1) * 0.35));
         this.takeDamage(dmg, { headshot: this.rollHeadshot(), attackerX: n.x, attackerY: n.y });
         announce(`${n.name} vous touche avec son ${weapon.name} ! ${dmg} dégâts.`, 'combat');
         // Chaque tir essuyé augmente la chance de le repérer précisément.
