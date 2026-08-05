@@ -582,6 +582,37 @@ Game.putInVehicle = function() {
   this.carriedPlayer = null;
 };
 
+// Tenir quelqu'un de CONSCIENT par la main (otage), utilisable n'importe où
+// en ville — pas seulement dans le déroulé scripté d'un braquage de banque
+// (voir takeHostage/heistState). Contrairement à carryPlayer (réservé à un
+// PNJ à terre, inconscient), celui-ci marche à côté du joueur.
+Game.holdHostage = function() {
+  if (this.heldHostage) return announce(`Vous tenez déjà ${this.heldHostage.name} par la main.`, 'assertive');
+  const npc = this.getLiveTarget() || City.npcs.find(n => !n.dead && !n.hostile && !n.menotte && !n.knockedOut && UTIL.dist(n, this) < 2);
+  if (!npc || npc.health <= 0) return announce('Personne à portée de main pour ça.', 'assertive');
+  this.heldHostage = npc;
+  npc.hostage = true; npc.fleeing = false; npc.handsUp = false;
+  announce(`Vous tenez ${npc.name} par la main. Il/elle vous suit tant que vous ne le/la relâchez pas.`, 'assertive');
+  this.reportCrimeToPolice('prise_otage', `Prise d'otage : ${npc.name}`);
+  this.wanted = Math.min(100, this.wanted + 20);
+  updateHud();
+};
+Game.releaseHostage = function() {
+  if (!this.heldHostage) return announce('Vous ne tenez personne par la main.', 'assertive');
+  announce(`Vous relâchez ${this.heldHostage.name}.`, 'polite');
+  this.heldHostage.hostage = false;
+  this.heldHostage = null;
+};
+// Suit le joueur d'une case, juste derrière lui — appelé en continu tant
+// qu'un otage est tenu (voir menus-and-ui.js, boucle de jeu).
+Game.tickHostage = function() {
+  const h = this.heldHostage;
+  if (!h || h.dead) { this.heldHostage = null; return; }
+  const { dx, dy } = this.headingToDelta(this.heading);
+  h.x = UTIL.clamp(this.x - dx, 0, City.W - 1);
+  h.y = UTIL.clamp(this.y - dy, 0, City.H - 1);
+};
+
 Game.openDoor = function(door) {
   if (!this.inVehicle || !this.vehicle) return announce('Vous n\'êtes pas dans un véhicule.', 'assertive');
   const doors = ['porte_conducteur', 'porte_passager_avant_droit', 'porte_passager_avant_gauche', 'porte_passager_arriere_droit', 'porte_passager_arriere_gauche', 'coffre'];
