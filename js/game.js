@@ -4747,12 +4747,8 @@ const Game = {
       const weapon = WEAPON_CATALOG[n.weapon];
       const fireChance = Math.max(0.05, 0.35 - d * 0.015);
       if (weapon && UTIL.chance(fireChance)) {
-        // Même principe que pour les tirs du joueur : moins de dégâts à
-        // distance (jusqu'à -35 % à la limite d'engagement de 14 cases).
-        const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6) * (1 - UTIL.clamp(d / 14, 0, 1) * 0.35));
-        this.takeDamage(dmg, { headshot: this.rollHeadshot(), attackerX: n.x, attackerY: n.y });
-        announce(`${n.name} vous touche avec son ${weapon.name} ! ${dmg} dégâts.`, 'combat');
-        // Chaque tir essuyé augmente la chance de le repérer précisément.
+        this.resolveNpcShotAtPlayer(n, weapon, d, 14);
+        // Chaque tir essuyé (touché ou raté) augmente la chance de le repérer précisément.
         n._shotsAtPlayer = (n._shotsAtPlayer || 0) + 1;
         if (UTIL.chance(Math.min(0.9, 0.25 + n._shotsAtPlayer * 0.15))) this.revealShooter(n);
       }
@@ -4778,6 +4774,37 @@ const Game = {
   // tel volume de tirs, et la synthèse vocale, submergée d'annonces de tir en
   // boucle, ne pouvait plus rien annoncer d'autre (verrouillage de cible,
   // etc.). Même cadence que les combats déjà throttlés ailleurs.
+  // Résout un tir d'un PNJ hostile sur le joueur — point d'entrée unique
+  // réutilisé par updateGangCombat() ET tous les tick* de mission en combat
+  // (au lieu de dupliquer la même logique 8 fois, divergente à chaque site) :
+  // - Comme pour le joueur (voir shoot()), TIRER ne veut pas dire TOUCHER —
+  //   avant, dès qu'un PNJ "tentait" un tir, il touchait systématiquement,
+  //   sans le moindre jet de précision. Un vrai jet, dégressif avec la
+  //   distance, décide maintenant si le tir part dans le vide ou touche.
+  // - Le bruit réel de l'arme (dédié au catalogue si fourni, sinon
+  //   synthétisé) est joué, spatialisé selon la position du tireur par
+  //   rapport au joueur, et diffusé aux autres joueurs proches — avant, ces
+  //   combats ne jouaient AUCUN son de tir, uniquement du texte.
+  // - Une réplique hostile du groupe "énervé" (déjà fournie pour les gangs,
+  //   étendue aux gardes) est jouée de temps en temps pendant l'échange, pas
+  //   à chaque tir pour ne pas noyer les annonces de combat.
+  // Renvoie true si le tir touche (dégâts appliqués), false s'il rate.
+  resolveNpcShotAtPlayer(npc, weapon, d, maxRange) {
+    const pan = this.panForPoint(npc.x, npc.y);
+    if (weapon.shotSound) AudioLib.playPositional(weapon.shotSound, pan, 0.7);
+    else Audio.gunshot(weapon.name, pan);
+    if (Net.connected) Net.emitSound(weapon.shotSound || 'synth:gunshot', { vol: 0.6 });
+    if (UTIL.chance(0.22)) this.npcVoiceReaction(npc.x, npc.y, { group: 'enerve', count: 1, radius: 14 });
+    const acc = Math.max(0.3, (weapon.accuracy || 0.6) - UTIL.clamp(d / maxRange, 0, 1) * 0.4);
+    if (!UTIL.chance(acc)) {
+      announce(`${npc.name} tire mais rate sa cible.`, 'polite');
+      return false;
+    }
+    const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6) * (1 - UTIL.clamp(d / maxRange, 0, 1) * 0.35));
+    this.takeDamage(dmg, { headshot: this.rollHeadshot(), attackerX: npc.x, attackerY: npc.y });
+    announce(`${npc.name} vous touche avec son ${weapon.name} ! ${dmg} dégâts.`, 'combat');
+    return true;
+  },
   missionCombatTick(key) {
     this._missionCombatCooldowns = this._missionCombatCooldowns || {};
     const now = Date.now();
@@ -4990,9 +5017,7 @@ const Game = {
               client.health = Math.max(0, client.health - dmg);
               announce(`${client.name} est touché ! Santé : ${Math.round(client.health)}%.`, 'assertive');
             } else {
-              const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
-              this.takeDamage(dmg, { headshot: this.rollHeadshot() });
-              announce(`${n.name} vous touche ! ${dmg} dégâts.`, 'assertive');
+              this.resolveNpcShotAtPlayer(n, weapon, d, 12);
             }
           }
         });
@@ -5169,11 +5194,7 @@ const Game = {
       squad.forEach(g => {
         const d = UTIL.dist(g, this);
         const weapon = WEAPON_CATALOG[g.weapon];
-        if (weapon && UTIL.chance(Math.max(0.05, 0.3 - d * 0.015))) {
-          const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
-          this.takeDamage(dmg, { headshot: this.rollHeadshot() });
-          announce(`${g.name} vous touche ! ${dmg} dégâts.`, 'assertive');
-        }
+        if (weapon && UTIL.chance(Math.max(0.05, 0.3 - d * 0.015))) this.resolveNpcShotAtPlayer(g, weapon, d, 14);
       });
       return;
     }
@@ -5269,11 +5290,7 @@ const Game = {
       const d = UTIL.dist(n, this);
       if (d > 12) return;
       const weapon = WEAPON_CATALOG[n.weapon];
-      if (weapon && UTIL.chance(Math.max(0.05, 0.25 - d * 0.015))) {
-        const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
-        this.takeDamage(dmg, { headshot: this.rollHeadshot() });
-        announce(`${n.name} vous touche ! ${dmg} dégâts.`, 'assertive');
-      }
+      if (weapon && UTIL.chance(Math.max(0.05, 0.25 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
     });
     if (!squad.length) {
       if (ds.wave >= 3) {
@@ -5377,11 +5394,7 @@ const Game = {
       const d = UTIL.dist(n, this);
       if (d > 10) return;
       const weapon = WEAPON_CATALOG[n.weapon];
-      if (weapon && UTIL.chance(Math.max(0.05, 0.28 - d * 0.015))) {
-        const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
-        this.takeDamage(dmg, { headshot: this.rollHeadshot() });
-        announce(`${n.name} vous touche ! ${dmg} dégâts.`, 'assertive');
-      }
+      if (weapon && UTIL.chance(Math.max(0.05, 0.28 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 10);
     });
     const now = Date.now();
     if (frontSquad.length === 0 && rearSquad.length > 0 && !rearEngaged && now - this.convoyState.lastReinforce > 15000) {
@@ -5447,11 +5460,7 @@ const Game = {
       const d = UTIL.dist(guard, this);
       if (d < 8) {
         const weapon = WEAPON_CATALOG[guard.weapon];
-        if (weapon && this.missionCombatTick('depot') && UTIL.chance(Math.max(0.05, 0.2 - d * 0.015))) {
-          const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
-          this.takeDamage(dmg, { headshot: this.rollHeadshot() });
-          announce(`${guard.name} vous repère et tire ! ${dmg} dégâts.`, 'assertive');
-        }
+        if (weapon && this.missionCombatTick('depot') && UTIL.chance(Math.max(0.05, 0.2 - d * 0.015))) this.resolveNpcShotAtPlayer(guard, weapon, d, 8);
         guard.x += Math.sign(this.x - guard.x); guard.y += Math.sign(this.y - guard.y);
       }
     }
@@ -5497,7 +5506,7 @@ const Game = {
         if (d < 8 && this.missionCombatTick('vip') && UTIL.chance(0.3)) {
           const weapon = WEAPON_CATALOG[attacker.weapon];
           if (UTIL.chance(0.3)) { vip.health -= UTIL.randInt(10, 25); announce(`${vip.name} est touché ! Santé : ${Math.round(vip.health)}%.`, 'assertive'); }
-          else { const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6)); this.takeDamage(dmg, { headshot: this.rollHeadshot() }); announce(`${attacker.name} vous touche ! ${dmg} dégâts.`, 'assertive'); }
+          else this.resolveNpcShotAtPlayer(attacker, weapon, d, 8);
         }
       } else { this.vipState.lastAttackerId = null; }
     }
@@ -5629,11 +5638,7 @@ const Game = {
       const d = UTIL.dist(n, this);
       if (d > 12) return;
       const weapon = WEAPON_CATALOG[n.weapon];
-      if (weapon && UTIL.chance(Math.max(0.05, 0.28 - d * 0.015))) {
-        const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
-        this.takeDamage(dmg, { headshot: this.rollHeadshot() });
-        announce(`${n.name} vous touche ! ${dmg} dégâts.`, 'assertive');
-      }
+      if (weapon && UTIL.chance(Math.max(0.05, 0.28 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
     });
   },
 
@@ -5733,11 +5738,7 @@ const Game = {
       const d = UTIL.dist(n, this);
       if (d > 12) return;
       const weapon = WEAPON_CATALOG[n.weapon];
-      if (weapon && UTIL.chance(Math.max(0.05, 0.3 - d * 0.015))) {
-        const dmg = Math.round(weapon.dmg * (0.4 + Math.random() * 0.6));
-        this.takeDamage(dmg, { headshot: this.rollHeadshot() });
-        announce(`${n.name} vous touche ! ${dmg} dégâts.`, 'assertive');
-      }
+      if (weapon && UTIL.chance(Math.max(0.05, 0.3 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
     });
   },
 
