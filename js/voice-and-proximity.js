@@ -421,7 +421,10 @@ window.onFreedFromVehicle = onFreedFromVehicle;
 // le moindre signe avant-coureur.
 function onPlayerTargetedMe(fromName) {
   if (window.Audio && Audio.targetedWarning) Audio.targetedWarning(0);
-  announce(`${fromName || 'Quelqu\'un'} vous vise avec une arme !`, 'assertive');
+  // Priorité 'combat' : cette alerte est vitale, elle ne doit jamais rester
+  // coincée derrière une annonce 'assertive' moins urgente déjà en attente
+  // (santé, faim...) pendant que quelqu'un vous vise.
+  announce(`${fromName || 'Quelqu\'un'} vous vise avec une arme !`, 'combat');
 }
 window.onPlayerTargetedMe = onPlayerTargetedMe;
 
