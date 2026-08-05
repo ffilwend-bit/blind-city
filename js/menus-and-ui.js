@@ -584,7 +584,13 @@ function applyWorldEdit(op, payload) {
     if (!City.vehicles.find(v => v.id === payload.id)) City.vehicles.push({ ...payload, inventory: payload.inventory || [], passengers: [], openDoors: new Set() });
   } else if (op === 'vehicle_position') {
     const v = City.vehicles.find(v => v.id === payload.id);
-    if (v) { v.x = payload.x; v.y = payload.y; if (typeof payload.locked === 'boolean') v.locked = payload.locked; }
+    if (v) {
+      v.x = payload.x; v.y = payload.y; if (typeof payload.locked === 'boolean') v.locked = payload.locked;
+      // Carburant/dégâts partagés : un véhicule laissé abîmé ou presque à
+      // sec le reste vraiment pour tout le monde, même après reconnexion.
+      if (typeof payload.fuel === 'number') v.fuel = payload.fuel;
+      if (typeof payload.hp === 'number') v.hp = payload.hp;
+    }
   } else if (op === 'vehicle_lock') {
     const v = City.vehicles.find(v => v.id === payload.id);
     if (v) v.locked = payload.locked;

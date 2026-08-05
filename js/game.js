@@ -832,6 +832,15 @@ const Game = {
       const kmh = Math.round(Math.abs(v.speed) * 60);
       announce(`Vous roulez vers le ${UTIL.cardinals[v.heading]}, environ ${kmh} kilomètres heure, dans ${p.district}.`, 'polite');
     }
+    // Synchronise périodiquement le carburant/les dégâts en cours de route
+    // (pas seulement à la descente) : sinon une longue session de conduite
+    // sans se garer ne se répercutait jamais côté serveur en cas de crash,
+    // déconnexion, ou simplement pour un autre joueur qui regarde ce
+    // véhicule en même temps.
+    if (moving && Net.connected && now - (p.lastSync || 0) > 10000) {
+      p.lastSync = now;
+      sendWorldEdit('vehicle_position', { id: v.id, x: v.x, y: v.y, locked: v.locked, fuel: v.fuel, hp: v.hp });
+    }
   },
   // Assistant de conduite (aide à la conduite manuelle sans la vue) : bascule
   // activé par défaut. Prévient des obstacles DROIT DEVANT le véhicule avant la
@@ -970,7 +979,12 @@ const Game = {
         setTimeout(() => AudioLib.playOnce('veh1_ouverture_porte', { volume: 0.6 }), 250);
         setTimeout(() => { AudioLib.playOnce('veh1_fermeture_porte', { volume: 0.6 }); AudioLib.playOnce('veh_frein_main', { volume: 0.5 }); }, 700);
       }
-      sendWorldEdit('vehicle_position', { id: this.vehicle.id, x: this.vehicle.x, y: this.vehicle.y, locked: this.vehicle.locked });
+      // Le carburant et les dégâts encaissés sont désormais synchronisés (pas
+      // seulement la position) : sinon, un véhicule repris par un AUTRE
+      // joueur (ou retrouvé après reconnexion) réapparaissait toujours à
+      // plein d'essence et en parfait état, quoi qu'il se soit vraiment
+      // passé pendant que quelqu'un le conduisait.
+      sendWorldEdit('vehicle_position', { id: this.vehicle.id, x: this.vehicle.x, y: this.vehicle.y, locked: this.vehicle.locked, fuel: this.vehicle.fuel, hp: this.vehicle.hp });
       // Retenu automatiquement pour pouvoir le retrouver plus tard (touche
       // Maj+F ou "où est ma voiture") — utile de se garer sans s'inquiéter.
       this.lastParkedVehicle = { id: this.vehicle.id, name: this.vehicle.name };
