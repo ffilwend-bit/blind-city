@@ -639,6 +639,12 @@ const Game = {
   // (on l'entend de loin), plus court pour un véhicule au sol.
   tickAmbientVehicles() {
     if (!window.AudioLib || typeof AudioLib.playLoopInstance !== 'function') return;
+    // En vol (altitude), le rayon d'écoute des véhicules AU SOL doit être plus
+    // large : avant, il restait fixé à 16 cases comme à pied, alors qu'un
+    // avion/hélicoptère couvre bien plus de terrain d'un coup — la
+    // circulation au sol (motos, voitures) devenait quasi inaudible depuis
+    // les airs.
+    const airborne = this.altitude > 5;
     const active = new Set();
     if (Net.connected) {
       Net.remotePlayers.forEach((p, pid) => {
@@ -646,7 +652,7 @@ const Game = {
         if (!p.inVehicle || !p.vehicleType) return;
         const cls = VEHICLE_CATALOG[p.vehicleType];
         if (!cls || cls.human) return;
-        const radius = cls.flies ? 45 : 16;
+        const radius = cls.flies ? 45 : (airborne ? 28 : 16);
         const dist = UTIL.dist(p, this);
         if (dist > radius) return;
         const instanceId = 'ambveh_' + pid;
@@ -665,7 +671,7 @@ const Game = {
       if (!v) return;
       const cls = VEHICLE_CATALOG[v.type];
       if (!cls) return;
-      const radius = 16;
+      const radius = airborne ? 28 : 16;
       const dist = UTIL.dist(v, this);
       if (dist > radius) return;
       const instanceId = 'ambveh_ai_' + vid;
