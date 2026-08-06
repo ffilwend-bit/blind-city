@@ -88,6 +88,11 @@ function openConvoyMenu() {
   const items = [];
   if (Convoy.inConvoy()) {
     items.push({ id: 'locate', title: '📍 Repérer mon convoi', desc: `Distance et direction de chaque membre. Code : ${Convoy.code}.` });
+    // Guidage EN DIRECT (réutilise le même mécanisme que suivre un joueur qui
+    // a partagé son GPS — voir Game.followPlayerGPS) : bien plus simple à
+    // suivre qu'un simple relevé ponctuel (locate), le trajet s'adapte tout
+    // seul si le membre bouge, avec des indications au fur et à mesure.
+    items.push({ id: 'guide', title: '🧭 Guidage automatique vers un membre', desc: 'Suivi en direct, comme un GPS : le trajet s\'adapte s\'il bouge.' });
     items.push({ id: 'leave', title: '🚪 Quitter le convoi', desc: 'Vous ne serez plus repéré par le groupe.' });
   } else {
     items.push({ id: 'create', title: '➕ Créer un convoi', desc: 'Génère un code à partager avec votre groupe.' });
@@ -95,9 +100,27 @@ function openConvoyMenu() {
   }
   renderMenu(items, (it) => {
     if (it.id === 'locate') { closeMenu(); Convoy.locate(); }
+    else if (it.id === 'guide') { closeMenu(); openConvoyGuideMenu(); }
     else if (it.id === 'leave') { Convoy.leave(); closeMenu(); }
     else if (it.id === 'create') { Convoy.create(); closeMenu(); }
     else if (it.id === 'join') { closeMenu(); AccessibleTextPrompt.open('Rejoindre un convoi', 'Saisissez le code du convoi communiqué par votre groupe.', '', (code) => Convoy.join(code)); }
+  });
+  el('menuOverlay').style.display = 'flex';
+}
+// Choix du membre du convoi à suivre automatiquement (voir Game.followPlayerGPS,
+// déjà utilisé pour se faire guider vers un joueur ayant partagé son GPS — les
+// membres d'un même convoi se sont déjà mutuellement identifiés en partageant
+// le code, donc pas besoin d'un partage GPS explicite en plus).
+function openConvoyGuideMenu() {
+  el('menuTitle').textContent = '🧭 Guidage vers un membre du convoi';
+  const mem = Convoy.members();
+  const items = mem.length
+    ? mem.map(p => ({ id: p.id, title: `${p.firstName || 'Membre'} ${p.lastName || ''}`.trim(), desc: `${Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE)} mètres vers le ${UTIL.bearing(p.x - Game.x, p.y - Game.y)}.`, name: p.firstName || 'Membre' }))
+    : [{ id: 'empty', title: 'Aucun membre repéré pour le moment', desc: 'Réessayez une fois le convoi rassemblé.' }];
+  renderMenu(items, (it) => {
+    if (it.id === 'empty') return;
+    closeMenu();
+    Game.followPlayerGPS(it.id, it.name);
   });
   el('menuOverlay').style.display = 'flex';
 }
@@ -1504,18 +1527,19 @@ function gameLoop() {
       // fichier audio réel (double moteur).
     }
 
-    // Sons partagés en réseau : moteur (quand on roule) et sirène (si active),
-    // émis à intervalle régulier pour que les joueurs proches les entendent,
-    // spatialisés selon notre position (voir Game.playRemoteSound).
+    // Son de moteur partagé en réseau (quand on roule), émis à intervalle
+    // régulier pour que les joueurs proches l'entendent, spatialisé selon
+    // notre position (voir Game.playRemoteSound). La sirène, elle, est gérée
+    // en boucle continue via le champ "siren" de l'état réseau (voir plus
+    // bas dans ce fichier) et Game.tickAmbientVehicles() — avant, elle était
+    // ré-émise en un son de synthèse court toutes les 850 ms, ce qui la
+    // faisait sonner hachée/coupée chez les autres joueurs (rien à voir avec
+    // le vrai fichier audio de sirène qu'entend celui qui l'a activée).
     if (Net.connected && Game.inVehicle && Game.vehicle) {
       const nowS = Date.now();
       if (Math.abs(Game.vehicle.speed) > 0 && nowS - (Game._lastEngineEmit || 0) > 400) {
         Net.emitSound('synth:engine', { vol: 0.5 });
         Game._lastEngineEmit = nowS;
-      }
-      if (Game.vehicle.siren && nowS - (Game._lastSirenEmit || 0) > 850) {
-        Net.emitSound('synth:siren', { vol: 0.7 });
-        Game._lastSirenEmit = nowS;
       }
     }
 

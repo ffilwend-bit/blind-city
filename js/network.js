@@ -459,6 +459,11 @@ const Net = {
       // synthétisant localement d'après ces données (voir tickPassengerAudio).
       vehicleType: Game.vehicle?.type || null,
       vehicleSpeedRatio: (Game.vehicle && VEHICLE_CATALOG[Game.vehicle.type]) ? Math.abs(Game.vehicle.speed || 0) / VEHICLE_CATALOG[Game.vehicle.type].maxSpeed : 0,
+      // Sirène allumée : permet aux autres clients de jouer le VRAI fichier
+      // audio de sirène en boucle continue (voir Game.tickAmbientVehicles),
+      // au lieu de le ré-émettre en son de synthèse court à intervalle
+      // régulier (haché/coupé chez qui l'écoutait sans l'avoir activée).
+      siren: !!(Game.vehicle && Game.vehicle.siren),
       talkieOn: Game.talkie.on, talkieFrequency: Game.talkie.frequency,
       convoy: (typeof Convoy !== 'undefined' ? Convoy.code : null),
       airplane: !!(typeof Phone !== 'undefined' && Phone.airplane),
