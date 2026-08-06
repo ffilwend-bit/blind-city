@@ -321,11 +321,21 @@ function openShareGpsMenu() {
   if (!Net.connected) { renderMenu([{ id: 'none', title: 'Hors ligne', desc: 'Le partage de position nécessite une connexion au serveur multijoueur.' }], () => closeMenu()); return; }
   const players = Array.from(Net.remotePlayers.values());
   if (!players.length) { renderMenu([{ id: 'none', title: 'Aucun joueur connecté', desc: 'Personne à qui envoyer votre position pour le moment.' }], () => closeMenu()); return; }
-  const items = players.map(p => ({ id: p.id, title: `${p.firstName} ${p.lastName}`, desc: `À ${Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE)} mètres. Lui envoyer votre position pour qu'il soit guidé jusqu'à vous.` }));
+  // Nom affiché : celui de VOS contacts s'il y en a un enregistré pour cette
+  // personne (voir Game.resolveContactName) — vous la reconnaissez ainsi
+  // depuis vos contacts, pas seulement en la voyant passer par hasard.
+  const items = players.map(p => {
+    const contactMatch = Game.resolveContactName({ isPlayer: true, accountUsername: p.accountUsername });
+    const label = contactMatch ? contactMatch.label : `${p.firstName} ${p.lastName}`;
+    return { id: p.id, title: label, desc: `À ${Math.round(UTIL.dist(p, Game) * CONFIG.METERS_PER_TILE)} mètres. Lui envoyer votre position pour qu'il soit guidé jusqu'à vous.` };
+  });
   renderMenu(items, (sel) => {
     const p = players.find(pp => pp.id === sel.id);
     closeMenu();
-    if (p) Game.shareMyGPS(p.id, `${p.firstName} ${p.lastName}`);
+    if (p) {
+      const contactMatch = Game.resolveContactName({ isPlayer: true, accountUsername: p.accountUsername });
+      Game.shareMyGPS(p.id, contactMatch ? contactMatch.label : `${p.firstName} ${p.lastName}`);
+    }
   });
 }
 function openRoleMenu() {

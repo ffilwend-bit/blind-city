@@ -1033,12 +1033,19 @@ const Game = {
       // Déjà passager : appuyer de nouveau fait descendre.
       this.leavePassengerSeat();
     } else {
-      // Choix de la PORTIÈRE. On repère le véhicule le plus proche (possédé ou
+      // Choix de la PORTIÈRE. On repère le(s) véhicule(s) proche(s) (possédé ou
       // non — un taxi peut appartenir à son chauffeur) et un éventuel chauffeur
       // réel au volant tout près.
       const driver = this.getNearbyRemoteDriver();
-      const v = targetVehicle || City.vehicles.filter(vv => UTIL.dist(vv, this) < 4).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
-      if (!v && !driver) { updateHud(); return announce('Aucun véhicule à proximité.', 'assertive'); }
+      const nearby = City.vehicles.filter(vv => UTIL.dist(vv, this) < 4).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this));
+      if (!nearby.length && !driver && !targetVehicle) { updateHud(); return announce('Aucun véhicule à proximité.', 'assertive'); }
+      // Plusieurs véhicules à portée à la fois (garés côte à côte) : on
+      // proposait avant TOUJOURS le plus proche au mètre près, sans un mot —
+      // impossible de choisir précisément lequel rejoindre (le sien, celui
+      // qu'un autre joueur vient de proposer...), surtout si deux véhicules
+      // portent le même nom (même modèle).
+      if (!targetVehicle && nearby.length > 1) return this.openNearbyVehiclesMenu(nearby, driver);
+      const v = targetVehicle || nearby[0];
       // Vélo / véhicule à une seule place sans portières : pas de menu de
       // portières (une seule place). On monte directement pour l'utiliser.
       const vcls = v ? VEHICLE_CATALOG[v.type] : null;
@@ -1105,6 +1112,28 @@ const Game = {
         RPJournal.log('Aviation', `${v.name} s'écrase, sans personne aux commandes.`, 'alert');
         sendWorldEdit('vehicle_position', { id: v.id, x: v.x, y: v.y, locked: v.locked, riderless: false, hp: 0, altitude: 0 });
       }
+    });
+  },
+  // Choix du véhicule quand plusieurs sont à portée en même temps (garés côte
+  // à côte) — avant, E prenait toujours le plus proche au mètre près, sans
+  // qu'on puisse choisir. Distance ET orientation (bearing) distinguent deux
+  // véhicules même s'ils portent EXACTEMENT le même nom, et "le vôtre" lève
+  // toute ambiguïté sur lequel vous appartient réellement.
+  openNearbyVehiclesMenu(nearby, driver) {
+    ensureMenuOpen();
+    el('menuTitle').textContent = 'Plusieurs véhicules à proximité — lequel ?';
+    const items = nearby.slice(0, 9).map((v, i) => {
+      const dist = Math.round(UTIL.dist(v, this) * CONFIG.METERS_PER_TILE);
+      const bearing = UTIL.bearing(v.x - this.x, v.y - this.y);
+      const mine = (this.ownedVehicles || []).includes(v.id);
+      return { id: v.id, title: `${i + 1}. ${v.name}${mine ? ' (le vôtre)' : ''}`, desc: `${dist} mètres vers le ${bearing}${v.locked ? ', verrouillé' : ''}.`, veh: v };
+    });
+    renderMenu(items, (sel) => {
+      closeMenu();
+      const v = sel.veh;
+      const vcls = VEHICLE_CATALOG[v.type];
+      if (!driver && (vcls?.doors === 0 || vcls?.seats <= 1)) return this.enterAsDriver(v);
+      this.openVehicleDoorMenu(v, driver);
     });
   },
   // Menu des portières : le joueur choisit par où monter. La portière CONDUCTEUR
@@ -2390,10 +2419,22 @@ const Game = {
     // avoir descendu un garde continuait à l'afficher exactement comme s'il
     // était toujours debout, sans le moindre indice qu'il était hors combat.
     const npcs = City.npcs.filter(n => !n.dead && UTIL.dist(n, this) < RADIUS).map(n => ({ ...n, dist: UTIL.dist(n, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(n.x - this.x, n.y - this.y) }));
-    const realPlayers = Array.from(Net.remotePlayers.values()).filter(p => UTIL.dist(p, this) < RADIUS).map(p => ({
-      id: p.id, name: `${p.firstName} ${p.lastName}`, job: 'joueur réel', gender: p.gender, outfit: p.outfit, isPlayer: true,
-      x: p.x, y: p.y, dist: UTIL.dist(p, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(p.x - this.x, p.y - this.y),
-    }));
+    // Nom affiché : masqué (cagoule) -> identité cachée, comme describePerson/
+    // greetPlayer déjà en face-à-face ; sinon, le nom enregistré dans VOS
+    // contacts s'il y en a un (resolveContactName), sinon le vrai nom du
+    // personnage. Avant, le scan révélait toujours le vrai nom brut, sans
+    // tenir compte ni d'un masque ni d'un contact enregistré — les deux
+    // avaient beau déjà exister pour l'interaction directe (E), le scan les
+    // ignorait complètement.
+    const realPlayers = Array.from(Net.remotePlayers.values()).filter(p => UTIL.dist(p, this) < RADIUS).map(p => {
+      const masked = !!p.outfit?.masque;
+      const contactMatch = !masked ? this.resolveContactName({ isPlayer: true, accountUsername: p.accountUsername }) : null;
+      const displayName = masked ? 'Individu masqué' : (contactMatch ? contactMatch.label : `${p.firstName} ${p.lastName}`);
+      return {
+        id: p.id, name: displayName, job: 'joueur réel', gender: p.gender, outfit: p.outfit, isPlayer: true,
+        x: p.x, y: p.y, dist: UTIL.dist(p, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(p.x - this.x, p.y - this.y),
+      };
+    });
     const people = [...realPlayers, ...npcs].sort((a, b) => a.dist - b.dist).slice(0, 9);
     const pois = City.pois.filter(p => UTIL.dist(p, this) < RADIUS).map(p => ({ ...p, dist: UTIL.dist(p, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(p.x - this.x, p.y - this.y) })).sort((a, b) => a.dist - b.dist).slice(0, 9);
     // Les véhicules (dont avions/hélicoptères posés ou en vol si assez proches)
@@ -3390,7 +3431,13 @@ const Game = {
       // deux véhicules du même modèle garés côte à côte, sans quoi le menu
       // affichait deux entrées au texte IDENTIQUE, impossibles à différencier.
       const meters = Math.round(UTIL.dist(v, this) * CONFIG.METERS_PER_TILE);
-      const mine = v.owner === 'player' ? ' — à vous' : '';
+      // v.owner === 'player' est un indicateur générique ("appartient à UN
+      // joueur, peu importe lequel", stocké sur l'objet partagé et donc vrai
+      // pour le véhicule d'un AUTRE joueur aussi) — pas "m'appartient à MOI" :
+      // c'est ownedVehicles (propre à chaque client) qu'il faut vérifier.
+      // Avant, la voiture d'un autre joueur garée à côté de la vôtre pouvait
+      // s'afficher « à vous » à tort.
+      const mine = (this.ownedVehicles || []).includes(v.id) ? ' — à vous' : '';
       targets.push({ d: UTIL.dist(v, this), label: `🚗 ${v.name} (véhicule, ${meters} m${mine})`, act: () => this.interactVehicle(v) });
     });
     City.miningSites.filter(m => UTIL.dist(m, this) < 4).forEach(m => {
@@ -4242,7 +4289,7 @@ const Game = {
   // côté d'un véhicule qu'on possède. Diffusé aux autres joueurs (vehicle_lock).
   toggleVehicleLock() {
     if (this.inVehicle) return this.applyVehicleLockToggle(this.vehicle);
-    const nearby = City.vehicles.filter(veh => veh.owner === 'player' && UTIL.dist(veh, this) < 3);
+    const nearby = City.vehicles.filter(veh => (this.ownedVehicles || []).includes(veh.id) && UTIL.dist(veh, this) < 3);
     if (!nearby.length) return announce('Aucun véhicule à vous à portée.', 'assertive');
     if (nearby.length === 1) return this.applyVehicleLockToggle(nearby[0]);
     // Plusieurs véhicules à vous à portée : on demande lequel plutôt que de
@@ -4262,7 +4309,7 @@ const Game = {
   },
   applyVehicleLockToggle(v) {
     if (!v) return announce('Aucun véhicule à vous à portée.', 'assertive');
-    if (v.owner !== 'player') return announce('Ce véhicule ne vous appartient pas.', 'assertive');
+    if (!(this.ownedVehicles || []).includes(v.id)) return announce('Ce véhicule ne vous appartient pas.', 'assertive');
     v.locked = !v.locked;
     sendWorldEdit('vehicle_lock', { id: v.id, locked: v.locked });
     AudioLib.playOnce('veh1_verrouillage', { volume: 0.5 });
@@ -4327,7 +4374,7 @@ const Game = {
     if (!all.length) return announce('Vous ne possédez aucun véhicule, et aucun n\'a été utilisé récemment.', 'assertive');
     if (all.length === 1) {
       const v = all[0];
-      if (v.owner === 'player') AudioLib.playPositional('veh_alarme_position', UTIL.clamp((v.x - this.x) / 20, -1, 1), 0.5);
+      if ((this.ownedVehicles || []).includes(v.id)) AudioLib.playPositional('veh_alarme_position', UTIL.clamp((v.x - this.x) / 20, -1, 1), 0.5);
       return this.setGuidance({ name: v.name, x: v.x, y: v.y });
     }
     el('menuTitle').textContent = 'Retrouver un véhicule';
@@ -4341,7 +4388,7 @@ const Game = {
       closeMenu();
       const v = all.find(vv => vv.id === sel.id);
       if (v) {
-        if (v.owner === 'player') AudioLib.playPositional('veh_alarme_position', UTIL.clamp((v.x - this.x) / 20, -1, 1), 0.5);
+        if ((this.ownedVehicles || []).includes(v.id)) AudioLib.playPositional('veh_alarme_position', UTIL.clamp((v.x - this.x) / 20, -1, 1), 0.5);
         this.setGuidance({ name: v.name, x: v.x, y: v.y });
       }
     });
