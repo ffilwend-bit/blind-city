@@ -467,7 +467,8 @@ const Game = {
     // restait complètement silencieux, alors qu'un vrai coup de frein
     // s'entend même en roulant doucement.
     if (speedRatioBefore > 0.08) {
-      if (cls.sport) RealEngine.brake(speedRatioBefore);
+      const stoppedNow = Math.abs(v.speed) < 0.02; // ce freinage vient de nous arrêter net
+      if (cls.sport) RealEngine.brake(speedRatioBefore, stoppedNow);
       else if (cls.electric) RealElectricEngine.brake(speedRatioBefore);
       else if (!cls.human && !cls.flies) RealEngine2.brake(speedRatioBefore);
     }

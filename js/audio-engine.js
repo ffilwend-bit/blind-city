@@ -840,13 +840,14 @@ const RealEngine = {
   active: false, vehicleId: null,
   lowKey: 'veh1_cruise', highKey: 'veh1_vitesse_stable',
   lastSpeedRatio: 0, lastEventTime: 0, startedAt: 0,
+  accelStreak: 0, decelStreak: 0, sonVitesseArmed: true,
   start(vehicleId) {
     if (this.active && this.vehicleId === vehicleId) return;
     if (this.active) this.stop();
     this.vehicleId = vehicleId;
     this.active = true;
     this.startedAt = Date.now();
-    this.lastSpeedRatio = 0;
+    this.lastSpeedRatio = 0; this.accelStreak = 0; this.decelStreak = 0; this.sonVitesseArmed = true;
     AudioLib.playOnce('veh1_demarrage', { volume: 0.6 });
   },
   stop() {
@@ -854,6 +855,10 @@ const RealEngine = {
     this.active = false; this.vehicleId = null;
     AudioLib.stopLoop(this.lowKey);
     AudioLib.stopLoop(this.highKey);
+    // Son d'arrêt moteur : les deux fichiers fournis (arret / arret_variable)
+    // n'étaient jusque-là jamais joués — le moteur sport coupait en silence
+    // total, alors que le véhicule normal et l'électrique ont bien le leur.
+    AudioLib.playOnce(UTIL.pick(['veh1_arret', 'veh1_arret_variable']), { volume: 0.5 });
   },
   // Appelé à chaque déplacement en véhicule thermique (voir driveVehicle).
   update(v, cls, speedRatio) {
@@ -875,6 +880,13 @@ const RealEngine = {
     const pitch = 0.85 + UTIL.clamp(((cls.baseFreq || 60) - 55) / 45, 0, 1) * 0.4;
     if (low) { low.volume = 0.32 * (1 - mix) + 0.05; low.playbackRate = (0.8 + speedRatio * 0.55) * pitch; }
     if (high) { high.volume = 0.4 * mix; high.playbackRate = (0.85 + speedRatio * 0.5) * pitch; }
+    // Vitesse de pointe atteinte : un seul déclenchement par "session" de
+    // vitesse (réarmé quand on redescend franchement), sur son propre canal
+    // exclusif pour ne jamais couper un son d'accélération/décélération.
+    if (speedRatio > 0.92 && this.sonVitesseArmed) {
+      this.sonVitesseArmed = false;
+      AudioLib.playOnce('veh1_son_vitesse', { volume: 0.35, exclusive: 'veh1_sonvitesse_event' });
+    } else if (speedRatio < 0.7) this.sonVitesseArmed = true;
     // Détection des évènements (accélération franche, décélération, freinage)
     // à partir de la vraie variation de vitesse — pas un minuteur aveugle.
     // Le seuil de décélération (0.18) était sensiblement plus strict que celui
@@ -884,23 +896,60 @@ const RealEngine = {
     const now = Date.now();
     const delta = speedRatio - this.lastSpeedRatio;
     this.lastSpeedRatio = speedRatio;
+    // En croisière stable (variation minime, vitesse soutenue) : petite
+    // touche de variété occasionnelle sur son PROPRE canal, sans jamais
+    // couper les sons d'accélération/décélération — juste une texture en
+    // plus, pas un évènement en soi.
+    if (Math.abs(delta) < 0.03 && speedRatio > 0.6 && UTIL.chance(0.02)) {
+      AudioLib.playOnce(UTIL.pick(['veh1_variation_haute_1', 'veh1_variation_haute_2']), { volume: 0.22, exclusive: 'veh1_variation_event' });
+    }
     if (now - this.lastEventTime < 650) return;
     if (delta > 0.14 && speedRatio > 0.15) { // il faut rouler un minimum : pas de son d'accélération à l'arrêt (tapotage)
       this.lastEventTime = now;
-      const key = delta > 0.3 ? 'veh1_accel_forte' : UTIL.pick(['veh1_accel_courte1', 'veh1_accel_courte2', 'veh1_accel_progressive2']);
-      AudioLib.playOnce(key, { volume: 0.4, exclusive: 'realengine_event' });
-      if (speedRatio > 0.75 && delta > 0.25) AudioLib.playOnce(UTIL.pick(['veh1_turbo_1', 'veh1_turbo_2']), { volume: 0.3, exclusive: 'realengine_event' });
+      this.decelStreak = 0;
+      this.accelStreak++;
+      // Amorce ("pre_accel") : sur son propre canal, JUSTE avant le son
+      // principal d'accélération, uniquement en reprenant depuis un régime
+      // bas (comme le temps de réponse d'un vrai moteur qui "avale" l'appui
+      // sur l'accélérateur avant de vraiment répondre). Ne coupe jamais le
+      // son principal puisqu'il joue sur un canal séparé, en même temps.
+      if (this.lastSpeedRatio - delta < 0.12) {
+        AudioLib.playOnce(UTIL.pick(['veh1_pre_accel_1', 'veh1_pre_accel_2', 'veh1_pre_accel_3', 'veh1_pre_accel_petit']), { volume: 0.25, exclusive: 'veh1_preaccel_event' });
+      }
+      // Accélération SOUTENUE (plusieurs évènements d'affilée sans relâcher) :
+      // un son long et continu au lieu de raccourcis qui se répètent en boucle.
+      const key = this.accelStreak >= 3 ? 'veh1_accel_longue' : delta > 0.3 ? 'veh1_accel_forte' : UTIL.pick(['veh1_accel_courte1', 'veh1_accel_courte2', 'veh1_accel_progressive1', 'veh1_accel_progressive2']);
+      AudioLib.playOnce(key, { volume: 0.4, exclusive: 'veh1_accel_event' });
+      // Le turbo est un effet qui se SUPERPOSE à l'accélération (pas qui la
+      // remplace) : canal exclusif séparé, sinon il coupait le son
+      // d'accélération lancé la ligne juste au-dessus, dans le même appel.
+      if (speedRatio > 0.75 && delta > 0.25) AudioLib.playOnce(UTIL.pick(['veh1_turbo_1', 'veh1_turbo_2']), { volume: 0.3, exclusive: 'veh1_turbo_event' });
+    } else if (delta > 0.04 && speedRatio > 0.1) {
+      // Micro-accélération : petites variations qui ne déclenchaient jusque-là
+      // aucun son (seuil de 0.14 trop haut pour elles) — canal séparé, léger.
+      this.lastEventTime = now;
+      this.accelStreak = 0; this.decelStreak = 0;
+      AudioLib.playOnce(UTIL.pick(['veh1_micro_accel_1', 'veh1_micro_accel_2', 'veh1_micro_accel_3', 'veh1_micro_accel_4', 'veh1_micro_accel_5']), { volume: 0.2, exclusive: 'veh1_microaccel_event' });
     } else if (delta < -0.12) {
       this.lastEventTime = now;
-      const key = speedRatio > 0.55 ? 'veh1_decel_haute_vitesse' : UTIL.pick(['veh1_decel_1', 'veh1_petit_decel_1', 'veh1_petit_decel_2']);
-      AudioLib.playOnce(key, { volume: 0.35, exclusive: 'realengine_event' });
+      this.accelStreak = 0;
+      this.decelStreak++;
+      // Décélération SOUTENUE (on lève le pied longtemps, sans freiner
+      // franchement) : un son long plutôt que les courts qui se répètent.
+      const key = this.decelStreak >= 3 ? 'veh1_decel_longue' : speedRatio > 0.55 ? 'veh1_decel_haute_vitesse' : UTIL.pick(['veh1_decel_1', 'veh1_petit_decel_1', 'veh1_petit_decel_2']);
+      AudioLib.playOnce(key, { volume: 0.35, exclusive: 'veh1_decel_event' });
     }
   },
   // Freinage volontaire (espace) : plus fort qu'une simple décélération.
   // Diffusé aux joueurs proches (passager compris) : avant, seul le
   // conducteur entendait son propre freinage.
-  brake(speedRatio) {
-    const key = speedRatio > 0.5 ? 'veh1_frenage_brusque_haute_vitesse' : UTIL.pick(['veh1_frenage_1', 'veh1_frenage_2', 'veh1_frenage_3', 'veh1_frenage_4', 'veh1_frenage_5']);
+  brake(speedRatio, stoppedNow) {
+    // Arrêt d'urgence : on roulait vite ET ce freinage nous a arrêté net
+    // (voir brakeVehicle) — son dédié, plus marqué qu'un simple freinage
+    // brusque à haute vitesse qui reste en mouvement.
+    const key = (stoppedNow && speedRatio > 0.4) ? 'veh1_stop_brusque'
+      : speedRatio > 0.5 ? 'veh1_frenage_brusque_haute_vitesse'
+      : UTIL.pick(['veh1_frenage_1', 'veh1_frenage_2', 'veh1_frenage_3', 'veh1_frenage_4', 'veh1_frenage_5']);
     AudioLib.playOnce(key, { volume: 0.45, exclusive: 'realengine_brake' });
     if (window.Net && Net.connected) Net.emitSound(key, { vol: 0.45 });
   },
@@ -953,13 +1002,17 @@ const RealAirEngine = {
 function createSampleEngine(keys) {
   return {
     active: false, vehicleId: null, startedAt: 0, lastSpeedRatio: 0, lastEventTime: 0, lastTier: null,
+    lastIdleSound: 0, vitesseStableArmed: true,
     start(vehicleId) {
       if (this.active && this.vehicleId === vehicleId) return;
       if (this.active) this.stop();
       this.vehicleId = vehicleId; this.active = true; this.startedAt = Date.now();
-      this.lastSpeedRatio = 0; this.lastTier = null;
+      this.lastSpeedRatio = 0; this.lastTier = null; this.vitesseStableArmed = true;
       if (keys.declic) AudioLib.playOnce(keys.declic, { volume: 0.4 });
       setTimeout(() => AudioLib.playOnce(keys.demarrage, { volume: 0.6 }), keys.declic ? 300 : 0);
+      // Petit son de "prise" du moteur juste après le démarrage, pour les
+      // moteurs qui en disposent (fichier fourni, jusque-là jamais utilisé).
+      if (keys.apresDemarrage) setTimeout(() => AudioLib.playOnce(keys.apresDemarrage, { volume: 0.35 }), (keys.declic ? 300 : 0) + 900);
     },
     stop() {
       if (!this.active) return;
@@ -984,10 +1037,30 @@ function createSampleEngine(keys) {
       const tier = speedRatio < 0.3 ? 'basse' : speedRatio < 0.7 ? 'moyenne' : 'haute';
       if (this.lastTier && tier !== this.lastTier && keys.transition) AudioLib.playOnce(keys.transition, { volume: 0.25, exclusive: keys.demarrage + '_event' });
       this.lastTier = tier;
+      const now = Date.now();
+      // Ralenti à l'arrêt, moteur tournant : sons occasionnels dédiés (fichiers
+      // fournis, jusque-là jamais utilisés), sur leur propre canal, sans jamais
+      // gêner les évènements d'accélération/décélération.
+      if (keys.repos && speedRatio < 0.02 && now - this.lastIdleSound > 6000 && UTIL.chance(0.15)) {
+        this.lastIdleSound = now;
+        AudioLib.playOnce(UTIL.pick(keys.repos), { volume: 0.2, exclusive: keys.demarrage + '_idle' });
+      }
+      // Vitesse soutenue atteinte : un seul déclenchement par "session" de
+      // vitesse (réarmé en redescendant), et un peu de texture ("ronflement")
+      // en croisière stable — mêmes principes que RealEngine (sport).
+      if (keys.vitesseStable) {
+        if (speedRatio > 0.85 && this.vitesseStableArmed) {
+          this.vitesseStableArmed = false;
+          AudioLib.playOnce(keys.vitesseStable, { volume: 0.3, exclusive: keys.demarrage + '_topspeed' });
+        } else if (speedRatio < 0.6) this.vitesseStableArmed = true;
+      }
+      if (keys.ronflement && Math.abs(speedRatio - this.lastSpeedRatio) < 0.03 && speedRatio > 0.5 && UTIL.chance(0.02)) {
+        AudioLib.playOnce(keys.ronflement, { volume: 0.2, exclusive: keys.demarrage + '_variation' });
+      }
       // Évènements ponctuels (accélération/décélération) selon la vraie
       // variation de vitesse — pas un minuteur aveugle.
-      const now = Date.now();
       const delta = speedRatio - this.lastSpeedRatio;
+      const prevSpeedRatio = this.lastSpeedRatio;
       this.lastSpeedRatio = speedRatio;
       if (now - this.lastEventTime < 700) return;
       if (delta > 0.14 && speedRatio > 0.15) { // pas de son d'accélération à l'arrêt (tapotage)
@@ -995,6 +1068,12 @@ function createSampleEngine(keys) {
         AudioLib.playOnce(delta > 0.3 ? keys.accelForte : UTIL.pick(keys.accels), { volume: 0.4, exclusive: keys.demarrage + '_event' });
       } else if (delta < -0.12) { // rapproché du seuil d'accélération : un ralentissement progressif n'atteignait presque jamais -0.18
         this.lastEventTime = now;
+        // Relâchement franc depuis une vitesse élevée : effet dédié
+        // ("relâchement turbo", fichier fourni, jusque-là jamais utilisé) sur
+        // son propre canal, en plus du son de décélération normal.
+        if (keys.relachementTurbo && prevSpeedRatio > 0.6 && delta < -0.25) {
+          AudioLib.playOnce(keys.relachementTurbo, { volume: 0.3, exclusive: keys.demarrage + '_turboRelease' });
+        }
         AudioLib.playOnce(speedRatio > 0.55 ? keys.decelLongue : UTIL.pick(keys.decels), { volume: 0.35, exclusive: keys.demarrage + '_event' });
       }
     },
@@ -1024,6 +1103,8 @@ const RealEngine2 = createSampleEngine({
   decels: ['veh2_decel_1', 'veh2_decel_douce', 'veh2_relachement_1', 'veh2_relachement_2'],
   decelLongue: 'veh2_decel_longue',
   frein: 'veh_frein_main', // vrai son de frein (jusque-là fourni mais jamais utilisé)
+  apresDemarrage: 'veh2_apres_demarrage', relachementTurbo: 'veh2_relachement_turbo',
+  repos: ['veh2_repos_1', 'veh2_repos_2'], ronflement: 'veh2_ronflement', vitesseStable: 'veh2_vitesse_stable',
 });
 // Moteur électrique : silence relatif, montée en régime linéaire, pas de
 // rugissement — utilisé pour les véhicules marqués `electric: true`.
