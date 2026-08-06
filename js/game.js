@@ -212,8 +212,12 @@ const Game = {
     // sortir un seul mot (nouvelle annonce = coupe la précédente). On espace donc
     // ces annonces routinières dans le temps ; les infos importantes (obstacle,
     // rencontre...) restent, elles, toujours annoncées immédiatement.
+    // Espacé de 900 ms à 3,5 s : à 900 ms, cette annonce purement routinière
+    // (on le sait déjà, la touche est maintenue) revenait sans arrêt pendant
+    // une marche continue, au point de saturer l'attention même en priorité
+    // 'polite'.
     const now = Date.now();
-    if (now - (this._lastMoveAnnounce || 0) > 900) {
+    if (now - (this._lastMoveAnnounce || 0) > 3500) {
       announce(opts.reverse ? 'Vous reculez.' : 'Vous avancez.', 'polite');
       this._lastMoveAnnounce = now;
     }
@@ -459,7 +463,10 @@ const Game = {
     // Vrai son de freinage à l'appui d'espace : avant, seul le kit sport avait
     // un crissement dédié — les autres véhicules (normaux, électriques)
     // restaient silencieux, le changement de régime étant à peine perceptible.
-    if (speedRatioBefore > 0.2) {
+    // Seuil abaissé (0,2 -> 0,08) : à vitesse de ville modérée, le freinage
+    // restait complètement silencieux, alors qu'un vrai coup de frein
+    // s'entend même en roulant doucement.
+    if (speedRatioBefore > 0.08) {
       if (cls.sport) RealEngine.brake(speedRatioBefore);
       else if (cls.electric) RealElectricEngine.brake(speedRatioBefore);
       else if (!cls.human && !cls.flies) RealEngine2.brake(speedRatioBefore);
@@ -1793,8 +1800,21 @@ const Game = {
       Audio.cash();
       this.guidanceTarget = null; this.guidanceAxis = null; this.guidancePath = null; this._pathGoal = null; this.guidanceFollowId = null; return;
     }
+    // Silence total si on ne progresse pas : avant, la voix continuait à
+    // répéter la consigne toutes les 2,5 s même à l'arrêt complet (stationné
+    // à pied ou véhicule immobile) — inutile et dérangeant.
+    const moving = (this.inVehicle && this.vehicle) ? Math.abs(this.vehicle.speed || 0) > 0.02
+      : UTIL.dist({ x: this.x, y: this.y }, this._lastGuidancePos || { x: this.x, y: this.y }) > 0.05;
+    this._lastGuidancePos = { x: this.x, y: this.y };
+    if (!force && !moving) return;
+
     const now = Date.now();
-    if (!force && now - this._lastGuidanceMsg < 2500) return;
+    // Intervalle de réévaluation adapté à la vitesse : plus on va vite, plus
+    // tôt une consigne de virage arrive (jusqu'à deux fois plus tôt à pleine
+    // vitesse), pour avoir le temps de réagir — avant, un intervalle fixe de
+    // 2,5 s ne tenait aucun compte de l'allure.
+    const speedRatio = (this.inVehicle && this.vehicle) ? UTIL.clamp(Math.abs(this.vehicle.speed || 0) / ((VEHICLE_CATALOG[this.vehicle.type] || {}).maxSpeed || 1), 0, 1) : 0;
+    if (!force && now - this._lastGuidanceMsg < 2500 - speedRatio * 1200) return;
     this._lastGuidanceMsg = now;
 
     // En vol (aéronef, altitude > 0) : on survole les bâtiments, donc une
@@ -1802,6 +1822,13 @@ const Game = {
     // qui contourne les immeubles — sinon le guidage faisait "tourner" un
     // avion en plein ciel comme s'il marchait entre des maisons.
     const vcls = this.inVehicle && this.vehicle ? VEHICLE_CATALOG[this.vehicle.type] : null;
+    // Mémorisé AVANT de recalculer l'instruction (qui écrase _lastTurnDiff en
+    // sous-main, voir _turnInstruction) : sert plus bas à ne reparler que si
+    // le VIRAGE À FAIRE change réellement, indépendamment de la distance en
+    // mètres qui, elle, varie en continu et rendait la comparaison de texte
+    // ("Tout droit, 40 mètres" puis "Tout droit, 37 mètres"...) presque
+    // toujours "différente" — d'où la voix qui semblait répéter sans arrêt.
+    const prevTurnDiff = this._lastTurnDiff;
     let instruction;
     if (vcls && vcls.flies && this.vehicle.altitude > 0) {
       instruction = this._flightInstruction(t);
@@ -1833,8 +1860,14 @@ const Game = {
     // simple bip suffit à indiquer où tourner (activé/désactivé par Maj+N).
     // La voix classique reste le mode par défaut, inchangé.
     if (CONFIG.GPS_BEEP_MODE) { this._playGuidanceBeep(this._lastTurnDiff || 0); return; }
+    // Petit bip de confirmation à CHAQUE recalcul (toujours audible, discret,
+    // jamais gênant) ; la phrase complète, elle, n'est reparlée que si le
+    // virage à faire a réellement changé (nouveau virage, ou retour à "tout
+    // droit") — avant, elle repassait en priorité 'interrupt' toutes les
+    // 2,5 s même sans rien de nouveau à dire, coupant systématiquement
+    // n'importe quelle autre annonce en cours, plus importante ou non.
     Audio.tone({ freq: 700, type: 'sine', duration: 0.1, gain: 0.08, pan: this.panForPoint(t.x, t.y) });
-    speak(instruction, 'interrupt');
+    if (force || this._lastTurnDiff !== prevTurnDiff) speak(instruction, 'assertive');
   },
   // Bip directionnel (mode Maj+N) : un bip aigu centré tout droit, un bip
   // panoramique à droite/gauche selon le virage, doublé si le virage est
@@ -2252,8 +2285,12 @@ const Game = {
       return;
     }
     if (this.inVehicle) return announce('Descendez d\'abord du véhicule.', 'assertive');
-    const v = City.vehicles.filter(vv => UTIL.dist(vv, this) < 2.5).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
-    const h = (City.houses || []).filter(hh => UTIL.dist(hh, this) < 2.5).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+    // Rayon aligné sur celui de toggleIndoor() (entrer dans un lieu) : 2,5
+    // cases était plus strict, donnant l'impression que la touche ne
+    // réagissait pas alors qu'on se croyait déjà "à côté" (juste hors de
+    // cette portée plus étroite).
+    const v = City.vehicles.filter(vv => UTIL.dist(vv, this) < 4).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
+    const h = (City.houses || []).filter(hh => UTIL.dist(hh, this) < 4).sort((a, b) => UTIL.dist(a, this) - UTIL.dist(b, this))[0];
     const vd = v ? UTIL.dist(v, this) : Infinity;
     const hd = h ? UTIL.dist(h, this) : Infinity;
     if (!v && !h) return announce('Rien à proximité sur quoi grimper : approchez-vous d\'un véhicule ou d\'une maison.', 'assertive');
@@ -2770,7 +2807,10 @@ const Game = {
     });
   },
   killNPC(npc) {
-    announce(`${npc.name} est hors combat.`, 'assertive');
+    // Le bruit de chute (ci-dessous) suffit déjà à savoir que la cible est
+    // hors combat : l'annonce vocale qui redisait "X est hors combat" en
+    // 'assertive' n'apportait rien de plus, mais coupait systématiquement
+    // toute autre annonce en cours (souvent plus importante en plein combat).
     const deathX = npc.x, deathY = npc.y;
     npc.dead = true; npc.knockedOut = true; // le corps reste sur place, fouillable (voir Game.searchTarget)
     AudioLib.playOnce('bruit_chute', { volume: 0.6 });
@@ -4245,12 +4285,24 @@ const Game = {
       // par findMyCar() : distinct du bruit de klaxon des autres véhicules
       // (NPC, collisions), pour qu'on le reconnaisse sans ambiguïté comme
       // « c'est le mien qui répond », qu'on soit à pied ou dans un autre véhicule.
-      const pan = this.panForPoint(v.x, v.y);
       const dist = UTIL.dist(v, this);
-      const vol = UTIL.clamp(0.9 - dist / 40, 0.15, 0.9);
-      AudioLib.playPositional('veh_alarme_position', pan, vol);
       const m = Math.round(dist * CONFIG.METERS_PER_TILE);
       announce(`${v.name} émet son signal de repérage à ${m} mètres, vers le ${UTIL.bearing(v.x - this.x, v.y - this.y)}.`, 'polite');
+      // Signal RÉPÉTÉ pendant quelques secondes, avec panoramique et volume
+      // mis à jour EN DIRECT selon votre position — avant, c'était un son
+      // ponctuel figé au moment du lancement : en vous approchant, vous
+      // éloignant, ou en tournant, le son restait exactement identique,
+      // inutile pour se guider à l'oreille comme dans la vraie vie.
+      const instanceId = 'findcar_' + v.id;
+      let ticks = 0;
+      const tick = () => {
+        const live = City.vehicles.find(vv => vv.id === v.id);
+        if (!live || this.inVehicle || ticks++ > 14) { AudioLib.stopLoopInstance(instanceId); return; }
+        const d = UTIL.dist(live, this);
+        AudioLib.playLoopInstance(instanceId, 'veh_alarme_position', UTIL.clamp(0.9 - d / 40, 0.1, 0.9), this.panForPoint(live.x, live.y));
+        setTimeout(tick, 500);
+      };
+      tick();
     };
     if (owned.length === 1) return honkVehicle(owned[0]);
     el('menuTitle').textContent = 'Faire sonner quel véhicule ?';

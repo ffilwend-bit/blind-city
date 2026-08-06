@@ -1000,11 +1000,13 @@ function createSampleEngine(keys) {
     },
     // Freinage volontaire (espace) : avant, seul le kit sport (RealEngine)
     // avait un vrai son de freinage — la majorité des véhicules (normaux et
-    // électriques) restait silencieuse au freinage, seul le changement
-    // progressif de régime étant (à peine) audible au pas suivant. Diffusé
-    // aux joueurs proches (passager compris), comme RealEngine.brake().
+    // électriques) rejouait un simple son de décélération générique (pas un
+    // vrai bruit de frein), ou gardait le silence à faible vitesse. keys.frein
+    // (fichier fourni, jusque-là jamais utilisé) donne maintenant un vrai son
+    // de freinage dédié. Diffusé aux joueurs proches (passager compris),
+    // comme RealEngine.brake().
     brake(speedRatio) {
-      const key = speedRatio > 0.5 ? keys.decelLongue : UTIL.pick(keys.decels);
+      const key = keys.frein || (speedRatio > 0.5 ? keys.decelLongue : UTIL.pick(keys.decels));
       AudioLib.playOnce(key, { volume: 0.5, exclusive: keys.demarrage + '_event' });
       if (window.Net && Net.connected) Net.emitSound(key, { vol: 0.5 });
     },
@@ -1021,6 +1023,7 @@ const RealEngine2 = createSampleEngine({
   accelForte: 'veh2_accel_forte',
   decels: ['veh2_decel_1', 'veh2_decel_douce', 'veh2_relachement_1', 'veh2_relachement_2'],
   decelLongue: 'veh2_decel_longue',
+  frein: 'veh_frein_main', // vrai son de frein (jusque-là fourni mais jamais utilisé)
 });
 // Moteur électrique : silence relatif, montée en régime linéaire, pas de
 // rugissement — utilisé pour les véhicules marqués `electric: true`.
@@ -1032,6 +1035,7 @@ const RealElectricEngine = createSampleEngine({
   accelForte: 'veh_elec_accel_forte',
   decels: ['veh_elec_decel_1', 'veh_elec_decel_douce', 'veh_elec_relachement_1', 'veh_elec_relachement_2'],
   decelLongue: 'veh_elec_decel_longue',
+  frein: 'veh_frein_main', // même son de frein réel que les véhicules normaux
 });
 
 const AudioLib = {
