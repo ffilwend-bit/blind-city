@@ -298,17 +298,45 @@ function createPeerVoiceMesh(opts) {
   };
 }
 
-// Voix de proximité : lecture directe, sans filtre (comme entendre une vraie voix).
+// Voix de proximité : sans filtre de timbre (comme entendre une vraie voix),
+// mais routée par le graphe Web Audio (comme TalkieVoice ci-dessous) pour
+// pouvoir faire varier le volume ET le panoramique EN DIRECT selon la
+// distance/position réelles — avant, un <audio> lu à volume fixe ne faisait
+// AUCUNE différence entre quelqu'un juste à côté et quelqu'un à la limite du
+// rayon d'écoute, puis la connexion se fermait d'un coup en sortant du rayon
+// (comme un appel qui raccroche), au lieu de s'estomper progressivement.
 const ProxVoice = createPeerVoiceMesh({
   channel: 'prox',
   onRemoteStream(peerId, stream, entry) {
-    if (!entry.remoteEl) { entry.remoteEl = new (window.Audio)(); entry.remoteEl.autoplay = true; }
-    entry.remoteEl.srcObject = stream;
-    entry.remoteEl.play().catch(() => {});
+    const ctx = Audio.ensure();
+    const src = ctx.createMediaStreamSource(stream);
+    const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    const gain = ctx.createGain(); gain.gain.value = 1;
+    if (panner) src.connect(panner).connect(gain).connect(Audio.master);
+    else src.connect(gain).connect(Audio.master);
+    entry.audioNodes = { src, panner, gain };
   },
-  onRemoteClose(peerId, entry) { if (entry.remoteEl) entry.remoteEl.srcObject = null; },
+  onRemoteClose(peerId, entry) {
+    if (entry.audioNodes) { try { entry.audioNodes.gain.disconnect(); } catch (e) { /* ignore */ } }
+  },
 });
 window.ProxVoice = ProxVoice;
+// Volume ET panoramique mis à jour en direct selon la distance/position
+// réelle de chaque pair connecté — appelé au même rythme qu'evaluateProxVoice
+// (voir plus bas). Estompage progressif jusqu'au bord du rayon d'écoute
+// plutôt qu'un volume constant suivi d'une coupure nette.
+function updateProxVoiceSpatial() {
+  ProxVoice.peers.forEach((entry, peerId) => {
+    if (!entry.audioNodes) return;
+    const p = Net.remotePlayers.get(peerId);
+    if (!p) return;
+    const d = UTIL.dist(Game, p);
+    const ctx = Audio.ensure();
+    const now = ctx.currentTime;
+    entry.audioNodes.gain.gain.setTargetAtTime(UTIL.clamp(1 - d / PROX_VOICE_RADIUS, 0.05, 1), now, 0.2);
+    if (entry.audioNodes.panner) entry.audioNodes.panner.pan.setTargetAtTime(Game.panForPoint(p.x, p.y), now, 0.2);
+  });
+}
 
 // Voix du talkie-walkie : passe dans un filtre passe-bande + légère saturation +
 // compression pour sonner comme une vraie radio, jamais en son "propre".
@@ -350,7 +378,10 @@ function getNetworkTypeLabel() {
 }
 window.getNetworkTypeLabel = getNetworkTypeLabel;
 
-const PROX_VOICE_RADIUS = 15; // même rayon que le chat RP texte
+// Réduit de 15 cases (60 m) à 5 (20 m) : une vraie voix ne porte pas à 60 m,
+// et le volume constant jusqu'au bord (voir updateProxVoiceSpatial) rendait
+// cette portée d'autant plus irréaliste.
+const PROX_VOICE_RADIUS = 5;
 function evaluateProxVoice() {
   if (!Game.voiceOpen || !Net.connected) { if (ProxVoice.peers.size) ProxVoice.evaluate(new Set()); return; }
   const desired = new Set();
@@ -358,6 +389,7 @@ function evaluateProxVoice() {
     if (p.voiceOpen && UTIL.dist(Game, p) <= PROX_VOICE_RADIUS) desired.add(pid);
   });
   ProxVoice.evaluate(desired);
+  updateProxVoiceSpatial();
 }
 function evaluateTalkieVoice() {
   if (!Game.talkie.on || !Net.connected) { if (TalkieVoice.peers.size) TalkieVoice.evaluate(new Set()); return; }
