@@ -664,16 +664,30 @@ const Game = {
         if (!p.inVehicle || !p.vehicleType) return;
         const cls = VEHICLE_CATALOG[p.vehicleType];
         if (!cls || cls.human) return;
-        const radius = cls.flies ? 45 : (airborne ? 28 : 16);
         const dist = UTIL.dist(p, this);
-        if (dist > radius) return;
-        const instanceId = 'ambveh_' + pid;
-        active.add(instanceId);
-        const key = cls.flies ? (p.vehicleType === 'avion' ? 'avion_stable' : 'helico_stable') : cls.electric ? 'veh_elec_vitesse_moyenne' : cls.sport ? 'veh1_cruise' : 'veh2_vitesse_moyenne';
-        const ratio = UTIL.clamp(p.vehicleSpeedRatio || 0, 0, 1);
-        const vol = UTIL.clamp((1 - dist / radius) * (0.15 + ratio * 0.25), 0, 0.4);
         const pan = this.panForPoint(p.x, p.y);
-        AudioLib.playLoopInstance(instanceId, key, vol, pan);
+        const radius = cls.flies ? 45 : (airborne ? 28 : 16);
+        if (dist <= radius) {
+          const instanceId = 'ambveh_' + pid;
+          active.add(instanceId);
+          const key = cls.flies ? (p.vehicleType === 'avion' ? 'avion_stable' : 'helico_stable') : cls.electric ? 'veh_elec_vitesse_moyenne' : cls.sport ? 'veh1_cruise' : 'veh2_vitesse_moyenne';
+          const ratio = UTIL.clamp(p.vehicleSpeedRatio || 0, 0, 1);
+          const vol = UTIL.clamp((1 - dist / radius) * (0.15 + ratio * 0.25), 0, 0.4);
+          AudioLib.playLoopInstance(instanceId, key, vol, pan);
+        }
+        // Sirène : le VRAI fichier audio (même son que celui qui l'a activée),
+        // en boucle continue et spatialisée selon la distance/position —
+        // avant, les autres joueurs n'entendaient qu'un son de synthèse court
+        // ré-émis toutes les 850 ms, haché et bien différent du son réel.
+        // Portée indépendante de celle du moteur : une sirène s'entend de
+        // plus loin.
+        const sirenKey = p.siren ? SIREN_SOUNDS[p.vehicleType] : null;
+        const sirenRadius = 40;
+        if (sirenKey && dist <= sirenRadius) {
+          const sirenId = 'ambsiren_' + pid;
+          active.add(sirenId);
+          AudioLib.playLoopInstance(sirenId, sirenKey, UTIL.clamp((1 - dist / sirenRadius) * 0.6, 0, 0.6), pan);
+        }
       });
     }
     // Circulation de PNJ (voir tickNpcTraffic) : même traitement, pour que ces
@@ -2333,7 +2347,11 @@ const Game = {
     const cls = this.inVehicle && this.vehicle ? VEHICLE_CATALOG[this.vehicle.type] : null;
     const airborne = !!(cls && cls.flies && this.altitude > 5);
     const RADIUS = airborne ? CONFIG.SCAN_RADIUS * 2.5 : CONFIG.SCAN_RADIUS;
-    const npcs = City.npcs.filter(n => UTIL.dist(n, this) < RADIUS).map(n => ({ ...n, dist: UTIL.dist(n, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(n.x - this.x, n.y - this.y) }));
+    // !n.dead : un PNJ éliminé (voir killNPC) reste sur place, fouillable,
+    // mais ne doit plus apparaître comme cible vivante — avant, un scan après
+    // avoir descendu un garde continuait à l'afficher exactement comme s'il
+    // était toujours debout, sans le moindre indice qu'il était hors combat.
+    const npcs = City.npcs.filter(n => !n.dead && UTIL.dist(n, this) < RADIUS).map(n => ({ ...n, dist: UTIL.dist(n, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(n.x - this.x, n.y - this.y) }));
     const realPlayers = Array.from(Net.remotePlayers.values()).filter(p => UTIL.dist(p, this) < RADIUS).map(p => ({
       id: p.id, name: `${p.firstName} ${p.lastName}`, job: 'joueur réel', gender: p.gender, outfit: p.outfit, isPlayer: true,
       x: p.x, y: p.y, dist: UTIL.dist(p, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(p.x - this.x, p.y - this.y),
@@ -2373,20 +2391,25 @@ const Game = {
   },
   target(index) {
     const n = this.scannedTargets[index - 1];
-    if (!n) return announce('Cible invalide.', 'assertive');
+    // Cibler (touches 1-9) est une COMMANDE explicite du joueur, pas une
+    // narration passive : elle doit couper net ce qui est en train d'être
+    // dit (la narration du scan, souvent longue, ou toute autre annonce) —
+    // avant, la priorité 'assertive'/'combat' ne faisait QUE se mettre en
+    // file d'attente sans jamais interrompre la parole en cours, donnant
+    // l'impression que la touche ne réagissait pas tant que le scan parlait.
+    if (!n) return announce('Cible invalide.', 'interrupt');
     this.lockedTarget = n;
     if (n.isVehicle) {
-      announce(`Cible verrouillée : ${n.name} (véhicule), ${Math.round(n.dist)} mètres, ${n.bearing}.`, 'assertive');
+      announce(`Cible verrouillée : ${n.name} (véhicule), ${Math.round(n.dist)} mètres, ${n.bearing}.`, 'interrupt');
       updateHud();
       return;
     }
     // Verrouiller un VRAI joueur (potentiellement un allié venu avec vous, pas
     // forcément un ennemi) mérite une confirmation qu'on ne peut pas louper :
-    // priorité 'combat' (passe devant les annonces moins urgentes en attente)
-    // + un bip distinct, pour éviter de tirer par erreur sur quelqu'un de son
+    // un bip distinct, pour éviter de tirer par erreur sur quelqu'un de son
     // groupe faute d'avoir bien entendu qui vient d'être verrouillé.
     if (n.isPlayer && window.Audio && Audio.beep) Audio.beep(0, 500);
-    announce(`Cible verrouillée : ${n.name}, ${n.isPlayer ? 'joueur réel' : n.job}, ${Math.round(n.dist)} mètres, ${n.bearing}.`, n.isPlayer ? 'combat' : 'assertive');
+    announce(`Cible verrouillée : ${n.name}, ${n.isPlayer ? 'joueur réel' : n.job}, ${Math.round(n.dist)} mètres, ${n.bearing}.`, 'interrupt');
     // Braquer une arme en verrouillant : la cible PNJ réagit tout de suite
     // (mains en l'air si acculée, sinon fuite) — le reste est géré par npcTick.
     if (this.weaponOut && !n.isPlayer) {
@@ -2708,7 +2731,22 @@ const Game = {
     if (!it) return announce('Vous n\'avez pas de grenade. Le marché noir en vend.', 'assertive');
     if (this.grenadeFusing) return announce('Une grenade est déjà dégoupillée, attendez l\'explosion.', 'assertive');
     const target = this.getLiveTarget();
-    const cx = target ? target.x : this.x, cy = target ? target.y : this.y;
+    // Portée réaliste d'un lancer de grenade à la main : environ 35 m (~9
+    // cases à 4 m/case) pour un lancer efficace — avant, elle pouvait
+    // exploser sur une cible verrouillée à n'importe quelle distance, ce qui
+    // n'a aucun sens pour un lancer à bras. Au-delà, elle retombe avant
+    // d'arriver, plus près de vous, comme dans la vraie vie.
+    const MAX_THROW = 9;
+    let cx = target ? target.x : this.x, cy = target ? target.y : this.y;
+    if (target) {
+      const throwDist = UTIL.dist(target, this);
+      if (throwDist > MAX_THROW) {
+        const ratio = MAX_THROW / throwDist;
+        cx = this.x + (target.x - this.x) * ratio;
+        cy = this.y + (target.y - this.y) * ratio;
+        announce(`${target.name} est hors de portée de lancer (${Math.round(throwDist * CONFIG.METERS_PER_TILE)} m, portée maximale environ ${MAX_THROW * CONFIG.METERS_PER_TILE} m) : la grenade retombe avant d'arriver.`, 'assertive');
+      }
+    }
     this.removeItem(it.id, 1);
     this.grenadeFusing = true;
     announce('Grenade dégoupillée ! Mettez-vous à couvert.', 'assertive');
@@ -2771,12 +2809,13 @@ const Game = {
     if (!witnesses.length) return;
     const chosen = [];
     for (let i = 0; i < Math.min(count, witnesses.length); i++) chosen.push(UTIL.pick(witnesses));
+    const muffle = this.vehicleSoundMuffle();
     chosen.forEach((n, i) => {
       setTimeout(() => {
         const pool = group.filter(l => l.gender === n.gender);
         const line = UTIL.pick(pool.length ? pool : group);
         const pan = Math.max(-1, Math.min(1, (n.x - this.x) / 15));
-        AudioLib.playPositional(line.key, pan, 0.85);
+        AudioLib.playPositional(line.key, pan, 0.85 * muffle);
         // Comme dans GTA RP : les autres joueurs réels à proximité entendent
         // aussi cette réaction de PNJ, pas seulement soi-même.
         if (Net.connected) Net.emitSound(line.key, { vol: 0.6 });
@@ -2785,6 +2824,19 @@ const Game = {
   },
   // Alias conservé pour compatibilité avec le code existant.
   npcPanicReaction(cx, cy, opts = {}) { this.npcVoiceReaction(cx, cy, opts); },
+  // Atténuation des sons extérieurs (paroles des PNJ) selon où l'on se
+  // trouve : dans la vraie vie, un habitacle fermé étouffe déjà beaucoup les
+  // bruits du dehors, et en plein vol on n'entend quasiment plus rien au
+  // sol — avant, les répliques des PNJ passaient exactement comme à pied,
+  // que l'on soit enfermé dans une voiture ou en plein vol en avion/hélico.
+  vehicleSoundMuffle() {
+    if (!this.inVehicle || !this.vehicle) return 1;
+    const vcls = VEHICLE_CATALOG[this.vehicle.type];
+    if (!vcls) return 1;
+    if (vcls.flies && this.altitude > 5) return 0.08; // en plein vol : quasiment rien du sol
+    if (!vcls.human && vcls.doors > 0) return 0.3; // habitacle fermé (pas une moto) : très étouffé
+    return 1;
+  },
 
   // Bribes de conversation de passants entendues en marchant près d'un PNJ
   // (pas d'interaction directe) : donne l'impression d'une ville vivante,
@@ -4991,6 +5043,10 @@ const Game = {
       };
       City.npcs.push(npc); es.npcIds.push(npc.id);
     }
+    // Réplique hostile AVANT le premier tir (pas seulement pendant l'échange,
+    // voir resolveNpcShotAtPlayer) : le joueur entend l'embuscade réagir dès
+    // qu'elle se déclenche, avant de commencer à essuyer des tirs.
+    this.npcVoiceReaction(this.vehicle.x, this.vehicle.y, { group: 'enerve', count: 1, radius: 14 });
   },
   tickEscorte(m) {
     if (!this.escorteState) return; // le menu s'ouvre via interact(), voir openEscorteBoardMenu
@@ -5205,6 +5261,9 @@ const Game = {
         announce(`${g.name} vous repère ! L'alarme se déclenche.`, 'assertive');
         this.reportCrimeToPolice('intrusion', 'Intrusion détectée sur un site industriel');
         this.sabotageState = { missionId: m.id, combat: true };
+        // Réplique hostile AVANT le premier tir (pas seulement pendant
+        // l'échange, voir resolveNpcShotAtPlayer).
+        this.npcVoiceReaction(g.x, g.y, { group: 'enerve', count: 1, radius: 14 });
       }
     });
     if (UTIL.dist({ x: this.x, y: this.y }, { x: m.objectiveX, y: m.objectiveY }) < 2 && !this.sabotageState?.combat) {
@@ -5322,6 +5381,9 @@ const Game = {
       };
       City.npcs.push(npc); ds.npcIds.push(npc.id);
     }
+    // Réplique hostile AVANT le premier tir (pas seulement pendant
+    // l'échange, voir resolveNpcShotAtPlayer).
+    this.npcVoiceReaction(this.x, this.y, { group: 'enerve', count: Math.min(2, count), radius: 20 });
   },
 
   /* ==========================================================
@@ -5385,6 +5447,9 @@ const Game = {
         this.convoyState = { missionId: m.id, lastReinforce: 0 };
         this.reportCrimeToPolice('coups_de_feu', 'Fusillade lors d\'une attaque de convoi');
         announce('Les deux extrémités du convoi sont engagées à la fois ! Neutralisez les gardes avant qu\'un camp ne reçoive du renfort.', 'assertive');
+        // Réplique hostile AVANT le premier tir (pas seulement pendant
+        // l'échange, voir resolveNpcShotAtPlayer).
+        this.npcVoiceReaction(m.frontPoint.x, m.frontPoint.y, { group: 'enerve', count: 1, radius: 20 });
       }
       return;
     }
@@ -5459,6 +5524,10 @@ const Game = {
     if (guard && !guard.dead) {
       const d = UTIL.dist(guard, this);
       if (d < 8) {
+        // Réplique hostile AVANT le premier tir (une seule fois, à la
+        // première détection) — avant, ce garde ouvrait le feu en silence,
+        // sans le moindre avertissement.
+        if (!ds.spotted) { ds.spotted = true; announce(`${guard.name} vous repère !`, 'assertive'); this.npcVoiceReaction(guard.x, guard.y, { group: 'enerve', count: 1, radius: 14 }); }
         const weapon = WEAPON_CATALOG[guard.weapon];
         if (weapon && this.missionCombatTick('depot') && UTIL.chance(Math.max(0.05, 0.2 - d * 0.015))) this.resolveNpcShotAtPlayer(guard, weapon, d, 8);
         guard.x += Math.sign(this.x - guard.x); guard.y += Math.sign(this.y - guard.y);
@@ -5498,6 +5567,9 @@ const Game = {
       City.npcs.push(npc);
       this.vipState.lastAttackerId = npc.id;
       announce('Une embuscade vous prend pour cible pendant l\'extraction !', 'assertive');
+      // Réplique hostile AVANT le premier tir (pas seulement pendant
+      // l'échange, voir resolveNpcShotAtPlayer).
+      this.npcVoiceReaction(npc.x, npc.y, { group: 'enerve', count: 1, radius: 14 });
     }
     if (this.vipState.lastAttackerId) {
       const attacker = City.npcs.find(n => n.id === this.vipState.lastAttackerId);
@@ -5632,7 +5704,13 @@ const Game = {
     squad.forEach(n => {
       const d = UTIL.dist(n, this);
       if (d > 12) return;
-      if (d < 8 && !this.stashState) { this.stashState = 'engaged'; this.reportCrimeToPolice('coups_de_feu', 'Fusillade sur une planque gardée'); announce('Les vigiles vous repèrent et ouvrent le feu !', 'assertive'); }
+      if (d < 8 && !this.stashState) {
+        this.stashState = 'engaged'; this.reportCrimeToPolice('coups_de_feu', 'Fusillade sur une planque gardée');
+        announce('Les vigiles vous repèrent et ouvrent le feu !', 'assertive');
+        // Réplique hostile AVANT le premier tir (pas seulement pendant
+        // l'échange, voir resolveNpcShotAtPlayer).
+        this.npcVoiceReaction(n.x, n.y, { group: 'enerve', count: 1, radius: 14 });
+      }
     });
     if (this.missionCombatTick('planque')) squad.forEach(n => {
       const d = UTIL.dist(n, this);
