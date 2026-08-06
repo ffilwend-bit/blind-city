@@ -1349,7 +1349,12 @@ Game.openVehicleMenu = function() {
     // monté : on peut consulter ses infos, et accéder à son coffre s'il est
     // déverrouillé ou si c'est le vôtre.
     el('menuTitle').textContent = `Véhicule : ${v.name}`;
-    const accessible = !v.locked || v.owner === 'player';
+    // v.owner === 'player' est un indicateur générique ("un joueur en est
+    // propriétaire", vrai aussi pour le véhicule d'un AUTRE joueur, stocké
+    // sur l'objet partagé) — pas "m'appartient à MOI" : accordait à tort
+    // l'accès au coffre d'un véhicule verrouillé appartenant à quelqu'un
+    // d'autre, dès lors qu'il l'avait lui-même acheté.
+    const accessible = !v.locked || (this.ownedVehicles || []).includes(v.id);
     const items = [
       { id: 'info', title: 'ℹ️ Infos du véhicule', desc: 'Puissance, essence, état, portes, passagers.' },
       { id: 'trunk', title: '📦 Coffre', desc: accessible ? 'Déposer ou récupérer des objets.' : 'Véhicule verrouillé : coffre inaccessible.' },

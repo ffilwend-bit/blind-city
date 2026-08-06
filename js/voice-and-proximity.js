@@ -186,6 +186,10 @@ function createPeerVoiceMesh(opts) {
 
     async ensureLocalStream() {
       if (this.localStream) return this.localStream;
+      // Source non-microphone (ex. MusicVoice, qui capture la lecture de
+      // MusicPlayer) : rien à demander comme permission, pas de message
+      // "micro indisponible" qui n'aurait aucun sens ici.
+      if (opts.getLocalStream) { this.localStream = opts.getLocalStream() || null; return this.localStream; }
       // evaluate() tourne toutes les secondes : sans temporisation, un micro
       // indisponible (permission refusée, périphérique déjà utilisé...) faisait
       // retenter getUserMedia() et réannoncer "Micro indisponible" CHAQUE
@@ -364,6 +368,50 @@ const TalkieVoice = createPeerVoiceMesh({
 });
 window.TalkieVoice = TalkieVoice;
 
+// Musique personnelle (MusicPlayer) diffusée aux joueurs réels à portée —
+// avant, elle ne jouait QUE chez celui qui l'avait lancée : personne d'autre
+// ne l'entendait, enceinte fixe ou radio portable. Même mécanisme que
+// ProxVoice/TalkieVoice (maillage WebRTC), mais la "voix" locale envoyée est
+// captée depuis la lecture de MusicPlayer (HTMLMediaElement.captureStream)
+// au lieu du microphone — rien à autoriser, pas de message d'erreur micro.
+const MusicVoice = createPeerVoiceMesh({
+  channel: 'music',
+  getLocalStream: () => (window.MusicPlayer && MusicPlayer.audioEl && MusicPlayer.audioEl.captureStream) ? MusicPlayer.audioEl.captureStream() : null,
+  onRemoteStream(peerId, stream, entry) {
+    const ctx = Audio.ensure();
+    const src = ctx.createMediaStreamSource(stream);
+    const gain = ctx.createGain(); gain.gain.value = 0.5;
+    src.connect(gain).connect(Audio.master);
+    entry.audioNodes = { src, gain };
+  },
+  onRemoteClose(peerId, entry) {
+    if (entry.audioNodes) { try { entry.audioNodes.gain.disconnect(); } catch (e) { /* ignore */ } }
+  },
+});
+window.MusicVoice = MusicVoice;
+// Même rayon d'atténuation que MusicPlayer.updateSpatialGain() (dehors), pour
+// rester cohérent entre ce qu'entend celui qui diffuse et ceux qui écoutent.
+const MUSIC_VOICE_RADIUS = 25;
+function evaluateMusicVoice() {
+  if (!window.MusicPlayer || !MusicPlayer.playing || typeof Net === 'undefined' || !Net.connected) {
+    if (MusicVoice.peers.size) MusicVoice.evaluate(new Set());
+    return;
+  }
+  // Position de la source : l'enceinte fixe (maison), sinon le joueur
+  // lui-même (radio portable/autoradio, qui le suit partout).
+  const src = (MusicPlayer.sourceRef && MusicPlayer.sourceRef.house) ? MusicPlayer.sourceRef.house : Game;
+  const desired = new Set();
+  Net.remotePlayers.forEach((p, pid) => { if (UTIL.dist(src, p) <= MUSIC_VOICE_RADIUS) desired.add(pid); });
+  MusicVoice.evaluate(desired);
+  MusicVoice.peers.forEach((entry, peerId) => {
+    if (!entry.audioNodes) return;
+    const p = Net.remotePlayers.get(peerId);
+    if (!p) return;
+    const ctx = Audio.ensure();
+    entry.audioNodes.gain.gain.setTargetAtTime(MusicPlayer.volume * Math.max(0, 1 - UTIL.dist(src, p) / MUSIC_VOICE_RADIUS), ctx.currentTime, 0.3);
+  });
+}
+
 // Type de connexion réseau (Wi-Fi / données mobiles) : utile pour diagnostiquer
 // soi-même pourquoi la voix de proximité passe ou pas — en données mobiles, le
 // lien direct échoue souvent (NAT symétrique/CGNAT) et tout repose sur le
@@ -399,7 +447,7 @@ function evaluateTalkieVoice() {
   });
   TalkieVoice.evaluate(desired);
 }
-setInterval(() => { evaluateProxVoice(); evaluateTalkieVoice(); }, 1000);
+setInterval(() => { evaluateProxVoice(); evaluateTalkieVoice(); evaluateMusicVoice(); }, 1000);
 
 function toggleProxVoice() {
   Game.voiceOpen = !Game.voiceOpen;
