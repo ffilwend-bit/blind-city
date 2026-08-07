@@ -4575,7 +4575,40 @@ const Game = {
       );
       return;
     }
+    // Missions extrêmes JOUABLES SEUL (pas dans MULTIPLAYER_REQUIRED_MISSION_
+    // TYPES ci-dessus, qui l'exigent) : avant, rien ne permettait d'y jouer à
+    // plusieurs. L'invitation par identifiant reste ENTIÈREMENT FACULTATIVE —
+    // refuser ou ignorer démarre la mission normalement en solo.
+    if (m.extreme && Net.connected && !m._invitePrompted) {
+      m._invitePrompted = true;
+      AccessibleConfirm.open(
+        'Inviter des coéquipiers ?',
+        `Mission extrême « ${m.title} » : voulez-vous inviter d'autres joueurs par leur identifiant pour la jouer à plusieurs ? Facultatif : la mission reste jouable seul si vous refusez.`,
+        (acc) => {
+          if (acc) this.inviteToMission(m);
+          this.finishActivateMission(m);
+        }
+      );
+      return;
+    }
     this.finishActivateMission(m);
+  },
+  // Invite d'autres joueurs (par identifiant) à rejoindre une mission
+  // extrême JOUABLE SEUL : chacun reçoit une notification avec le lieu de
+  // rendez-vous et peut l'accepter ou la refuser (voir le gestionnaire
+  // 'mission_invite' dans network.js) — un simple toggle, sans rien imposer.
+  inviteToMission(m) {
+    AccessibleTextPrompt.open(
+      'Inviter par identifiant',
+      'Saisissez les identifiants des joueurs à inviter, séparés par des virgules.',
+      '',
+      (input) => {
+        const ids = (input || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (!ids.length) return;
+        ids.forEach(id => Net.send({ type: 'mission_invite', targetId: 'p' + id.replace(/^p/, ''), missionTitle: m.title, missionType: m.type, x: m.x, y: m.y }));
+        announce(`Invitation envoyée à : ${ids.join(', ')}.`, 'polite');
+      }
+    );
   },
   finishActivateMission(m) {
     // Guidage adapté à chaque mission : celles qui ont déjà leur propre
