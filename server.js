@@ -209,6 +209,23 @@ const CHAT_RADIUS = 15;      // distance (en cases) pour s'entendre parler en RP
 const SOUND_RADIUS = 30;     // distance (en cases, ~120 m) pour entendre les sons du monde d'un autre joueur
 const FREQ_TOLERANCE = 0.05; // tolérance de fréquence pour le talkie-walkie (en MHz)
 const WORLD_TICK_MS = 250;   // fréquence de diffusion des positions (~4 fois par seconde)
+// Bornes de validation pour les coups portés à un autre VRAI joueur
+// (player_hit/player_punch) : le client calcule et envoie le dégât (le
+// serveur ne connaît pas l'arme utilisée), donc on ne peut pas revalider le
+// calcul exact, mais on borne ce qui est physiquement plausible dans ce jeu
+// et on exige une vraie proximité, pour empêcher un client modifié
+// d'infliger des dégâts arbitraires ou de tirer à travers toute la carte.
+// - MAX_HIT_DAMAGE couvre le coup le plus puissant hors tête (canon de char,
+//   120, voir Game.fireTankCannon côté client) avec marge.
+// - MAX_HEADSHOT_DAMAGE couvre le sniper à la tête (75 × 2, avant réduction
+//   par la distance) avec marge.
+// - MAX_HIT_RANGE couvre la plus longue portée d'arme (sniper, 90 cases),
+//   étendue par le bonus de hauteur (×1,6 en grimpant, voir Game.shoot).
+const MAX_HIT_RANGE = 150;
+const MAX_HIT_DAMAGE = 140;
+const MAX_HEADSHOT_DAMAGE = 160;
+const MAX_PUNCH_DAMAGE = 30;
+const MIN_HIT_INTERVAL_MS = 60; // sous la cadence de l'arme la plus rapide du jeu (UZI, ~80 ms)
 
 // Sert aussi le jeu lui-même (HTML, JS, sons) : quelqu'un visitant l'adresse
 // du serveur dans son navigateur reçoit directement le jeu, sans avoir à
@@ -353,6 +370,17 @@ function publicState(p) {
 }
 
 function dist(a, b) { return Math.hypot((a.x || 0) - (b.x || 0), (a.y || 0) - (b.y || 0)); }
+// Anti-spam générique par joueur et par catégorie d'action (ex. dons
+// d'argent, signalements) : borne l'ampleur d'un abus automatisé en
+// attendant une vraie autorité serveur sur ces systèmes. Retourne true si
+// l'action doit être BLOQUÉE (trop rapprochée de la précédente du même type).
+function isRateLimited(player, key, ms) {
+  player._rateLimits = player._rateLimits || {};
+  const now = Date.now();
+  if (now - (player._rateLimits[key] || 0) < ms) return true;
+  player._rateLimits[key] = now;
+  return false;
+}
 
 // Démarre un appel entre deux joueurs, que ce soit via un contact (call_offer)
 // ou en composant un numéro (dial_number) — même minuterie de 30 secondes,
@@ -483,6 +511,15 @@ wss.on('connection', (ws, req) => {
         return;
       }
       player.accountUsername = username;
+      // Restaure le rôle/grade policier depuis la DERNIÈRE sauvegarde du
+      // compte authentifié — seul point de confiance légitime maintenant que
+      // 'state' ne les accepte plus du client à chaque envoi (voir plus
+      // haut) : le rôle a déjà été validé par staff_grant_job/promote_police
+      // avant d'être sauvegardé, on peut donc le restaurer sans revalider.
+      if (account.saveData) {
+        if (typeof account.saveData.role === 'string') player.role = account.saveData.role;
+        if (typeof account.saveData.policeRank === 'string' || account.saveData.policeRank === null) player.policeRank = account.saveData.policeRank;
+      }
       send(ws, { type: 'login_result', ok: true, username, saveData: account.saveData || null });
       console.log(`[compte] Connexion : ${username}`);
       grantOwnerStaffIfEligible(ws, player, username, account);
@@ -537,7 +574,27 @@ wss.on('connection', (ws, req) => {
       if (!player.accountUsername || player.accountUsername !== msg.username) return;
       const account = accountsData.accounts[player.accountUsername];
       if (!account) return;
-      account.saveData = msg.data;
+      // Garde-fou de PLAUSIBILITÉ minimal (pas un schéma complet — le client
+      // reste autoritaire sur le détail de l'inventaire/des véhicules pour
+      // l'instant) : on rejette juste ce qui est manifestement aberrant, pour
+      // qu'un blob forgé ne s'installe pas silencieusement comme "vraie"
+      // sauvegarde du compte.
+      const data = msg.data;
+      if (!data || typeof data !== 'object') return;
+      let size = 0;
+      try { size = JSON.stringify(data).length; } catch (e) { return; }
+      if (size > 2_000_000) { // ~2 Mo : très généreux pour une sauvegarde de personnage, bloque un abus de stockage
+        console.warn(`[save_progress] rejeté (taille ${size} octets) pour ${player.accountUsername}`);
+        return;
+      }
+      const MAX_PLAUSIBLE_MONEY = 10_000_000_000; // 10 milliards : au-delà, manifestement forgé
+      for (const field of ['money', 'dirtyMoney']) {
+        if (typeof data[field] === 'number' && (data[field] < 0 || data[field] > MAX_PLAUSIBLE_MONEY || !Number.isFinite(data[field]))) {
+          console.warn(`[save_progress] rejeté (${field}=${data[field]}) pour ${player.accountUsername}`);
+          return;
+        }
+      }
+      account.saveData = data;
       account.lastSaveAt = Date.now();
       saveAccountsData();
     }
@@ -616,8 +673,12 @@ wss.on('connection', (ws, req) => {
       broadcastStaffLog(`${player.firstName} ${player.lastName} nomme ${target.firstName} ${target.lastName} recruteur pour « ${roleName} ».`);
     }
     else if (msg.type === 'promote_police') {
+      // Règle déjà affichée aux joueurs côté client (Game.openPoliceHierarchyMenu,
+      // js/police-and-startup.js) mais jamais vérifiée ici : seul un CHEF de
+      // la police peut promouvoir un autre policier, jamais soi-même.
+      if (player.policeRank !== 'chef') { send(ws, { type: 'staff_error', text: 'Seul un chef de la police peut promouvoir un autre policier.' }); return; }
       const target = players.get(msg.targetId);
-      if (!target) return;
+      if (!target || target.id === player.id || target.role !== 'police') return;
       const rank = safeName(msg.rank, '', 20);
       target.policeRank = rank;
       send(target.ws, { type: 'police_promoted', rank, byName: `${player.firstName} ${player.lastName}` });
@@ -627,11 +688,17 @@ wss.on('connection', (ws, req) => {
     else if (msg.type === 'player_treated') {
       const target = players.get(msg.targetId);
       if (!target) return;
+      // Proximité réelle exigée : un soin ne peut pas se faire à distance.
+      if (dist(player, target) > 6) return;
       const gain = Math.max(0, Math.min(100, parseInt(msg.healthGain, 10) || 0));
       send(target.ws, { type: 'player_treated', healthGain: gain, byName: `${player.firstName} ${player.lastName}` });
     }
 
     else if (msg.type === 'give_ammo') {
+      // Anti-spam : en attendant une vraie autorité serveur sur l'inventaire
+      // (relais pur pour l'instant, voir save_progress), au moins limiter le
+      // débit d'un abus automatisé.
+      if (isRateLimited(player, 'give_ammo', 1000)) return;
       const target = players.get(msg.targetId);
       if (!target) return;
       const qty = Math.max(1, Math.min(10000, parseInt(msg.qty, 10) || 0));
@@ -642,16 +709,27 @@ wss.on('connection', (ws, req) => {
     else if (msg.type === 'toggle_cuffs') {
       const target = players.get(msg.targetId);
       if (!target) return;
+      // Proximité réelle exigée : impossible de menotter quelqu'un à distance.
+      if (dist(player, target) > 6) return;
       send(target.ws, { type: 'you_are_cuffed', cuffed: !!msg.cuffed, byName: `${player.firstName} ${player.lastName}` });
     }
 
     else if (msg.type === 'toggle_jail') {
+      // Règle déjà affichée côté client (Roles.hasPerm('cni'), voir
+      // Game.toggleJail dans js/police-and-startup.js) mais jamais vérifiée
+      // ici : réservé aux policiers.
+      if (player.role !== 'police') { send(ws, { type: 'staff_error', text: 'Réservé à la police.' }); return; }
       const target = players.get(msg.targetId);
       if (!target) return;
       send(target.ws, { type: 'you_are_jailed', jailed: !!msg.jailed, byName: msg.byName || `${player.firstName} ${player.lastName}` });
     }
 
     else if (msg.type === 'give_money') {
+      // Anti-spam : en attendant une vraie autorité serveur sur les soldes
+      // (relais pur pour l'instant), au moins limiter le débit d'un abus
+      // automatisé — un don légitime de main à main n'a jamais besoin de se
+      // répéter plusieurs fois par seconde.
+      if (isRateLimited(player, 'give_money', 1000)) return;
       const target = players.get(msg.targetId);
       if (!target) return;
       const amount = Math.max(1, Math.min(50000000, parseInt(msg.amount, 10) || 0));
@@ -798,14 +876,29 @@ wss.on('connection', (ws, req) => {
     else if (msg.type === 'player_hit') {
       const target = players.get(msg.targetId);
       if (!target) return;
-      const damage = Math.max(0, Math.min(200, parseInt(msg.damage, 10) || 0));
-      send(target.ws, { type: 'player_hit', damage, headshot: !!msg.headshot, fromId: player.id, fromName: `${player.firstName} ${player.lastName}` });
+      // Anti-spam : un client modifié ne peut pas contourner son propre
+      // cooldown d'arme pour infliger des dégâts en rafale bien plus vite
+      // qu'aucune arme du jeu ne le permet.
+      const now = Date.now();
+      if (now - (player._lastHitAt || 0) < MIN_HIT_INTERVAL_MS) return;
+      player._lastHitAt = now;
+      // Portée : empêche un tir depuis l'autre bout de la carte (le serveur
+      // connaît la dernière position connue des deux joueurs via 'state').
+      if (dist(player, target) > MAX_HIT_RANGE) return;
+      const headshot = !!msg.headshot;
+      const cap = headshot ? MAX_HEADSHOT_DAMAGE : MAX_HIT_DAMAGE;
+      const damage = Math.max(0, Math.min(cap, parseInt(msg.damage, 10) || 0));
+      send(target.ws, { type: 'player_hit', damage, headshot, fromId: player.id, fromName: `${player.firstName} ${player.lastName}` });
     }
 
     else if (msg.type === 'player_punch') {
       const target = players.get(msg.targetId);
       if (!target) return;
-      const damage = Math.max(0, Math.min(30, parseInt(msg.damage, 10) || 0));
+      const now = Date.now();
+      if (now - (player._lastHitAt || 0) < MIN_HIT_INTERVAL_MS) return;
+      player._lastHitAt = now;
+      if (dist(player, target) > MAX_HIT_RANGE) return;
+      const damage = Math.max(0, Math.min(MAX_PUNCH_DAMAGE, parseInt(msg.damage, 10) || 0));
       send(target.ws, { type: 'player_punch', damage, fromId: player.id, fromName: `${player.firstName} ${player.lastName}` });
     }
 
@@ -843,13 +936,21 @@ wss.on('connection', (ws, req) => {
       if (typeof msg.x === 'number') player.x = msg.x;
       if (typeof msg.y === 'number') player.y = msg.y;
       if (typeof msg.heading === 'number') player.heading = msg.heading;
-      if (typeof msg.health === 'number') player.health = msg.health;
+      // Santé : simple borne de plausibilité (0-100). Le client reste
+      // AUTORITAIRE sur sa propre santé pour l'instant (voir takeDamage côté
+      // client) — une vraie autorité serveur sur les PV est un chantier
+      // séparé, plus gros ; ici on empêche juste une valeur absurde
+      // (négative ou hors barème) de se propager aux autres joueurs.
+      if (typeof msg.health === 'number' && Number.isFinite(msg.health)) player.health = Math.max(0, Math.min(100, msg.health));
       if (typeof msg.hunger === 'number') player.hunger = msg.hunger;
       if (typeof msg.thirst === 'number') player.thirst = msg.thirst;
-      if (typeof msg.role === 'string' && msg.role !== player.role) {
-        broadcastStaffLog(`${player.firstName} ${player.lastName} change de métier : ${player.role} → ${msg.role}.`);
-        player.role = msg.role;
-      }
+      // Rôle et grade policier : PLUS acceptés depuis ce message. Un client
+      // modifié pouvait auparavant s'auto-déclarer n'importe quel métier ou
+      // grade et être vu comme tel par tous les autres joueurs (ce même
+      // champ, une fois stocké ici, est diffusé tel quel via le tick
+      // "world", voir publicState()). Le rôle et le grade ne sont désormais
+      // modifiables QUE via les handlers déjà validés : staff_grant_job
+      // (staff) et promote_police (chef de police ou staff).
       if (msg.outfit && typeof msg.outfit === 'object') player.outfit = msg.outfit;
       if (typeof msg.inVehicle === 'boolean') {
         if (msg.inVehicle !== player.inVehicle) broadcastStaffLog(`${player.firstName} ${player.lastName} ${msg.inVehicle ? 'monte dans' : 'sort de'} ${msg.vehicleName || 'un véhicule'}.`);
@@ -866,7 +967,6 @@ wss.on('connection', (ws, req) => {
       if (typeof msg.unconscious === 'boolean') player.unconscious = msg.unconscious;
       if (typeof msg.isCuffed === 'boolean') player.isCuffed = msg.isCuffed;
       if (typeof msg.stuckInVehicle === 'boolean') player.stuckInVehicle = msg.stuckInVehicle;
-      if (typeof msg.policeRank === 'string' || msg.policeRank === null) player.policeRank = msg.policeRank;
       if (typeof msg.convoy === 'string' || msg.convoy === null) player.convoy = msg.convoy ? String(msg.convoy).slice(0, 6) : null;
     }
 
@@ -1068,6 +1168,9 @@ wss.on('connection', (ws, req) => {
     else if (msg.type === 'crime_report') {
       const reporter = players.get(id);
       if (!reporter) return;
+      // Anti-spam : un signalement légitime n'a jamais besoin de se répéter
+      // plusieurs fois par seconde vers toute la police.
+      if (isRateLimited(reporter, 'crime_report', 1000)) return;
       broadcastStaffLog(`Crime signalé : ${msg.kind}${msg.detail ? ' — ' + msg.detail : ''}, par ${reporter.firstName} ${reporter.lastName} en (${Math.round(reporter.x)}, ${Math.round(reporter.y)}).`);
       for (const p of players.values()) {
         if (p.joined && p.role === 'police' && p.id !== id) {
@@ -1146,12 +1249,21 @@ wss.on('connection', (ws, req) => {
     }
 
     else if (msg.type === 'world_edit') {
+      if (!player.joined) return;
+      const payload = msg.payload;
+      if (!payload || typeof payload !== 'object') return;
       // Achat de véhicule/maison, stationnement... : action de jeu normale,
       // donc accessible à tout joueur connecté (pas réservé au staff).
-      if (!player.joined) return;
-      const key = msg.op + ':' + (msg.payload && msg.payload.id);
+      // Plausibilisation minimale des valeurs d'un véhicule partagé : sans
+      // ça, un 'vehicle_position' forgé pouvait annoncer n'importe quel
+      // carburant/état à tous les autres joueurs (ex. hp: 999999).
+      if (msg.op === 'vehicle_position') {
+        if (typeof payload.fuel === 'number') payload.fuel = Math.max(0, Math.min(1, payload.fuel));
+        if (typeof payload.hp === 'number') payload.hp = Math.max(0, Math.min(100, payload.hp));
+      }
+      const key = msg.op + ':' + payload.id;
       const idx = staffData.worldEdits.findIndex(e => (e.op + ':' + (e.payload && e.payload.id)) === key);
-      const edit = { op: msg.op, payload: msg.payload };
+      const edit = { op: msg.op, payload };
       if (idx >= 0) staffData.worldEdits[idx] = edit; else staffData.worldEdits.push(edit);
       if (staffData.worldEdits.length > 3000) staffData.worldEdits.splice(0, staffData.worldEdits.length - 3000);
       saveStaffData();
