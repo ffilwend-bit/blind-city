@@ -133,6 +133,22 @@ const Net = {
         if (acc) Game.followPlayerGPS(msg.fromId, msg.fromName);
         else announce('Guidage refusé.', 'polite');
       });
+    } else if (msg.type === 'mission_invite') {
+      // Invitation à rejoindre une mission extrême jouable seul (voir
+      // Game.inviteToMission) : simple toggle accepter/refuser, rien n'est
+      // imposé. En acceptant, on est guidé jusqu'au point de rendez-vous ET
+      // on renvoie sa propre position à l'inviteur (partage réciproque),
+      // pour que chacun puisse suivre l'autre — utile en véhicules séparés.
+      AudioLib.playNotification();
+      AccessibleConfirm.open(`${msg.fromName} vous invite sur une mission`, `${msg.fromName} vous invite à rejoindre « ${msg.missionTitle} ». Vous faire guider automatiquement jusqu'au point de rendez-vous ? Votre position sera aussi envoyée à ${msg.fromName} pour qu'il ou elle puisse vous suivre.`, (acc) => {
+        if (acc) {
+          Game.setGuidance({ name: msg.missionTitle, x: msg.x, y: msg.y });
+          announce(`Guidage activé vers ${msg.missionTitle}.`, 'assertive');
+          if (msg.fromId) Net.send({ type: 'share_gps', targetId: msg.fromId });
+        } else {
+          announce('Invitation refusée.', 'polite');
+        }
+      });
     } else if (msg.type === 'crime_alert') {
       Game.onCrimeAlert(msg.kind, msg.detail, msg.x, msg.y);
     } else if (msg.type === 'criminal_record_request') {
