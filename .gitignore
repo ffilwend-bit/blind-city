@@ -1,6 +1,15 @@
 # Données joueurs (mots de passe hachés) — générées au fil du jeu, jamais publiées
 accounts-data.json
 
+# Codes administrateur (staff) et bannissements — jamais publiés. Générés
+# localement au premier démarrage si absent (voir server.js) ; en prod,
+# les vrais codes viennent de préférence des variables d'environnement
+# STAFF_CODE_PRINCIPAL / STAFF_CODE_MODERATEUR, jamais de ce fichier.
+staff-data.json
+
+# Variables d'environnement (secrets Supabase, codes staff...)
+.env
+
 # Dépendances Node
 node_modules/
 
