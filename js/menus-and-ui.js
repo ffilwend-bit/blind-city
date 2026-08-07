@@ -243,6 +243,15 @@ function openMainMenu() {
 // ce qui permet de revenir au menu précédent d'un seul geste, sans que chaque
 // sous-menu ait à gérer son propre bouton retour.
 const MenuNav = { stack: [], navigating: false };
+// Nombre d'options à partir duquel un champ de filtre est ajouté en haut du
+// menu : en dessous, un champ de plus n'apporterait qu'une gêne inutile pour
+// parcourir 2-3 cartes à la flèche.
+const MENU_FILTER_THRESHOLD = 7;
+// Compare sans tenir compte des accents/majuscules : "cafe" doit retrouver
+// "Café", "ecole" doit retrouver "École".
+function _menuFilterNorm(s) {
+  return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
 function renderMenu(items, handler) {
   const c = el('menuContent'); c.innerHTML = '';
   const title = el('menuTitle') ? el('menuTitle').textContent : '';
@@ -257,23 +266,63 @@ function renderMenu(items, handler) {
     if (idx >= 0) { MenuNav.stack.length = idx + 1; MenuNav.stack[idx] = { title, items, handler }; }
     else MenuNav.stack.push({ title, items, handler });
   }
-  items.forEach((it, i) => {
-    const card = document.createElement('div'); card.className = 'menu-card'; card.tabIndex = 0; card.setAttribute('role', 'button');
-    card.innerHTML = `<h4>${escapeHtml(it.title)}</h4><p>${escapeHtml(it.desc)}</p>`;
-    card.addEventListener('click', () => handler(it));
-    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(it); } });
-    c.appendChild(card);
-  });
-  // Carte « Retour » ajoutée automatiquement dès qu'un menu précédent existe.
-  if (MenuNav.stack.length > 1) {
-    const prevTitle = MenuNav.stack[MenuNav.stack.length - 2].title;
-    const back = document.createElement('div'); back.className = 'menu-card menu-card-back'; back.tabIndex = 0; back.setAttribute('role', 'button');
-    back.innerHTML = `<h4>↩️ Retour</h4><p>Revenir au menu précédent${prevTitle ? ' : ' + escapeHtml(prevTitle) : ''}.</p>`;
-    back.addEventListener('click', menuGoBack);
-    back.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); menuGoBack(); } });
-    c.appendChild(back);
+  // Champ de filtre en direct pour les menus à nombreuses options (contacts,
+  // armes, missions...) : dès qu'on tape une lettre, seules les cartes dont
+  // le titre (ou la description) la contiennent restent affichées — plus
+  // besoin de parcourir toute la liste à la flèche pour trouver une option
+  // précise. Purement additif : la navigation habituelle (flèches/Tab sur
+  // les cartes, retour) reste identique quand le champ n'est pas utilisé.
+  let filterInput = null;
+  if (items.length > MENU_FILTER_THRESHOLD) {
+    filterInput = document.createElement('input');
+    filterInput.type = 'text';
+    filterInput.className = 'menu-filter-input';
+    filterInput.placeholder = 'Filtrer les options...';
+    filterInput.setAttribute('aria-label', 'Filtrer les options de ce menu en tapant une partie du nom');
+    filterInput.style.cssText = 'width:100%;box-sizing:border-box;padding:10px;margin-bottom:10px;font-size:1rem;';
+    c.appendChild(filterInput);
   }
-  const first = c.querySelector('.menu-card');
+  const listEl = document.createElement('div');
+  c.appendChild(listEl);
+  const renderCards = (filterText) => {
+    listEl.innerHTML = '';
+    const q = _menuFilterNorm(filterText);
+    const filtered = q ? items.filter(it => _menuFilterNorm(it.title).includes(q) || _menuFilterNorm(it.desc).includes(q)) : items;
+    filtered.forEach((it) => {
+      const card = document.createElement('div'); card.className = 'menu-card'; card.tabIndex = 0; card.setAttribute('role', 'button');
+      card.innerHTML = `<h4>${escapeHtml(it.title)}</h4><p>${escapeHtml(it.desc)}</p>`;
+      card.addEventListener('click', () => handler(it));
+      card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(it); } });
+      listEl.appendChild(card);
+    });
+    // Carte « Retour » ajoutée automatiquement dès qu'un menu précédent existe.
+    if (MenuNav.stack.length > 1) {
+      const prevTitle = MenuNav.stack[MenuNav.stack.length - 2].title;
+      const back = document.createElement('div'); back.className = 'menu-card menu-card-back'; back.tabIndex = 0; back.setAttribute('role', 'button');
+      back.innerHTML = `<h4>↩️ Retour</h4><p>Revenir au menu précédent${prevTitle ? ' : ' + escapeHtml(prevTitle) : ''}.</p>`;
+      back.addEventListener('click', menuGoBack);
+      back.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); menuGoBack(); } });
+      listEl.appendChild(back);
+    }
+    return filtered;
+  };
+  renderCards('');
+  if (filterInput) {
+    let lastAnnounceCount = items.length;
+    filterInput.addEventListener('input', () => {
+      const filtered = renderCards(filterInput.value);
+      // Annonce discrète du nombre de résultats restants : indispensable
+      // sans retour visuel pour savoir si la frappe a filtré quelque chose.
+      if (filtered.length !== lastAnnounceCount) {
+        lastAnnounceCount = filtered.length;
+        announce(`${filtered.length} résultat${filtered.length > 1 ? 's' : ''}.`, 'polite');
+      }
+    });
+    filterInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); filterInput.value = ''; renderCards(''); }
+    });
+  }
+  const first = listEl.querySelector('.menu-card');
   if (first) setTimeout(() => first.focus(), 30);
   announceTouchLabels();
 }
