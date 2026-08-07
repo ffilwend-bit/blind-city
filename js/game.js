@@ -117,7 +117,7 @@ const Game = {
       const now = Date.now();
       if (now - (this._lastObstacleWarn || 0) > 1500) {
         this._lastObstacleWarn = now;
-        announce('Attention, obstacle juste devant.', 'assertive');
+        announce('Attention, obstacle juste devant.', 'assertive', { tag: 'obstacle' });
       }
     }
   },
@@ -179,13 +179,27 @@ const Game = {
     // deux cases orthogonales sont solides, le passage est bloqué.
     if (dx !== 0 && dy !== 0 && City.isSolid(Math.round(this.x + dx), Math.round(this.y)) && City.isSolid(Math.round(this.x), Math.round(this.y + dy))) {
       Audio.impact(UTIL.clamp(dx, -1, 1) * 0.5);
-      announce('Passage bloqué entre deux murs. Tournez un peu pour les contourner.', 'assertive');
+      // Tag 'obstacle' + throttle : en glissement tactile maintenu, move()
+      // est rappelé toutes les 300 ms — sans throttle, chaque appel contre le
+      // même mur empilait une annonce dans la file, qui continuait à être
+      // lue en rafale ("mur, mur, mur...") bien après avoir lâché/tourné.
+      // Le tag fait aussi remplacer une annonce déjà en attente/en cours de
+      // la même catégorie plutôt que de s'y ajouter.
+      const nowB = Date.now();
+      if (nowB - (this._lastObstacleAnnounce || 0) > 1200) {
+        this._lastObstacleAnnounce = nowB;
+        announce('Passage bloqué entre deux murs. Tournez un peu pour les contourner.', 'assertive', { tag: 'obstacle' });
+      }
       return;
     }
     if (City.isSolid(nx, ny)) {
       Audio.impact(UTIL.clamp(dx, -1, 1) * 0.5);
       if (Net.connected) Net.emitSound('synth:impact', { vol: 0.5 });
-      announce('Obstacle, vous n\'avancez pas. ' + City.getTile(nx, ny), 'assertive');
+      const nowO = Date.now();
+      if (nowO - (this._lastObstacleAnnounce || 0) > 1200) {
+        this._lastObstacleAnnounce = nowO;
+        announce('Obstacle, vous n\'avancez pas. ' + City.getTile(nx, ny), 'assertive', { tag: 'obstacle' });
+      }
       return;
     }
     this.x = UTIL.clamp(nx, 0, City.W - 1); this.y = UTIL.clamp(ny, 0, City.H - 1);
@@ -409,11 +423,14 @@ const Game = {
       if (City.isRoad(v.x, v.y)) this.npcVoiceReaction(v.x, v.y, { group: 'impatient', radius: 12, count: 2 });
     } else {
       v.x = UTIL.clamp(nx, 0, City.W - 1); v.y = UTIL.clamp(ny, 0, City.H - 1);
-      // Consommation ~ constante par case parcourue, quelle que soit la vitesse
-      // (step = v.speed * MOVE_SCALE, donc fuel/case = ratio * 12). Avant, un
-      // plein ne couvrait qu'environ 167 mètres (0,002 * 12 par case) — bien
-      // trop peu pour un réservoir plein. Réduit à ~8 km par plein.
-      if (!noFuelNeeded) v.fuel = Math.max(0, v.fuel - Math.abs(v.speed) * 0.00004);
+      // Consommation VRAIMENT constante par case parcourue (4 m), indépendante
+      // de la vitesse instantanée — avant, le calcul multipliait par v.speed
+      // malgré ce commentaire qui promettait déjà l'inverse : résultat, chaque
+      // augmentation de la vitesse max des véhicules (voir catalogs.js) faisait
+      // aussi fondre le réservoir plus vite, en plus d'un plein déjà trop
+      // court. Constante choisie pour ~27 km par plein, un plein qui dure
+      // vraiment une session de jeu au lieu de s'épuiser en quelques minutes.
+      if (!noFuelNeeded) v.fuel = Math.max(0, v.fuel - 0.00015);
       // Conduite tout-terrain à vitesse notable : chance occasionnelle de
       // taper un trou (juste un bruit, pas de dégâts — la route cahoteuse).
       if (offroadFactor < 1 && Math.abs(v.speed) > cls.maxSpeed * 0.3 && UTIL.chance(0.03)) {
@@ -1897,7 +1914,13 @@ const Game = {
     // 2,5 s même sans rien de nouveau à dire, coupant systématiquement
     // n'importe quelle autre annonce en cours, plus importante ou non.
     Audio.tone({ freq: 700, type: 'sine', duration: 0.1, gain: 0.08, pan: this.panForPoint(t.x, t.y) });
-    if (force || this._lastTurnDiff !== prevTurnDiff) speak(instruction, 'assertive');
+    // Tag 'guidance' : si une instruction de virage est encore en train
+    // d'être lue (ou en attente) quand une NOUVELLE instruction, différente,
+    // devient due, l'ancienne est forcément périmée — elle est coupée/
+    // remplacée au lieu de s'empiler derrière, pour ne plus jamais avoir
+    // "tu pars à gauche, tu pars à droite, tu pars à gauche..." qui
+    // s'accumule et se joue en retard.
+    if (force || this._lastTurnDiff !== prevTurnDiff) speak(instruction, 'assertive', { tag: 'guidance' });
   },
   // Bip directionnel (mode Maj+N) : un bip aigu centré tout droit, un bip
   // panoramique à droite/gauche selon le virage, doublé si le virage est

@@ -597,29 +597,44 @@ function _speakChunks(chunks, onAllDone) {
 // annonce assertive n'interrompt que du contenu 'polite' (routine) ; si une
 // autre annonce importante est déjà en cours, elle attend son tour (limitée
 // à 3 en attente, pour ne pas prendre un retard interminable en rafale).
-let _assertiveQueue = [];
+let _assertiveQueue = []; // éléments : { chunks, tag }
 let _currentSpeakPriority = null;
+// Catégorie (tag) de l'annonce en train d'être lue actuellement (ex :
+// 'guidance', 'obstacle') — voir _enqueueUrgent/speak plus bas : sert à
+// remplacer une annonce devenue obsolète de la MÊME catégorie plutôt que de
+// s'empiler derrière elle.
+let _currentSpeakTag = null;
 function _playNextAssertive() {
-  if (!_assertiveQueue.length) { _currentSpeakPriority = null; return; }
-  const chunks = _assertiveQueue.shift();
+  if (!_assertiveQueue.length) { _currentSpeakPriority = null; _currentSpeakTag = null; return; }
+  const entry = _assertiveQueue.shift();
   _currentSpeakPriority = 'assertive';
-  _speakChunks(chunks, _playNextAssertive);
+  _currentSpeakTag = entry.tag || null;
+  _speakChunks(entry.chunks, _playNextAssertive);
 }
 // Une annonce 'combat' (on vous tire dessus, on vous vise, cible verrouillée)
 // passe devant toute annonce 'assertive' déjà en file (santé/faim, etc.) sans
 // jamais couper une annonce déjà en train d'être lue — sinon, en plein
 // échange de tirs, l'info vitale ("on vous vise !") pouvait rester coincée
 // derrière des annonces bien moins urgentes déjà en attente.
-function _enqueueUrgent(chunks, isCombat) {
+function _enqueueUrgent(chunks, isCombat, tag) {
+  // Une nouvelle annonce d'une catégorie (tag) donnée remplace toute annonce
+  // de cette même catégorie déjà en attente : sinon, quand la situation
+  // change vite et souvent (ex : instruction de conduite qui change sans
+  // arrêt, avertissement d'obstacle répété), la file s'engorge d'annonces
+  // devenues périmées qui continuent à être lues bien après coup ("mur, mur,
+  // mur" répété alors qu'on ne cogne plus le mur).
+  if (tag) _assertiveQueue = _assertiveQueue.filter(e => e.tag !== tag);
+  const entry = { chunks, tag: tag || null };
   if (isCombat) {
     if (_assertiveQueue.length >= 3) _assertiveQueue.pop(); // retire la moins prioritaire en fin de file
-    _assertiveQueue.unshift(chunks);
+    _assertiveQueue.unshift(entry);
   } else {
     if (_assertiveQueue.length >= 3) _assertiveQueue.shift(); // garde les annonces 'assertive' les plus récentes
-    _assertiveQueue.push(chunks);
+    _assertiveQueue.push(entry);
   }
 }
-function speak(text, priority = 'polite') {
+function speak(text, priority = 'polite', opts = {}) {
+  const tag = opts && opts.tag ? opts.tag : null;
   if ('speechSynthesis' in window) {
     const synth = window.speechSynthesis;
     const busy = synth.speaking || synth.pending;
@@ -652,13 +667,28 @@ function speak(text, priority = 'polite') {
       try { synth.cancel(); } catch (e) { /* ignore */ }
       _assertiveQueue = [];
       _currentSpeakPriority = 'interrupt';
-      _speakChunks(chunks, () => { _currentSpeakPriority = null; _playNextAssertive(); });
+      _currentSpeakTag = null;
+      _speakChunks(chunks, () => { _currentSpeakPriority = null; _currentSpeakTag = null; _playNextAssertive(); });
     } else if (priority === 'assertive' || priority === 'combat') {
-      if (busy && (_currentSpeakPriority === 'assertive' || _currentSpeakPriority === 'interrupt' || _currentSpeakPriority === 'combat')) {
-        _enqueueUrgent(chunks, priority === 'combat');
+      // Une annonce porteuse d'un tag (catégorie) qui correspond à celle
+      // actuellement en train d'être lue est devenue OBSOLÈTE par
+      // définition (ex : nouvelle instruction de virage qui remplace la
+      // précédente, nouvel avertissement d'obstacle) : on la coupe pour
+      // parler la nouvelle tout de suite, plutôt que d'attendre la fin
+      // d'une phrase déjà périmée — "il faut que les actions puissent
+      // s'interrompre".
+      if (tag && busy && _currentSpeakTag === tag) {
+        try { synth.cancel(); } catch (e) { /* ignore */ }
+        _assertiveQueue = _assertiveQueue.filter(e => e.tag !== tag);
+        _currentSpeakPriority = priority;
+        _currentSpeakTag = tag;
+        _speakChunks(chunks, _playNextAssertive);
+      } else if (busy && (_currentSpeakPriority === 'assertive' || _currentSpeakPriority === 'interrupt' || _currentSpeakPriority === 'combat')) {
+        _enqueueUrgent(chunks, priority === 'combat', tag);
       } else {
         try { synth.cancel(); } catch (e) { /* ignore */ } // coupe une annonce 'polite' en cours, elle
         _currentSpeakPriority = priority;
+        _currentSpeakTag = tag;
         _speakChunks(chunks, _playNextAssertive);
       }
     } else {
@@ -668,7 +698,7 @@ function speak(text, priority = 'polite') {
   const a = priority === 'polite' ? el('announcerPolite') : el('announcer');
   if (a) { a.textContent = ''; a.textContent = text; }
 }
-function announce(text, priority) { log(text, 'system'); speak(text, priority); }
+function announce(text, priority, opts) { log(text, 'system'); speak(text, priority, opts); }
 function alertUser(text) { log(text, 'damage'); speak(text, 'assertive'); }
 function updateHud() {
   // Purement de l'affichage : un seul élément HUD manquant (contexte
