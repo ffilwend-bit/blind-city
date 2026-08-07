@@ -4947,7 +4947,11 @@ const Game = {
     const firstNames = ['Boukary', 'Idrissa', 'Salif', 'Mamadou', 'Aboubacar', 'Yacouba', 'Adama', 'Ousmane'];
     const lastNames = ['Sana', 'Zongo', 'Compaoré', 'Kaboré', 'Ilboudo', 'Ouédraogo', 'Nikiema'];
     const count = Math.max(1, Math.min(gang.members, 5));
-    const pool = gang.power > 60 ? ['ak47', 'm4', 'pompe'] : gang.power > 30 ? ['pistolet_9', 'uzi'] : ['pistolet_9', 'revolver_38'];
+    // Plafond volontaire : ni sniper ni fusil à pompe pour un PNJ, quel qu'il
+    // soit (gang, garde, police) — trop lourd/puissant pour un adversaire
+    // que le combat peut faire apparaître en nombre. AK-47 reste le haut du
+    // barème.
+    const pool = gang.power > 60 ? ['ak47', 'm4'] : gang.power > 30 ? ['pistolet_9', 'uzi'] : ['pistolet_9', 'revolver_38'];
     const npcIds = [];
     for (let i = 0; i < count; i++) {
       const job = 'ganger';
@@ -6004,7 +6008,7 @@ const Game = {
         id: 'wantedresp_' + Date.now() + '_' + i, name: UTIL.pick(firstNames), job: 'policier', gender,
         x: UTIL.clamp(this.x + UTIL.randInt(-3, 3), 0, City.W - 1), y: UTIL.clamp(this.y + UTIL.randInt(-3, 3), 0, City.H - 1),
         health: 100, relation: -100, money: 0, inCar: false, dialogue: [], home: { x: this.x, y: this.y }, hostile: true,
-        weapon: UTIL.pick(['pistolet_9', 'pompe']), outfit: generateNPCAppearance('policier'),
+        weapon: UTIL.pick(['pistolet_9', 'uzi']), outfit: generateNPCAppearance('policier'), // pas de fusil à pompe : plafond volontaire pour tout PNJ
       };
       City.npcs.push(npc); npcIds.push(npc.id);
     }
@@ -6079,7 +6083,7 @@ const Game = {
         id: 'chase_' + Date.now() + '_' + i, name: UTIL.pick(['Agent Somé', 'Agent Kientega', 'Agent Zerbo', 'Agent Ilboudo']),
         job: 'policier', gender: UTIL.pick(['homme', 'femme']), x: px, y: py,
         health: 100, relation: -100, money: 0, inCar: true, dialogue: [], home: { x: this.x, y: this.y },
-        hostile: true, weapon: UTIL.pick(['pistolet_9', 'pompe']), outfit: generateNPCAppearance('policier'),
+        hostile: true, weapon: UTIL.pick(['pistolet_9', 'uzi']), outfit: generateNPCAppearance('policier'), // pas de fusil à pompe : plafond volontaire pour tout PNJ
       };
       City.npcs.push(npc); npcIds.push(npc.id);
     }
@@ -6184,7 +6188,9 @@ const Game = {
   },
 
   grantGangLoot(gang, multiplier) {
-    const pool = gang.power > 60 ? ['ak47', 'm4', 'pompe'] : gang.power > 30 ? ['pistolet_9', 'uzi'] : ['pistolet_9', 'revolver_38'];
+    // Même plafond que launchGangCombat : un gang ne détient (et ne laisse
+    // donc tomber) ni sniper ni fusil à pompe.
+    const pool = gang.power > 60 ? ['ak47', 'm4'] : gang.power > 30 ? ['pistolet_9', 'uzi'] : ['pistolet_9', 'revolver_38'];
     const weaponId = UTIL.pick(pool);
     const weapon = WEAPON_CATALOG[weaponId];
     const ammoQty = Math.max(10, Math.round(UTIL.randInt(20, 60) * multiplier));
