@@ -183,6 +183,7 @@ function createPeerVoiceMesh(opts) {
     localStream: null,
     micEnabled: opts.defaultMicEnabled !== false, // false pour le talkie (silence tant que le PTT n'est pas tenu)
     micFailedAt: 0, // dernier échec de getUserMedia, pour temporiser les nouvelles tentatives
+    micFailAnnounced: false, // l'échec n'est annoncé QU'UNE fois, pas à chaque joueur qui passe à proximité
 
     async ensureLocalStream() {
       if (this.localStream) return this.localStream;
@@ -192,18 +193,27 @@ function createPeerVoiceMesh(opts) {
       if (opts.getLocalStream) { this.localStream = opts.getLocalStream() || null; return this.localStream; }
       // evaluate() tourne toutes les secondes : sans temporisation, un micro
       // indisponible (permission refusée, périphérique déjà utilisé...) faisait
-      // retenter getUserMedia() et réannoncer "Micro indisponible" CHAQUE
-      // seconde, indéfiniment — d'où le message qui boucle sans fin signalé.
+      // retenter getUserMedia() CHAQUE seconde, indéfiniment.
       const now = Date.now();
       if (now - this.micFailedAt < 8000) return null;
       try {
         this.localStream = await requestMicrophoneAccess();
         this.localStream.getAudioTracks().forEach(t => { t.enabled = this.micEnabled; });
         this.micFailedAt = 0;
+        this.micFailAnnounced = false;
       } catch (e) {
         this.micFailedAt = now;
-        announce('Micro indisponible. Si l\'autorisation n\'a jamais été accordée, activez temporairement votre lecteur d\'écran pour cliquer sur Autoriser dans la fenêtre du navigateur.', 'assertive');
         this.localStream = null;
+        // Sans autorisation déjà accordée, chaque joueur qui passait à
+        // proximité relançait une tentative (toutes les 8 s tant qu'il
+        // restait là) et réannonçait l'échec en boucle — on ne le dit
+        // qu'UNE fois par activation du micro ; les tentatives silencieuses
+        // continuent en arrière-plan au cas où l'autorisation serait
+        // accordée entre-temps.
+        if (!this.micFailAnnounced) {
+          this.micFailAnnounced = true;
+          announce('Micro indisponible. Si l\'autorisation n\'a jamais été accordée, activez temporairement votre lecteur d\'écran pour cliquer sur Autoriser dans la fenêtre du navigateur.', 'assertive');
+        }
       }
       return this.localStream;
     },
@@ -460,7 +470,7 @@ function toggleProxVoice() {
   const btn = document.getElementById('touchProxMic');
   if (btn) btn.className = Game.voiceOpen ? 'touch-btn mic-btn listening' : 'touch-btn mic-btn';
   if (!Game.voiceOpen) ProxVoice.stopAll();
-  else evaluateProxVoice();
+  else { ProxVoice.micFailAnnounced = false; evaluateProxVoice(); } // nouvelle activation volontaire : redonner une chance à l'annonce d'échec
 }
 window.toggleProxVoice = toggleProxVoice;
 
