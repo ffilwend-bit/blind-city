@@ -401,27 +401,40 @@ const Game = {
     // Un aéronef EN VOL (altitude > 0) survole les bâtiments : pas de collision
     // au sol. Il ne heurte que s'il roule au sol (altitude 0).
     if (!(cls.flies && v.altitude > 0) && City.isSolid(nx, ny)) {
-      const impactDmg = Math.round(Math.abs(v.speed) * 40 * (1 - (cls.armor || 0)));
-      v.hp = Math.max(0, v.hp - impactDmg);
-      if (this.fragileState) this.fragileState.condition = Math.max(0, this.fragileState.condition - UTIL.randInt(15, 35));
-      if (this.taxiState) this.taxiRoughEvent(UTIL.randInt(15, 30));
-      if (this.medicalState) {
-        const victim = City.npcs.find(n => n.id === this.medicalState.victimId);
-        if (victim) { victim.health = Math.max(0, victim.health - UTIL.randInt(8, 18)); announce(`Le blessé encaisse le choc ! Santé : ${Math.round(victim.health)}%.`, 'assertive'); }
+      // Un seul impact compté par collision RÉELLE : rester coincé contre le
+      // même mur (touche maintenue) rappelait cette branche à chaque tick et
+      // infligeait des dégâts à répétition pour un seul choc physique. On ne
+      // ré-inflige des dégâts que lors du PREMIER tick de contact contre cet
+      // obstacle ; tant qu'on reste collé dessus, plus aucun nouveau dégât
+      // (le véhicule ne bouge de toute façon plus). Se dégager en changeant
+      // de direction (cellule cible différente, non solide) réarme un
+      // prochain impact.
+      const alreadyColliding = v._collisionActive;
+      v._collisionActive = true;
+      if (!alreadyColliding) {
+        const impactDmg = Math.round(Math.abs(v.speed) * 40 * (1 - (cls.armor || 0)));
+        v.hp = Math.max(0, v.hp - impactDmg);
+        if (this.fragileState) this.fragileState.condition = Math.max(0, this.fragileState.condition - UTIL.randInt(15, 35));
+        if (this.taxiState) this.taxiRoughEvent(UTIL.randInt(15, 30));
+        if (this.medicalState) {
+          const victim = City.npcs.find(n => n.id === this.medicalState.victimId);
+          if (victim) { victim.health = Math.max(0, victim.health - UTIL.randInt(8, 18)); announce(`Le blessé encaisse le choc ! Santé : ${Math.round(victim.health)}%.`, 'assertive'); }
+        }
+        const otherVehicleHere = City.vehicles.some(ov => ov.id !== v.id && UTIL.dist(ov, { x: nx, y: ny }) < 1.5);
+        // Diffusée aux joueurs proches (passager compris, qui se trouve à la
+        // même position que le véhicule) : avant, seul le conducteur entendait
+        // sa propre collision.
+        const collisionKey = otherVehicleHere ? 'veh_kolision_entre_2' : impactDmg > 20 ? 'veh_kolision_4_fort' : impactDmg > 8 ? UTIL.pick(['veh_kolision_1', 'veh_kolision_2', 'veh_kolision_3']) : null;
+        if (collisionKey) {
+          AudioLib.playOnce(collisionKey, { volume: otherVehicleHere ? 0.6 : (impactDmg > 20 ? 0.65 : 0.55), exclusive: 'veh_collision_' + v.id });
+          if (Net.connected) Net.emitSound(collisionKey, { vol: 0.6 });
+        }
+        announce(`Collision !${impactDmg > 3 ? ` État du véhicule : ${Math.round(v.hp)}%.` : ''}`, 'assertive');
+        if (City.isRoad(v.x, v.y)) this.npcVoiceReaction(v.x, v.y, { group: 'impatient', radius: 12, count: 2 });
       }
       v.speed = 0; Audio.screech(0);
-      const otherVehicleHere = City.vehicles.some(ov => ov.id !== v.id && UTIL.dist(ov, { x: nx, y: ny }) < 1.5);
-      // Diffusée aux joueurs proches (passager compris, qui se trouve à la
-      // même position que le véhicule) : avant, seul le conducteur entendait
-      // sa propre collision.
-      const collisionKey = otherVehicleHere ? 'veh_kolision_entre_2' : impactDmg > 20 ? 'veh_kolision_4_fort' : impactDmg > 8 ? UTIL.pick(['veh_kolision_1', 'veh_kolision_2', 'veh_kolision_3']) : null;
-      if (collisionKey) {
-        AudioLib.playOnce(collisionKey, { volume: otherVehicleHere ? 0.6 : (impactDmg > 20 ? 0.65 : 0.55), exclusive: 'veh_collision_' + v.id });
-        if (Net.connected) Net.emitSound(collisionKey, { vol: 0.6 });
-      }
-      announce(`Collision !${impactDmg > 3 ? ` État du véhicule : ${Math.round(v.hp)}%.` : ''}`, 'assertive');
-      if (City.isRoad(v.x, v.y)) this.npcVoiceReaction(v.x, v.y, { group: 'impatient', radius: 12, count: 2 });
     } else {
+      v._collisionActive = false;
       v.x = UTIL.clamp(nx, 0, City.W - 1); v.y = UTIL.clamp(ny, 0, City.H - 1);
       // Consommation VRAIMENT constante par case parcourue (4 m), indépendante
       // de la vitesse instantanée — avant, le calcul multipliait par v.speed
@@ -2427,6 +2440,31 @@ const Game = {
     announce(parts.join(' '), 'interrupt');
   },
 
+  // Rafraîchit silencieusement scannedTargets (mêmes filtres que scan(), sans
+  // la moindre annonce ni le bip) : sans ça, la liste numérotée (touches
+  // 1-9) restait figée sur l'instantané du DERNIER scan manuel — tirer sur
+  // quelqu'un qui vient de mourir laissait sa fiche dans la liste, et un
+  // nouvel assaillant arrivé entre-temps restait invisible tant qu'on ne
+  // relançait pas un scan complet. Appelée après chaque tir (voir shoot())
+  // pour que la liste reste juste sans avoir à re-scanner à la voix.
+  refreshScannedTargets() {
+    const cls = this.inVehicle && this.vehicle ? VEHICLE_CATALOG[this.vehicle.type] : null;
+    const airborne = !!(cls && cls.flies && this.altitude > 5);
+    const RADIUS = airborne ? CONFIG.SCAN_RADIUS * 2.5 : CONFIG.SCAN_RADIUS;
+    const npcs = City.npcs.filter(n => !n.dead && UTIL.dist(n, this) < RADIUS).map(n => ({ ...n, dist: UTIL.dist(n, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(n.x - this.x, n.y - this.y) }));
+    const realPlayers = Array.from(Net.remotePlayers.values()).filter(p => UTIL.dist(p, this) < RADIUS).map(p => {
+      const masked = !!p.outfit?.masque;
+      const contactMatch = !masked ? this.resolveContactName({ isPlayer: true, accountUsername: p.accountUsername }) : null;
+      const displayName = masked ? 'Individu masqué' : (contactMatch ? contactMatch.label : `${p.firstName} ${p.lastName}`);
+      return {
+        id: p.id, name: displayName, job: 'joueur réel', gender: p.gender, outfit: p.outfit, isPlayer: true,
+        x: p.x, y: p.y, dist: UTIL.dist(p, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(p.x - this.x, p.y - this.y),
+      };
+    });
+    const people = [...realPlayers, ...npcs].sort((a, b) => a.dist - b.dist).slice(0, 9);
+    const vehicles = City.vehicles.filter(v => UTIL.dist(v, this) < RADIUS).map(v => ({ ...v, isVehicle: true, dist: UTIL.dist(v, this) * CONFIG.METERS_PER_TILE, bearing: UTIL.bearing(v.x - this.x, v.y - this.y) })).sort((a, b) => a.dist - b.dist).slice(0, 5);
+    this.scannedTargets = [...people, ...vehicles];
+  },
   // Scanner and targeting
   scan() {
     Audio.beep(0, 1200);
@@ -2800,6 +2838,10 @@ const Game = {
     }
     if (w.legal === false) { this.wanted = Math.min(100, this.wanted + 5); this.policeAwareness = Math.min(100, this.policeAwareness + 10); }
     Police.dispatch('tir', this.x, this.y, this.lockedTarget);
+    // Liste de ciblage (1-9) tenue à jour après chaque tir, sans re-scanner
+    // à la voix (voir refreshScannedTargets) : les nouveaux assaillants
+    // arrivés depuis le dernier scan deviennent immédiatement ciblables.
+    this.refreshScannedTargets();
     updateHud();
   },
   startBurst() {
@@ -5180,6 +5222,25 @@ const Game = {
       this.escorteState = null; this.activeMission = null;
       return;
     }
+    // Arrivée au point d'exfiltration : vérifiée AVANT le "return" qui exige
+    // d'être en véhicule, et sur la position du JOUEUR (proche du véhicule
+    // qu'on vient de quitter) autant que sur celle du véhicule — avant,
+    // cette vérification était coincée après le "return si pas en véhicule",
+    // donc descendre à l'arrivée (comme demandé par le message d'arrivée du
+    // guidage, "appuyez sur E") rendait la mission bloquée pour toujours :
+    // plus aucun code de fin n'était jamais exécuté.
+    const dropPos = (this.inVehicle && this.vehicle) ? this.vehicle : this;
+    if (UTIL.dist(dropPos, { x: m.dropX, y: m.dropY }) < 5) {
+      const amount = m.reward;
+      this.dirtyMoney += amount; Audio.cash();
+      m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
+      if (this.vehicle) this.vehicle.passengers = (this.vehicle.passengers || []).filter(p => p.id !== es.clientId);
+      this.escorteState = null;
+      RPJournal.log('Mission', `Escorte réussie : ${UTIL.formatMoney(amount)}.`, 'alert');
+      announce(`${client.name} arrive sain et sauf ! Vous touchez ${UTIL.formatMoney(amount)}.`, 'assertive');
+      updateHud();
+      return;
+    }
     if (!this.inVehicle || !this.vehicle) return;
     if (!es.ambushDone && Math.random() < 0.008) { es.ambushDone = true; this.triggerEscorteAmbush(); }
     if (es.npcIds.length) {
@@ -5200,18 +5261,7 @@ const Game = {
             }
           }
         });
-        return;
       }
-    }
-    if (UTIL.dist(this.vehicle, { x: m.dropX, y: m.dropY }) < 4) {
-      const amount = m.reward;
-      this.dirtyMoney += amount; Audio.cash();
-      m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
-      this.vehicle.passengers = (this.vehicle.passengers || []).filter(p => p.id !== es.clientId);
-      this.escorteState = null;
-      RPJournal.log('Mission', `Escorte réussie : ${UTIL.formatMoney(amount)}.`, 'alert');
-      announce(`${client.name} arrive sain et sauf ! Vous touchez ${UTIL.formatMoney(amount)}.`, 'assertive');
-      updateHud();
     }
   },
 
@@ -5818,9 +5868,19 @@ const Game = {
         RPJournal.log('Mission', `Planque gardée pillée : ${UTIL.formatMoney(amount)} + ${weapon.name}.`, 'alert');
         announce(`Vigiles éliminés, butin récupéré : ${UTIL.formatMoney(amount)}, un ${weapon.name} et ${ammoQty} munitions.`, 'assertive');
         updateHud();
-      } else if (!this.stashState) {
-        announce('Les vigiles sont neutralisés. Approchez-vous du point pour récupérer le butin.', 'polite');
-        this.stashState = true;
+      } else {
+        // Ancien bug : ce message réutilisait le même stashState que le
+        // déclenchement du combat ('engaged'), donc n'était plus jamais
+        // annoncé une fois la fusillade commencée — le joueur, tous les
+        // gardes abattus, n'était jamais informé qu'il fallait s'approcher
+        // du point d'origine pour récupérer le butin. Flag dédié + rappel
+        // espacé (pas juste une fois, au cas où le message se perde parmi
+        // d'autres annonces de fin de combat).
+        const now = Date.now();
+        if (now - (this._stashLootHintAt || 0) > 8000) {
+          this._stashLootHintAt = now;
+          announce('Vigiles neutralisés. Approchez-vous du point de la planque pour récupérer le butin.', 'assertive', { tag: 'stash-loot' });
+        }
       }
       return;
     }
