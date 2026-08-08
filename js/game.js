@@ -5913,10 +5913,21 @@ const Game = {
         // du point d'origine pour récupérer le butin. Flag dédié + rappel
         // espacé (pas juste une fois, au cas où le message se perde parmi
         // d'autres annonces de fin de combat).
+        // Deuxième bug, resté même après ce correctif : le rappel ne disait
+        // JAMAIS où se trouvait ce point. Les vigiles ne se déplacent pas
+        // (ils tirent sur place), mais le combat pouvait très bien se
+        // dérouler à distance de tir (jusqu'à une douzaine de cases) — une
+        // fois tous morts, plus aucun repère sonore pour retrouver le point
+        // exact. Comme pour la chasse aux primes (tickChassePrimes) et le
+        // rappel d'ID de mission (announceActiveMissionId), distance ET
+        // direction réelles vers m (le point de la planque, fixe depuis sa
+        // création — voir City.generateExtremeMissions).
         const now = Date.now();
         if (now - (this._stashLootHintAt || 0) > 8000) {
           this._stashLootHintAt = now;
-          announce('Vigiles neutralisés. Approchez-vous du point de la planque pour récupérer le butin.', 'assertive', { tag: 'stash-loot' });
+          const d = Math.round(UTIL.dist(m, this) * CONFIG.METERS_PER_TILE);
+          const dir = UTIL.bearing(m.x - this.x, m.y - this.y);
+          announce(`Vigiles neutralisés. Butin au sol à ${d} mètres, vers le ${dir}.`, 'assertive', { tag: 'stash-loot' });
         }
       }
       return;
