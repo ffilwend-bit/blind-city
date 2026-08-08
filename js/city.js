@@ -529,7 +529,7 @@ const City = {
         id: 'npc_' + i, name: `${UTIL.pick(first)} ${UTIL.pick(last)}`, job, x: pos.x, y: pos.y,
         health: 100, relation: UTIL.randInt(-20, 30), money: UTIL.randInt(500, 30000), inCar: false,
         dialogue: this.generateDialogue(job), home: pos, hostile: job === 'ganger' || job === 'garde',
-        weapon: job === 'ganger' ? UTIL.pick(['pistolet_9','ak47','pompe']) : null,
+        weapon: job === 'ganger' ? UTIL.pick(['pistolet_9','ak47']) : null, // pas de fusil à pompe : plafond volontaire pour tout PNJ
         gender: UTIL.pick(['homme', 'femme']), outfit: generateNPCAppearance(job),
       };
       this.npcs.push(npc);
@@ -748,7 +748,7 @@ const City = {
         const frontIds = [], rearIds = [];
         for (let g = 0; g < 2; g++) {
           const gender1 = UTIL.pick(['homme', 'femme']);
-          const fnpc = { id: `convoy_front_${i}_${g}`, name: `Garde avant ${g + 1}`, job: 'garde', gender: gender1, x: frontPoint.x, y: frontPoint.y, health: 100, relation: -80, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: frontPoint, hostile: true, weapon: UTIL.pick(['pistolet_9', 'pompe']), outfit: generateNPCAppearance('garde') };
+          const fnpc = { id: `convoy_front_${i}_${g}`, name: `Garde avant ${g + 1}`, job: 'garde', gender: gender1, x: frontPoint.x, y: frontPoint.y, health: 100, relation: -80, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: frontPoint, hostile: true, weapon: UTIL.pick(['pistolet_9', 'uzi']), outfit: generateNPCAppearance('garde') }; // pas de fusil à pompe : plafond volontaire pour tout PNJ
           this.npcs.push(fnpc); frontIds.push(fnpc.id);
           const gender2 = UTIL.pick(['homme', 'femme']);
           const rnpc = { id: `convoy_rear_${i}_${g}`, name: `Garde arrière ${g + 1}`, job: 'garde', gender: gender2, x: rearPoint.x, y: rearPoint.y, health: 100, relation: -80, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: rearPoint, hostile: true, weapon: UTIL.pick(['uzi', 'ak47']), outfit: generateNPCAppearance('garde') };
@@ -765,7 +765,7 @@ const City = {
         const vaultPoint = { x: UTIL.clamp(base.x - 7, 0, this.W - 1), y: base.y };
         const guardId = 'depot_guard_' + i;
         const gender = UTIL.pick(['homme', 'femme']);
-        this.npcs.push({ id: guardId, name: 'Garde de patrouille', job: 'garde', gender, x: patrolPoint.x, y: patrolPoint.y, health: 100, relation: -80, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: patrolPoint, hostile: true, weapon: 'pompe', outfit: generateNPCAppearance('garde') });
+        this.npcs.push({ id: guardId, name: 'Garde de patrouille', job: 'garde', gender, x: patrolPoint.x, y: patrolPoint.y, health: 100, relation: -80, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: patrolPoint, hostile: true, weapon: UTIL.pick(['pistolet_9', 'uzi']), outfit: generateNPCAppearance('garde') }); // pas de fusil à pompe : plafond volontaire pour tout PNJ
         extra = { camPoint, patrolPoint, vaultPoint, guardId };
       }
       else if (t.type === 'extraction_vip') {
@@ -802,7 +802,7 @@ const City = {
         const count = UTIL.randInt(2, 4);
         for (let g = 0; g < count; g++) {
           const gender = UTIL.pick(['homme', 'femme']);
-          const npc = { id: `stash_guard_${i}_${g}`, name: `Vigile ${g + 1}`, job: 'garde', gender, x: UTIL.clamp(base.x + UTIL.randInt(-2, 2), 0, this.W - 1), y: UTIL.clamp(base.y + UTIL.randInt(-2, 2), 0, this.H - 1), health: 100, relation: -90, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: base, hostile: true, weapon: UTIL.pick(['uzi', 'ak47', 'pompe']), outfit: generateNPCAppearance('garde') };
+          const npc = { id: `stash_guard_${i}_${g}`, name: `Vigile ${g + 1}`, job: 'garde', gender, x: UTIL.clamp(base.x + UTIL.randInt(-2, 2), 0, this.W - 1), y: UTIL.clamp(base.y + UTIL.randInt(-2, 2), 0, this.H - 1), health: 100, relation: -90, money: 0, inCar: false, dialogue: GUARD_DIALOGUE, home: base, hostile: true, weapon: UTIL.pick(['uzi', 'ak47']), outfit: generateNPCAppearance('garde') }; // pas de fusil à pompe : plafond volontaire pour tout PNJ
           this.npcs.push(npc); guardIds.push(npc.id);
         }
         extra = { guardIds };
