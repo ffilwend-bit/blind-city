@@ -441,9 +441,10 @@ const Game = {
       // malgré ce commentaire qui promettait déjà l'inverse : résultat, chaque
       // augmentation de la vitesse max des véhicules (voir catalogs.js) faisait
       // aussi fondre le réservoir plus vite, en plus d'un plein déjà trop
-      // court. Constante choisie pour ~27 km par plein, un plein qui dure
-      // vraiment une session de jeu au lieu de s'épuiser en quelques minutes.
-      if (!noFuelNeeded) v.fuel = Math.max(0, v.fuel - 0.00015);
+      // court. Une première réduction (~27 km/plein) restait encore trop
+      // courte en usage réel (le réservoir se vidait bien avant la fin d'une
+      // session) : constante à nouveau réduite, pour ~100 km par plein.
+      if (!noFuelNeeded) v.fuel = Math.max(0, v.fuel - 0.00004);
       // Conduite tout-terrain à vitesse notable : chance occasionnelle de
       // taper un trou (juste un bruit, pas de dégâts — la route cahoteuse).
       if (offroadFactor < 1 && Math.abs(v.speed) > cls.maxSpeed * 0.3 && UTIL.chance(0.03)) {
@@ -689,6 +690,18 @@ const Game = {
   // (on l'entend de loin), plus court pour un véhicule au sol.
   tickAmbientVehicles() {
     if (!window.AudioLib || typeof AudioLib.playLoopInstance !== 'function') return;
+    // Dans un bâtiment (this.interior) : les bribes de PNJ (tickPassersby) et
+    // le bruit ambiant de la ville sont déjà coupés, mais PAS les moteurs des
+    // véhicules d'autres joueurs/PNJ — incohérent, une maison isole aussi du
+    // bruit de la circulation. On arrête toute boucle déjà lancée (sinon elle
+    // continue de jouer au dernier volume connu, plus jamais mise à jour tant
+    // qu'on ne quitte pas ce `return` anticipé) puis on coupe le reste de la
+    // fonction ; la sortie du bâtiment relance normalement au tick suivant.
+    if (this.interior) {
+      (this._ambientVehicleIds || []).forEach(id => AudioLib.stopLoopInstance(id));
+      this._ambientVehicleIds = new Set();
+      return;
+    }
     // En vol (altitude), le rayon d'écoute des véhicules AU SOL doit être plus
     // large : avant, il restait fixé à 16 cases comme à pied, alors qu'un
     // avion/hélicoptère couvre bien plus de terrain d'un coup — la
@@ -6682,18 +6695,23 @@ const Game = {
     updateHud();
   },
   talkieTick() {
-    // Autonomie augmentée drastiquement : avant, une batterie pleine ne
-    // tenait qu'environ 8 minutes allumée (0.01 toutes les 5 s) — beaucoup
-    // trop court pour un talkie-walkie. Décharge divisée par 10.
+    // Autonomie augmentée une première fois (8 min -> ~83 min, 0.01 -> 0.001
+    // toutes les 5 s), encore insuffisant en usage réel : un vrai
+    // talkie-walkie tient des heures. Décharge à nouveau divisée, pour une
+    // pleine charge allumée en continu autour de 4h30 (au lieu de ~83 min).
     if (this.talkie.owned && this.talkie.on) {
-      this.talkie.battery = Math.max(0, this.talkie.battery - 0.001);
+      this.talkie.battery = Math.max(0, this.talkie.battery - 0.0003);
       if (this.talkie.battery <= 0) { this.talkie.on = false; announce('Batterie du talkie-walkie épuisée. Il s\'éteint.', 'assertive'); }
     }
   },
   talkiePTT(message) {
     if (!this.talkie.owned || !this.talkie.on) return announce('Allumez d\'abord votre talkie-walkie.', 'assertive');
     if (this.talkie.battery <= 0.02) return announce('Batterie trop faible pour émettre.', 'assertive');
-    this.talkie.battery = Math.max(0, this.talkie.battery - 0.002);
+    // Coût d'émission réduit dans la même proportion que la décharge
+    // ambiante ci-dessus : sinon, une utilisation fréquente du talkie
+    // (émissions répétées) restait disproportionnellement coûteuse en
+    // batterie malgré l'autonomie ambiante déjà allongée.
+    this.talkie.battery = Math.max(0, this.talkie.battery - 0.0005);
     AudioLib.playOnce('son_talkie_bip', { volume: 0.6 });
     const txt = message || 'Message reçu, à vous.';
     announce(`Vous émettez sur ${this.talkie.frequency.toFixed(3)} mégahertz : « ${txt} »`, 'polite');
