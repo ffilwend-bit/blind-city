@@ -436,14 +436,17 @@ function getNetworkTypeLabel() {
 }
 window.getNetworkTypeLabel = getNetworkTypeLabel;
 
-// 15 cases (60 m) jugé irréaliste pour une vraie voix, réduit à 5 (20 m) —
-// mais 20 m s'est révélé trop court à l'usage pour se coordonner sans se
-// coller l'un à l'autre. Remonté à 10 cases (40 m) : reste très en dessous
-// des 60 m d'origine, mais laisse une vraie marge de manœuvre. Le volume
-// continue de s'estomper progressivement jusqu'au bord (voir
-// updateProxVoiceSpatial), donc quelqu'un à 40 m s'entend déjà bien plus
-// faiblement que quelqu'un juste à côté.
-const PROX_VOICE_RADIUS = 10;
+// Revenu à la valeur d'origine (15 cases, 60 m) à la demande, après deux
+// réductions (60 -> 20 -> 40 m) qui n'ont pas réglé le vrai problème
+// signalé : silence TOTAL même juste à côté de l'autre joueur (distance
+// quasi nulle). Or le calcul de volume ci-dessous (updateProxVoiceSpatial)
+// donne un gain MAXIMAL (1 - d/RADIUS ≈ 1) quand d ≈ 0, quel que soit
+// RADIUS — la portée ne peut donc PAS expliquer un silence à bout portant.
+// Le vrai coupable est ailleurs (connexion WebRTC qui ne s'établit jamais,
+// ou permission micro jamais réellement accordée d'un côté ou de l'autre)
+// — remis à 60 m pour retirer complètement la distance de l'équation
+// pendant qu'on isole la vraie cause.
+const PROX_VOICE_RADIUS = 15;
 function evaluateProxVoice() {
   if (!Game.voiceOpen || !Net.connected) { if (ProxVoice.peers.size) ProxVoice.evaluate(new Set()); return; }
   const desired = new Set();
