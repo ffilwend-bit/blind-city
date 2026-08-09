@@ -436,10 +436,14 @@ function getNetworkTypeLabel() {
 }
 window.getNetworkTypeLabel = getNetworkTypeLabel;
 
-// Réduit de 15 cases (60 m) à 5 (20 m) : une vraie voix ne porte pas à 60 m,
-// et le volume constant jusqu'au bord (voir updateProxVoiceSpatial) rendait
-// cette portée d'autant plus irréaliste.
-const PROX_VOICE_RADIUS = 5;
+// 15 cases (60 m) jugé irréaliste pour une vraie voix, réduit à 5 (20 m) —
+// mais 20 m s'est révélé trop court à l'usage pour se coordonner sans se
+// coller l'un à l'autre. Remonté à 10 cases (40 m) : reste très en dessous
+// des 60 m d'origine, mais laisse une vraie marge de manœuvre. Le volume
+// continue de s'estomper progressivement jusqu'au bord (voir
+// updateProxVoiceSpatial), donc quelqu'un à 40 m s'entend déjà bien plus
+// faiblement que quelqu'un juste à côté.
+const PROX_VOICE_RADIUS = 10;
 function evaluateProxVoice() {
   if (!Game.voiceOpen || !Net.connected) { if (ProxVoice.peers.size) ProxVoice.evaluate(new Set()); return; }
   const desired = new Set();
