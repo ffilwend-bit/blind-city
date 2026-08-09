@@ -91,6 +91,14 @@ function setupExtraInput() {
     else if (shift && key === 'g') { e.preventDefault(); Game.stopGuidance(); }
     else if (shift && key === 'n') { e.preventDefault(); Game.toggleGpsBeeps(); }
     else if (shift && key === 'c') { e.preventDefault(); Game.cityTour(); }
+    // Guidage pas à pas vers le point pertinent de la mission active — le
+    // butin après avoir éliminé des gardes, le point de livraison une fois
+    // au volant du véhicule visé, etc. (voir guideToMissionObjective).
+    else if (shift && key === 'm') { e.preventDefault(); Game.guideToMissionObjective(); }
+    // Plonger / remonter directement, sans passer par le menu principal —
+    // fonctionne dans n'importe quelle eau libre (mer, rivière...), pas
+    // seulement dans une piscine intérieure (déjà accessible via E là-bas).
+    else if (shift && key === 'd') { e.preventDefault(); Game.diveInWater(); }
     else if (shift && key === 'u') {
       e.preventDefault();
       const live = Game.getLiveTarget();

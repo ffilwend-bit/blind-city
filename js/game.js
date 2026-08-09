@@ -464,10 +464,11 @@ const Game = {
       // malgré ce commentaire qui promettait déjà l'inverse : résultat, chaque
       // augmentation de la vitesse max des véhicules (voir catalogs.js) faisait
       // aussi fondre le réservoir plus vite, en plus d'un plein déjà trop
-      // court. Une première réduction (~27 km/plein) restait encore trop
-      // courte en usage réel (le réservoir se vidait bien avant la fin d'une
-      // session) : constante à nouveau réduite, pour ~100 km par plein.
-      if (!noFuelNeeded) v.fuel = Math.max(0, v.fuel - 0.00004);
+      // court. Deux réductions précédentes (~27 km puis ~100 km/plein)
+      // restaient encore trop courtes en usage réel : constante divisée par
+      // 500 par rapport à la dernière valeur, pour ~50 000 km par plein —
+      // le carburant cesse d'être une vraie contrainte de jeu.
+      if (!noFuelNeeded) v.fuel = Math.max(0, v.fuel - 0.00000008);
       // Conduite tout-terrain à vitesse notable : chance occasionnelle de
       // taper un trou (juste un bruit, pas de dégâts — la route cahoteuse).
       if (offroadFactor < 1 && Math.abs(v.speed) > cls.maxSpeed * 0.3 && UTIL.chance(0.03)) {
