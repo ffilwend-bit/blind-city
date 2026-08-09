@@ -235,9 +235,26 @@ function createPeerVoiceMesh(opts) {
       this.peers.set(peerId, entry);
       pc.onicecandidate = (e) => { if (e.candidate) Net.send({ type: 'mesh_ice', toId: peerId, channel: this.channel, data: e.candidate }); };
       pc.ontrack = (e) => opts.onRemoteStream(peerId, e.streams[0], entry);
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this.disconnect(peerId);
-      };
+      // Diagnostic vocal manquant jusque-là : la connexion échouait EN
+      // SILENCE (juste this.disconnect(peerId), aucun retour). Impossible de
+      // distinguer "ça sonne mais personne ne parle" de "la connexion audio
+      // n'a jamais abouti" — d'où des signalements de micro muet sans piste
+      // pour savoir où ça coince réellement. Pour le canal 'prox'
+      // uniquement (celui qu'on essaie de diagnostiquer, pour ne pas noyer
+      // le talkie/la musique d'annonces).
+      if (this.channel === 'prox') {
+        pc.onconnectionstatechange = () => {
+          const p = Net.remotePlayers.get(peerId);
+          const name = p ? `${p.firstName} ${p.lastName}` : 'un joueur proche';
+          if (pc.connectionState === 'connected') announce(`Connexion audio établie avec ${name}.`, 'polite');
+          else if (pc.connectionState === 'failed') announce(`Connexion audio impossible avec ${name} (échec réseau).`, 'polite');
+          if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this.disconnect(peerId);
+        };
+      } else {
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this.disconnect(peerId);
+        };
+      }
       if (isOfferer) {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
