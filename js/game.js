@@ -909,8 +909,11 @@ const Game = {
 
   // Retour de progression en véhicule : c'est ce qui fait « sentir » qu'on
   // avance (un non-voyant n'a que le son). Émet un tic de roulement à chaque
-  // case franchie et annonce les changements de quartier et de type de route,
-  // plus un rappel périodique de cap et de vitesse. Vaut en manuel ET en auto.
+  // case franchie et avertit en sortant de la route (info de sécurité). Le
+  // changement de quartier et le rappel périodique de cap/vitesse ont été
+  // retirés (le véhicule "parlait trop" en conduite normale) — ces infos
+  // restent consultables à tout moment SUR DEMANDE (I/L pour la position et
+  // la vitesse, C pour le cap). Vaut en manuel ET en auto.
   updateVehicleProgress() {
     if (!this.inVehicle || !this.vehicle) { this._vehProg = null; return; }
     const v = this.vehicle;
@@ -928,9 +931,13 @@ const Game = {
         const ratio = Math.min(1, Math.abs(v.speed) / (VEHICLE_CATALOG[v.type].maxSpeed || 1));
         Audio.tone({ freq: 90 + ratio * 120, type: 'sine', duration: 0.05, gain: 0.05, pan: 0 });
       }
-      // Changement de quartier.
+      // Changement de quartier : n'est PLUS annoncé automatiquement à
+      // chaque franchissement (le véhicule "parlait trop") — consultable à
+      // tout moment à la demande via announceLocation (touches I ou L), qui
+      // l'indique déjà. p.district n'a donc plus d'usage réel ici, gardé
+      // pour ne pas casser la structure de _vehProg sans raison.
       const dName = City.getDistrictAt(tx, ty).name;
-      if (dName !== p.district) { p.district = dName; announce(`Vous entrez dans ${dName}.`, 'polite'); }
+      if (dName !== p.district) p.district = dName;
       // Passage route / hors-route : ne s'applique qu'au sol — un aéronef EN
       // VOL (altitude > 0) survole tout, la notion de route au sol ne le
       // concerne plus (sinon « vous quittez la route » sonnait à tort en
@@ -940,12 +947,11 @@ const Game = {
       if (!(cls.flies && v.altitude > 0) && onRoad !== p.road) { p.road = onRoad; announce(onRoad ? 'Vous êtes sur la route.' : 'Attention, vous quittez la route.', 'polite'); }
       else if (cls.flies && v.altitude > 0) p.road = onRoad; // garde l'état à jour sans l'annoncer, pour ne pas annoncer faussement au posé
     }
-    // Rappel périodique de cap et de vitesse (sensation de progression continue).
-    if (moving && now - p.lastMsg > 7000) {
-      p.lastMsg = now;
-      const kmh = Math.round(Math.abs(v.speed) * 60);
-      announce(`Vous roulez vers le ${UTIL.cardinals[v.heading]}, environ ${kmh} kilomètres heure, dans ${p.district}.`, 'polite');
-    }
+    // Rappel périodique de cap/vitesse/quartier : supprimé (le véhicule
+    // "parlait trop" en conduite normale) — cap consultable à la demande
+    // via C (boussole), vitesse et quartier via I ou L (announceLocation,
+    // qui inclut maintenant la vitesse en véhicule). p.lastMsg n'est plus
+    // utilisé mais reste initialisé plus haut, sans effet.
     // Synchronise périodiquement le carburant/les dégâts en cours de route
     // (pas seulement à la descente) : sinon une longue session de conduite
     // sans se garer ne se répercutait jamais côté serveur en cas de crash,
@@ -1650,7 +1656,12 @@ const Game = {
     const bearing = UTIL.cardinals[this.heading];
     const alt = this.altitude > 0 ? `, altitude ${Math.round(this.altitude)} mètres` : '';
     const etage = (!this.inVehicle && this.floor > 0) ? `, étage ${this.floor}` : '';
-    announce(`Vous êtes dans ${d.name}, ${street}, cap vers le ${bearing}${etage}${alt}.`, 'polite');
+    // Vitesse : vérifiable ici À LA DEMANDE plutôt qu'annoncée toute seule
+    // toutes les 7 secondes en conduite (voir updateVehicleProgress) — le
+    // véhicule "parlait trop" pour une info qu'on peut très bien demander
+    // seulement quand on en a besoin.
+    const vitesse = (this.inVehicle && this.vehicle) ? `, ${Math.round(Math.abs(this.vehicle.speed) * 60)} kilomètres heure` : '';
+    announce(`Vous êtes dans ${d.name}, ${street}, cap vers le ${bearing}${vitesse}${etage}${alt}.`, 'polite');
   },
   // Heure et phase du cycle jour/nuit (voir DayNight) : partagée par tout le
   // monde en multijoueur, calculée localement en solo.
