@@ -1775,8 +1775,12 @@ function startGame(seed) {
     setInterval(() => Game.tickNpcTraffic(), 1000);
     setInterval(() => Game.updateBeacons(), 150);
     setInterval(() => Game.updateVehicleDelivery(), 1000);
-    setInterval(() => Game.updateGangCombat(), 1500);
-    setInterval(() => Game.updateWantedResponseCombat(), 1500);
+    // 1500 -> 1000 ms : cohérent avec missionCombatTick (voir
+    // game-missions-story.js), resserré pour le même motif — un garde qui
+    // ne tentait un tir qu'une fois toutes les quelques dizaines de
+    // secondes ne donnait pas l'impression d'un vrai échange de tirs.
+    setInterval(() => Game.updateGangCombat(), 1000);
+    setInterval(() => Game.updateWantedResponseCombat(), 1000);
     setInterval(() => Game.updateWantedChase(), 800);
     setInterval(() => Convoy.tick(), 2500);
     setInterval(() => Game.vendorTick(), 2000);
