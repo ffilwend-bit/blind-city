@@ -1381,7 +1381,10 @@ Object.assign(Game, {
   // à randomEncounters() ci-dessous, dont le panoramique est purement
   // aléatoire, sans PNJ réel derrière).
   tickPassersby() {
-    if (this.inVehicle || this.unconscious || this.interior) return;
+    // this.interior ET this.indoors (voir tickAmbientVehicles) : un lieu
+    // sans plan de pièces (station-service, garage...) ne posait que
+    // this.indoors, jamais coupé ici auparavant.
+    if (this.inVehicle || this.unconscious || this.interior || this.indoors) return;
     const now = Date.now();
     if (now - (this._lastPassantLine || 0) < 12000) return; // pas plus d'une bribe toutes les 12 s
     const nearby = City.npcs.filter(n => !n.dead && !n.hostile && !n.menotte && !n.knockedOut && !n.handsUp && UTIL.dist(n, this) < 8);
@@ -1398,6 +1401,14 @@ Object.assign(Game, {
   },
   // Random encounters
   randomEncounters() {
+    // N'est normalement appelée QUE depuis le déplacement piéton extérieur
+    // (voir move()), lui-même déjà détourné vers _moveInterior tant que
+    // this.interior est actif — mais un lieu SANS plan de pièces (station-
+    // service, garage...) ne pose que this.indoors, jamais this.interior :
+    // le déplacement y restait donc le déplacement extérieur normal, et
+    // cette fonction pouvait faire "passer une moto" ou "aboyer un chien"
+    // en pleine station-service. Garde explicite, ceinture et bretelles.
+    if (this.interior || this.indoors) return;
     if (UTIL.chance(0.02)) {
       const options = ['Un chien aboie à l\'est.','Un klaxon retentit au nord.','Des sirènes au loin.','Des enfants rient à proximité.','Un moteur de moto démarre.','Une porte claque.','Un véhicule passe non loin.'];
       const msg = UTIL.pick(options);

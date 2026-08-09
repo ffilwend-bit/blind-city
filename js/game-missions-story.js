@@ -271,7 +271,7 @@ Object.assign(Game, {
       const d = UTIL.dist(n, this);
       if (d > 14) return;
       const weapon = WEAPON_CATALOG[n.weapon];
-      const fireChance = Math.max(0.05, 0.35 - d * 0.015);
+      const fireChance = Math.max(0.1, 0.4 - d * 0.015); // plancher/base remontés, cohérent avec le reste (voir missionCombatTick)
       if (weapon && UTIL.chance(fireChance)) {
         this.resolveNpcShotAtPlayer(n, weapon, d, 14);
         // Chaque tir essuyé (touché ou raté) augmente la chance de le repérer précisément.
@@ -334,7 +334,12 @@ Object.assign(Game, {
   missionCombatTick(key) {
     this._missionCombatCooldowns = this._missionCombatCooldowns || {};
     const now = Date.now();
-    if (now - (this._missionCombatCooldowns[key] || 0) < 1500) return false;
+    // Correctif #133 (60 tirs/seconde -> rythme "réaliste") avait resserré ce
+    // throttle à 1500 ms, combiné à des chances de tir déjà prudentes : le
+    // résultat cumulé rendait les gardes quasi passifs (un tir toutes les
+    // 6 à 30 secondes par garde selon la distance). Resserré à 1000 ms —
+    // toujours très loin de l'ancien excès, mais un vrai échange de tirs.
+    if (now - (this._missionCombatCooldowns[key] || 0) < 1000) return false;
     this._missionCombatCooldowns[key] = now;
     return true;
   },
@@ -560,7 +565,8 @@ Object.assign(Game, {
           const d = UTIL.dist(n, this.vehicle);
           if (d > 12) return;
           const weapon = WEAPON_CATALOG[n.weapon];
-          if (weapon && UTIL.chance(Math.max(0.05, 0.3 - d * 0.02))) {
+          // Chance de tir remontée (voir missionCombatTick) : trop rare avant.
+          if (weapon && UTIL.chance(Math.max(0.1, 0.45 - d * 0.02))) {
             if (UTIL.chance(0.4)) {
               const dmg = Math.round(weapon.dmg * 0.6);
               client.health = Math.max(0, client.health - dmg);
@@ -732,7 +738,8 @@ Object.assign(Game, {
       squad.forEach(g => {
         const d = UTIL.dist(g, this);
         const weapon = WEAPON_CATALOG[g.weapon];
-        if (weapon && UTIL.chance(Math.max(0.05, 0.3 - d * 0.015))) this.resolveNpcShotAtPlayer(g, weapon, d, 14);
+        // Chance de tir remontée (voir missionCombatTick) : trop rare avant.
+        if (weapon && UTIL.chance(Math.max(0.1, 0.45 - d * 0.015))) this.resolveNpcShotAtPlayer(g, weapon, d, 14);
       });
       return;
     }

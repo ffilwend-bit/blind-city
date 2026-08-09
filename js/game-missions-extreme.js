@@ -35,7 +35,8 @@ Object.assign(Game, {
       const d = UTIL.dist(n, this);
       if (d > 12) return;
       const weapon = WEAPON_CATALOG[n.weapon];
-      if (weapon && UTIL.chance(Math.max(0.05, 0.25 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
+      // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
+      if (weapon && UTIL.chance(Math.max(0.1, 0.4 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
     });
     if (!squad.length) {
       if (ds.wave >= 3) {
@@ -145,7 +146,8 @@ Object.assign(Game, {
       const d = UTIL.dist(n, this);
       if (d > 10) return;
       const weapon = WEAPON_CATALOG[n.weapon];
-      if (weapon && UTIL.chance(Math.max(0.05, 0.28 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 10);
+      // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
+      if (weapon && UTIL.chance(Math.max(0.1, 0.43 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 10);
     });
     const now = Date.now();
     if (frontSquad.length === 0 && rearSquad.length > 0 && !rearEngaged && now - this.convoyState.lastReinforce > 15000) {
@@ -215,7 +217,8 @@ Object.assign(Game, {
         // sans le moindre avertissement.
         if (!ds.spotted) { ds.spotted = true; announce(`${guard.name} vous repère !`, 'assertive'); this.npcVoiceReaction(guard.x, guard.y, { group: 'enerve', count: 1, radius: 14 }); }
         const weapon = WEAPON_CATALOG[guard.weapon];
-        if (weapon && this.missionCombatTick('depot') && UTIL.chance(Math.max(0.05, 0.2 - d * 0.015))) this.resolveNpcShotAtPlayer(guard, weapon, d, 8);
+        // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
+        if (weapon && this.missionCombatTick('depot') && UTIL.chance(Math.max(0.1, 0.35 - d * 0.015))) this.resolveNpcShotAtPlayer(guard, weapon, d, 8);
         guard.x += Math.sign(this.x - guard.x); guard.y += Math.sign(this.y - guard.y);
       }
     }
@@ -261,7 +264,8 @@ Object.assign(Game, {
       const attacker = City.npcs.find(n => n.id === this.vipState.lastAttackerId);
       if (attacker && !attacker.dead) {
         const d = UTIL.dist(attacker, this);
-        if (d < 8 && this.missionCombatTick('vip') && UTIL.chance(0.3)) {
+        // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
+        if (d < 8 && this.missionCombatTick('vip') && UTIL.chance(0.45)) {
           const weapon = WEAPON_CATALOG[attacker.weapon];
           if (UTIL.chance(0.3)) { vip.health -= UTIL.randInt(10, 25); announce(`${vip.name} est touché ! Santé : ${Math.round(vip.health)}%.`, 'assertive'); }
           else this.resolveNpcShotAtPlayer(attacker, weapon, d, 8);
@@ -423,7 +427,8 @@ Object.assign(Game, {
       const d = UTIL.dist(n, this);
       if (d > 12) return;
       const weapon = WEAPON_CATALOG[n.weapon];
-      if (weapon && UTIL.chance(Math.max(0.05, 0.28 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
+      // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
+      if (weapon && UTIL.chance(Math.max(0.1, 0.43 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
     });
   },
 
@@ -523,7 +528,8 @@ Object.assign(Game, {
       const d = UTIL.dist(n, this);
       if (d > 12) return;
       const weapon = WEAPON_CATALOG[n.weapon];
-      if (weapon && UTIL.chance(Math.max(0.05, 0.3 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
+      // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
+      if (weapon && UTIL.chance(Math.max(0.1, 0.45 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
     });
   },
 

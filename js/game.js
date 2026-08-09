@@ -713,14 +713,21 @@ const Game = {
   // (on l'entend de loin), plus court pour un véhicule au sol.
   tickAmbientVehicles() {
     if (!window.AudioLib || typeof AudioLib.playLoopInstance !== 'function') return;
-    // Dans un bâtiment (this.interior) : les bribes de PNJ (tickPassersby) et
-    // le bruit ambiant de la ville sont déjà coupés, mais PAS les moteurs des
+    // Dans un bâtiment : les bribes de PNJ (tickPassersby) et le bruit
+    // ambiant de la ville sont déjà coupés, mais PAS les moteurs des
     // véhicules d'autres joueurs/PNJ — incohérent, une maison isole aussi du
     // bruit de la circulation. On arrête toute boucle déjà lancée (sinon elle
     // continue de jouer au dernier volume connu, plus jamais mise à jour tant
     // qu'on ne quitte pas ce `return` anticipé) puis on coupe le reste de la
     // fonction ; la sortie du bâtiment relance normalement au tick suivant.
-    if (this.interior) {
+    // this.interior ET this.indoors : DEUX flags différents et pas toujours
+    // ensemble — this.interior seulement pour un lieu avec un vrai plan de
+    // pièces à parcourir (maison, banque, commissariat...), this.indoors
+    // pour TOUT lieu où l'on entre, y compris ceux sans plan interne
+    // (station-service, garage, aéroport, port...). Ne tester que
+    // this.interior laissait ces derniers sans aucune coupure du bruit
+    // ambiant — corrigé en testant les deux.
+    if (this.interior || this.indoors) {
       (this._ambientVehicleIds || []).forEach(id => AudioLib.stopLoopInstance(id));
       this._ambientVehicleIds = new Set();
       return;

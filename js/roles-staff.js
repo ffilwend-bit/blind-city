@@ -53,12 +53,19 @@ function npcTick() {
     // acculée (tout près), sinon elle prend la fuite. Les témoins proches
     // s'affolent aussi. Les hostiles/fugitifs/policiers ne sont pas concernés.
     // Incohérence corrigée : Game.x/y restent figés à la position d'ENTRÉE
-    // pendant qu'on est dans un bâtiment (le déplacement intérieur se fait
-    // sur un plan séparé, voir _moveInterior/this.interior.ix/iy) — un PNJ
-    // resté près de la porte se retrouvait donc "à distance de vue" d'une
-    // arme qu'il ne pouvait pourtant pas voir à travers les murs. Aucune
-    // réaction tant que le joueur est à l'intérieur (Game.interior).
-    if (Game.weaponOut && !Game.interior && !n.hostile && !n.menotte && !n.knockedOut && n.job !== 'police' && n.job !== 'fugitif') {
+    // pendant qu'on est dans un bâtiment AVEC plan de pièces (le déplacement
+    // intérieur se fait sur un plan séparé, voir _moveInterior/
+    // this.interior.ix/iy) — un PNJ resté près de la porte se retrouvait
+    // donc "à distance de vue" d'une arme qu'il ne pouvait pourtant pas voir
+    // à travers les murs. Un lieu SANS plan de pièces (station-service,
+    // garage...) ne pose que Game.indoors, jamais Game.interior — testé
+    // aussi, par cohérence avec le reste (voir tickAmbientVehicles/
+    // tickPassersby). Aucune réaction tant que le joueur est indiqué comme
+    // à l'intérieur, d'une façon ou d'une autre — ni tant qu'il est dans un
+    // véhicule (vitres fermées) ou en plein vol : personne dehors ne peut
+    // voir une arme braquée à travers une carrosserie ou depuis le sol
+    // quand on survole la ville en avion/hélico.
+    if (Game.weaponOut && !Game.interior && !Game.indoors && !Game.inVehicle && !n.hostile && !n.menotte && !n.knockedOut && n.job !== 'police' && n.job !== 'fugitif') {
       const d = UTIL.dist(n, Game);
       const aimed = Game.lockedTarget && !Game.lockedTarget.isPlayer && Game.lockedTarget.id === n.id;
       if ((aimed || d < 6) && !n.handsUp && !n.fleeing) {
@@ -71,15 +78,16 @@ function npcTick() {
       }
     }
     // Mains en l'air : figé tant qu'on le braque de près ; se calme sinon.
-    // Se calme aussi dès que le joueur entre dans un bâtiment (Game.interior)
-    // — même logique que ci-dessus : plus vu, donc plus de menace perçue.
+    // Se calme aussi dès que le joueur entre dans un bâtiment (Game.interior
+    // OU Game.indoors) ou monte dans un véhicule — même logique que
+    // ci-dessus : plus vu, donc plus de menace perçue.
     if (n.handsUp) {
-      if (!Game.weaponOut || Game.interior || UTIL.dist(n, Game) > 8) n.handsUp = false;
+      if (!Game.weaponOut || Game.interior || Game.indoors || Game.inVehicle || UTIL.dist(n, Game) > 8) n.handsUp = false;
       else continue;
     }
     // Fuite : court à l'opposé du joueur ; s'arrête quand la menace s'éloigne.
     if (n.fleeing) {
-      if (!Game.weaponOut || Game.interior || UTIL.dist(n, Game) > 16) { n.fleeing = false; }
+      if (!Game.weaponOut || Game.interior || Game.indoors || Game.inVehicle || UTIL.dist(n, Game) > 16) { n.fleeing = false; }
       else {
         const dx = Math.sign(n.x - Game.x) || UTIL.randInt(-1, 1), dy = Math.sign(n.y - Game.y) || UTIL.randInt(-1, 1);
         const nx = n.x + dx, ny = n.y + dy;

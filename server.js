@@ -242,7 +242,18 @@ function serveStaticFile(res, filePath) {
   const ext = path.extname(filePath).toLowerCase();
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Fichier introuvable.'); return; }
-    res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' });
+    const headers = { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' };
+    // HTML/JS : aucun en-tête de cache n'était envoyé auparavant. Sans
+    // validateur explicite, un navigateur peut appliquer un cache
+    // "heuristique" et continuer à servir une VIEILLE version du jeu depuis
+    // son cache local pendant un moment après un déploiement — un correctif
+    // pourtant bien en ligne peut alors sembler "ne pas marcher" pour
+    // quelqu'un qui rouvre simplement le jeu sans vider son cache. no-cache
+    // force une revalidation à chaque chargement (pas un no-store : le
+    // navigateur peut réutiliser sa copie si le serveur confirme qu'elle
+    // est encore à jour, donc pas de re-téléchargement systématique inutile).
+    if (ext === '.html' || ext === '.js') headers['Cache-Control'] = 'no-cache';
+    res.writeHead(200, headers);
     res.end(data);
   });
 }
