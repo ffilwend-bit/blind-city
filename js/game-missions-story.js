@@ -267,13 +267,15 @@ Object.assign(Game, {
       announce('Vous vous êtes trop éloigné : le repaire reste sous le contrôle du gang.', 'polite');
       return;
     }
+    // Portée élargie (14 -> 18, sous le seuil de 20 qui annule le raid si on
+    // s'éloigne trop) : coupait tout tir à distance réaliste (voir tickPlanqueGardee).
     squad.forEach(n => {
       const d = UTIL.dist(n, this);
-      if (d > 14) return;
+      if (d > 18) return;
       const weapon = WEAPON_CATALOG[n.weapon];
       const fireChance = Math.max(0.1, 0.4 - d * 0.015); // plancher/base remontés, cohérent avec le reste (voir missionCombatTick)
       if (weapon && UTIL.chance(fireChance)) {
-        this.resolveNpcShotAtPlayer(n, weapon, d, 14);
+        this.resolveNpcShotAtPlayer(n, weapon, d, 18);
         // Chaque tir essuyé (touché ou raté) augmente la chance de le repérer précisément.
         n._shotsAtPlayer = (n._shotsAtPlayer || 0) + 1;
         if (UTIL.chance(Math.min(0.9, 0.25 + n._shotsAtPlayer * 0.15))) this.revealShooter(n);
@@ -561,9 +563,10 @@ Object.assign(Game, {
       const squad = es.npcIds.map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
       if (!squad.length) { es.npcIds = []; announce('Les assaillants sont neutralisés. La route est libre.', 'assertive'); }
       else if (this.missionCombatTick('escorte')) {
+        // Portée élargie (12 -> 20) : coupait tout tir à distance réaliste (voir tickPlanqueGardee).
         squad.forEach(n => {
           const d = UTIL.dist(n, this.vehicle);
-          if (d > 12) return;
+          if (d > 20) return;
           const weapon = WEAPON_CATALOG[n.weapon];
           // Chance de tir remontée (voir missionCombatTick) : trop rare avant.
           if (weapon && UTIL.chance(Math.max(0.1, 0.45 - d * 0.02))) {
