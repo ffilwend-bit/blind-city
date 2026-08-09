@@ -194,6 +194,49 @@ Object.assign(Game, {
   stopGuidance() {
     if (this.guidanceTarget) { announce('Guidage arrêté.', 'interrupt'); this.guidanceTarget = null; this.guidanceAxis = null; this.guidanceFollowId = null; this.guidancePath = null; this._pathGoal = null; }
   },
+  // Guidage vocal pas à pas (même moteur que setGuidance, avec contournement
+  // d'obstacles) vers le POINT PERTINENT de la mission active en cours —
+  // pas juste une annonce de distance/cap ponctuelle (voir
+  // announceActiveMissionId), un vrai guidage continu qui se corrige au fur
+  // et à mesure qu'on avance. Avant, une fois les gardes/vigiles éliminés
+  // (planque gardée, dépôt d'armes...), rien ne guidait vers le butin ou —
+  // pour un recel de véhicule — vers le point de livraison une fois monté
+  // dedans : il fallait deviner la direction seul.
+  guideToMissionObjective() {
+    const m = this.activeMission;
+    if (!m) return announce('Aucune mission active pour le moment.', 'assertive');
+    let target = null;
+    if (m.type === 'recel_vehicule') {
+      // Pas encore au volant du véhicule visé : direction vers LUI. Une fois
+      // dedans : direction vers le point de livraison (voir tickRecelVehicule).
+      const vehicle = City.vehicles.find(v => v.id === m.vehicleId);
+      if (this.inVehicle && this.vehicle && vehicle && this.vehicle.id === vehicle.id) {
+        target = { name: m.dropName || 'le point de livraison', x: m.dropX, y: m.dropY };
+      } else if (vehicle) {
+        target = { name: vehicle.name || 'le véhicule à voler', x: vehicle.x, y: vehicle.y };
+      }
+    } else if (m.type === 'extraction_vip') {
+      // Pas encore récupéré le VIP : direction vers lui. Une fois à bord
+      // (this.vipState existe, voir tickExtractionVip) : direction vers le
+      // point d'exfiltration.
+      const vip = City.npcs.find(n => n.id === m.vipId);
+      if (this.vipState) target = { name: m.extractName || "le point d'exfiltration", x: m.extractX, y: m.extractY };
+      else if (vip) target = { name: 'le VIP à exfiltrer', x: vip.x, y: vip.y };
+    } else if (m.type === 'sabotage' && typeof m.objectiveX === 'number') {
+      target = { name: "l'objectif de sabotage", x: m.objectiveX, y: m.objectiveY };
+    } else if (m.type === 'chasse_primes' && this.bountyState) {
+      target = { name: this.bountyState.stationName || 'le commissariat', x: this.bountyState.stationX, y: this.bountyState.stationY };
+    } else if (typeof m.x === 'number' && typeof m.y === 'number') {
+      // Cas général (planque gardée, dépôt d'armes de gang, convoi blindé,
+      // défense de territoire, casse à deux rôles, braquage de banque...) :
+      // le point d'origine de la mission EST le point pertinent — que ce
+      // soit pour s'y rendre au départ, ou (planque gardée notamment) pour
+      // y revenir récupérer le butin une fois les gardes éliminés.
+      target = { name: m.title || "l'objectif de la mission", x: m.x, y: m.y };
+    }
+    if (!target) return announce('Impossible de déterminer une direction pour cette mission.', 'assertive');
+    this.setGuidance(target);
+  },
   // Guidage automatique EN DIRECT vers un joueur réel qui a partagé sa position
   // GPS avec vous. Le chemin (qui contourne les murs) se met à jour au fur et à
   // mesure qu'il se déplace, jusqu'à ce que vous le rejoigniez.
