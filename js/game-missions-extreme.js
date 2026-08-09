@@ -31,12 +31,14 @@ Object.assign(Game, {
     }
     const ds = this.defenseState;
     const squad = ds.npcIds.map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
+    // Portée alignée sur les vraies portées d'armes des gardes (voir
+    // tickPlanqueGardee) : 12 coupait tout tir à distance réaliste.
     if (this.missionCombatTick('defense')) squad.forEach(n => {
       const d = UTIL.dist(n, this);
-      if (d > 12) return;
+      if (d > 22) return;
       const weapon = WEAPON_CATALOG[n.weapon];
       // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
-      if (weapon && UTIL.chance(Math.max(0.1, 0.4 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
+      if (weapon && UTIL.chance(Math.max(0.1, 0.4 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 22);
     });
     if (!squad.length) {
       if (ds.wave >= 3) {
@@ -142,12 +144,14 @@ Object.assign(Game, {
     }
     const frontSquad = (m.frontIds || []).map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
     const rearSquad = (m.rearIds || []).map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
+    // Portée alignée sur les vraies portées d'armes des gardes (voir
+    // tickPlanqueGardee) : 10 coupait tout tir à distance réaliste.
     if (this.missionCombatTick('convoi')) [...frontSquad, ...rearSquad].forEach(n => {
       const d = UTIL.dist(n, this);
-      if (d > 10) return;
+      if (d > 22) return;
       const weapon = WEAPON_CATALOG[n.weapon];
       // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
-      if (weapon && UTIL.chance(Math.max(0.1, 0.43 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 10);
+      if (weapon && UTIL.chance(Math.max(0.1, 0.43 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 22);
     });
     const now = Date.now();
     if (frontSquad.length === 0 && rearSquad.length > 0 && !rearEngaged && now - this.convoyState.lastReinforce > 15000) {
@@ -211,14 +215,16 @@ Object.assign(Game, {
     const guard = City.npcs.find(n => n.id === m.guardId);
     if (guard && !guard.dead) {
       const d = UTIL.dist(guard, this);
-      if (d < 8) {
+      // Détection élargie (8 -> 14) : coupait toute réaction à distance
+      // réaliste (voir tickPlanqueGardee pour le même correctif).
+      if (d < 14) {
         // Réplique hostile AVANT le premier tir (une seule fois, à la
         // première détection) — avant, ce garde ouvrait le feu en silence,
         // sans le moindre avertissement.
         if (!ds.spotted) { ds.spotted = true; announce(`${guard.name} vous repère !`, 'assertive'); this.npcVoiceReaction(guard.x, guard.y, { group: 'enerve', count: 1, radius: 14 }); }
         const weapon = WEAPON_CATALOG[guard.weapon];
         // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
-        if (weapon && this.missionCombatTick('depot') && UTIL.chance(Math.max(0.1, 0.35 - d * 0.015))) this.resolveNpcShotAtPlayer(guard, weapon, d, 8);
+        if (weapon && this.missionCombatTick('depot') && UTIL.chance(Math.max(0.1, 0.35 - d * 0.015))) this.resolveNpcShotAtPlayer(guard, weapon, d, 14);
         guard.x += Math.sign(this.x - guard.x); guard.y += Math.sign(this.y - guard.y);
       }
     }
@@ -264,11 +270,11 @@ Object.assign(Game, {
       const attacker = City.npcs.find(n => n.id === this.vipState.lastAttackerId);
       if (attacker && !attacker.dead) {
         const d = UTIL.dist(attacker, this);
-        // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
-        if (d < 8 && this.missionCombatTick('vip') && UTIL.chance(0.45)) {
+        // Chance de tir + portée remontées (voir tickPlanqueGardee) : trop rare/rapproché avant.
+        if (d < 14 && this.missionCombatTick('vip') && UTIL.chance(0.45)) {
           const weapon = WEAPON_CATALOG[attacker.weapon];
           if (UTIL.chance(0.3)) { vip.health -= UTIL.randInt(10, 25); announce(`${vip.name} est touché ! Santé : ${Math.round(vip.health)}%.`, 'assertive'); }
-          else this.resolveNpcShotAtPlayer(attacker, weapon, d, 8);
+          else this.resolveNpcShotAtPlayer(attacker, weapon, d, 14);
         }
       } else { this.vipState.lastAttackerId = null; }
     }
@@ -412,10 +418,16 @@ Object.assign(Game, {
       }
       return;
     }
+    // Portées de tir/détection alignées sur les VRAIES portées d'armes des
+    // vigiles (pistolet 25, uzi 20, AK-47 45 — voir catalogs.js) : les
+    // anciens plafonds (12/8) coupaient tout tir dès qu'on engageait à
+    // distance réaliste (snipe, recul tactique...) — un joueur qui
+    // n'allait jamais au contact rapproché ne se faisait quasiment jamais
+    // tirer dessus, malgré des chances de tir déjà remontées.
     squad.forEach(n => {
       const d = UTIL.dist(n, this);
-      if (d > 12) return;
-      if (d < 8 && !this.stashState) {
+      if (d > 22) return;
+      if (d < 14 && !this.stashState) {
         this.stashState = 'engaged'; this.reportCrimeToPolice('coups_de_feu', 'Fusillade sur une planque gardée');
         announce('Les vigiles vous repèrent et ouvrent le feu !', 'assertive');
         // Réplique hostile AVANT le premier tir (pas seulement pendant
@@ -425,10 +437,10 @@ Object.assign(Game, {
     });
     if (this.missionCombatTick('planque')) squad.forEach(n => {
       const d = UTIL.dist(n, this);
-      if (d > 12) return;
+      if (d > 22) return;
       const weapon = WEAPON_CATALOG[n.weapon];
       // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
-      if (weapon && UTIL.chance(Math.max(0.1, 0.43 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
+      if (weapon && UTIL.chance(Math.max(0.1, 0.43 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 22);
     });
   },
 
@@ -524,12 +536,13 @@ Object.assign(Game, {
       announce('Vous avez neutralisé l\'équipe d\'intervention. Niveau de recherche réduit.', 'assertive');
       return;
     }
+    // Portée alignée sur les vraies portées d'armes des agents (voir tickPlanqueGardee).
     squad.forEach(n => {
       const d = UTIL.dist(n, this);
-      if (d > 12) return;
+      if (d > 22) return;
       const weapon = WEAPON_CATALOG[n.weapon];
       // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
-      if (weapon && UTIL.chance(Math.max(0.1, 0.45 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 12);
+      if (weapon && UTIL.chance(Math.max(0.1, 0.45 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 22);
     });
   },
 

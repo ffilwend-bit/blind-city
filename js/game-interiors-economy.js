@@ -226,6 +226,31 @@ Object.assign(Game, {
     // (menu de choix sinon, voire une tout autre interaction) — d'où le statut
     // "passager" qui semblait ne jamais se nettoyer une fois qu'on avait fait
     // autre chose entre-temps.
+    // Guidé (Maj+M, guideToMissionObjective) vers le véhicule d'un recel
+    // ALORS qu'on y arrive au volant de son PROPRE véhicule : E, avant, ne
+    // pouvait que faire descendre du sien (branche juste en dessous), sans
+    // jamais pouvoir atteindre le véhicule visé — il fallait deviner qu'il
+    // fallait d'abord descendre "à la main", puis remonter dans l'autre.
+    // On propose maintenant explicitement le choix, plutôt que de rendre la
+    // main sur un simple "vous descendez du véhicule" qui ignore la mission.
+    if (this.inVehicle && !this.ridingWith && this.activeMission && this.activeMission.type === 'recel_vehicule') {
+      const targetV = City.vehicles.find(v => v.id === this.activeMission.vehicleId);
+      if (targetV && targetV.id !== this.vehicle.id && UTIL.dist(targetV, this.vehicle) < 6) {
+        if (typeof ensureMenuOpen === 'function') ensureMenuOpen(); else el('menuOverlay').style.display = 'flex';
+        el('menuTitle').textContent = 'Véhicule de la mission à proximité';
+        const items = [
+          { id: 'target', title: `🚗 Descendre et monter dans ${targetV.name} (véhicule de la mission)`, desc: '' },
+          { id: 'exit', title: '🚪 Descendre ici seulement', desc: '' },
+        ];
+        renderMenu(items, (sel) => {
+          closeMenu();
+          this.interactVehicle(); // descend d'abord obligatoirement du sien
+          if (sel.id === 'target') setTimeout(() => this.interactVehicle(targetV), 300);
+        });
+        announce(`${targetV.name}, le véhicule de la mission, est à proximité. Il faut d'abord descendre pour l'atteindre.`, 'assertive');
+        return;
+      }
+    }
     if (this.inVehicle || this.ridingWith) return this.interactVehicle();
     // On rassemble TOUT ce avec quoi on peut interagir à portée (joueurs, PNJ,
     // bâtiments, maisons, véhicules, mine, gang, objets au sol). S'il n'y a
@@ -264,7 +289,11 @@ Object.assign(Game, {
         targets.push({ d: UTIL.dist(h, this), label: `🏠 ${h.name || 'une maison'} — touche Q pour entrer`, act: () => announce(`Vous êtes devant ${h.name || 'cette maison'}. Appuyez sur la touche Q, ou Ctrl+Alt+E, pour entrer.`, 'assertive') });
       }
     });
-    City.vehicles.filter(v => !this.inVehicle && UTIL.dist(v, this) < 3).forEach(v => {
+    // Portée alignée sur celle des bâtiments/maisons juste au-dessus (< 4,
+    // au lieu de < 3) : un véhicule qu'on vient de rejoindre à pied (guidé
+    // par Maj+M par exemple) ne devrait pas être hors de portée de E pour
+    // une histoire d'un mètre de trop.
+    City.vehicles.filter(v => !this.inVehicle && UTIL.dist(v, this) < 4).forEach(v => {
       // Distance précise et mention « à vous » : indispensable pour distinguer
       // deux véhicules du même modèle garés côte à côte, sans quoi le menu
       // affichait deux entrées au texte IDENTIQUE, impossibles à différencier.

@@ -1224,12 +1224,18 @@ function setupInput() {
     if (e.repeat) return;
     Game.keys.add(e.key.toLowerCase());
     const key = e.key.toLowerCase();
-    // Les combinaisons avec Ctrl / Alt / Cmd sont TOUTES gérées par l'autre
-    // gestionnaire (raccourcis de police-and-startup). Ici on ne traite que les
-    // touches simples : on sort dès qu'un de ces modificateurs est présent, pour
-    // ne jamais déclencher deux actions en même temps (ce qui « mangeait » ou
-    // parasitait certains raccourcis Ctrl/Alt).
-    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    // Les combinaisons avec Ctrl / Alt / Cmd / Maj sont TOUTES gérées par
+    // l'autre gestionnaire (raccourcis de police-and-startup). Ici on ne
+    // traite que les touches simples : on sort dès qu'un de ces
+    // modificateurs est présent, pour ne jamais déclencher deux actions en
+    // même temps. Maj (e.shiftKey) manquait ici : plusieurs touches simples
+    // de CE handler (m, d, v...) n'avaient pas leur propre garde
+    // "!e.shiftKey" comme e/s/t/z/1-9 l'ont déjà plus bas — Maj+M (menu
+    // principal ET guidage de mission), Maj+D (balise de porte ET plonger),
+    // Maj+V (micro de proximité ET klaxon) se déclenchaient donc TOUS LES
+    // DEUX à la fois. Un seul garde-fou ici règle tous les cas, présents et
+    // futurs, au lieu d'ajouter "!e.shiftKey" touche par touche.
+    if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
     // Déplacement : uniquement sans modificateur. Sinon, le pavé numérique sans
     // Verr Num (qui envoie Arrow…) déclenchait un déplacement en même temps
     // qu'un raccourci Maj+Alt+chiffre — d'où les comportements « bizarres ».
