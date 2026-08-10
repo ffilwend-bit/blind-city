@@ -231,7 +231,7 @@ function createPeerVoiceMesh(opts) {
       if (this.peers.has(peerId)) return; // connecté entre-temps par l'autre côté
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
-      const entry = { pc, pendingIce: [], remoteEl: null, audioNodes: null };
+      const entry = { pc, pendingIce: [], remoteEl: null, audioNodes: null, announcedState: null };
       this.peers.set(peerId, entry);
       pc.onicecandidate = (e) => { if (e.candidate) Net.send({ type: 'mesh_ice', toId: peerId, channel: this.channel, data: e.candidate }); };
       pc.ontrack = (e) => opts.onRemoteStream(peerId, e.streams[0], entry);
@@ -242,19 +242,39 @@ function createPeerVoiceMesh(opts) {
       // pour savoir où ça coince réellement. Pour le canal 'prox'
       // uniquement (celui qu'on essaie de diagnostiquer, pour ne pas noyer
       // le talkie/la musique d'annonces).
-      if (this.channel === 'prox') {
-        pc.onconnectionstatechange = () => {
+      //
+      // pc.connectionState (utilisé seul jusqu'ici) n'est PAS fiable sur tous
+      // les navigateurs/versions (certains Safari/iOS et WebView Android plus
+      // anciens ne le déclenchent jamais, ou le laissent bloqué à "new") — ce
+      // qui expliquerait un signalement "aucune des deux annonces jamais
+      // entendue" même si la négociation ICE, elle, aboutit bien ou échoue
+      // bien. pc.oniceconnectionstatechange (iceConnectionState) existe
+      // depuis les tout débuts de WebRTC et reste le signal le plus
+      // largement supporté : on écoute désormais les DEUX évènements, avec
+      // un verrou (entry.announcedState) pour ne jamais annoncer deux fois
+      // la même transition si les deux se déclenchent pour le même état.
+      const reportState = (state) => {
+        if (state === entry.announcedState) return;
+        if (state !== 'connected' && state !== 'failed') return; // seuls ces deux états nous intéressent ici
+        entry.announcedState = state;
+        if (this.channel === 'prox') {
           const p = Net.remotePlayers.get(peerId);
           const name = p ? `${p.firstName} ${p.lastName}` : 'un joueur proche';
-          if (pc.connectionState === 'connected') announce(`Connexion audio établie avec ${name}.`, 'polite');
-          else if (pc.connectionState === 'failed') announce(`Connexion audio impossible avec ${name} (échec réseau).`, 'polite');
-          if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this.disconnect(peerId);
-        };
-      } else {
-        pc.onconnectionstatechange = () => {
-          if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this.disconnect(peerId);
-        };
-      }
+          if (state === 'connected') announce(`Connexion audio établie avec ${name}.`, 'polite');
+          else announce(`Connexion audio impossible avec ${name} (échec réseau).`, 'polite');
+        }
+        if (state === 'failed') this.disconnect(peerId);
+      };
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected' || pc.connectionState === 'failed') reportState(pc.connectionState);
+        if (pc.connectionState === 'closed') this.disconnect(peerId);
+      };
+      pc.oniceconnectionstatechange = () => {
+        // 'completed' compte comme connecté (ICE a fini de vérifier toutes
+        // les paires de candidats, l'audio circule déjà depuis 'connected').
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') reportState('connected');
+        else if (pc.iceConnectionState === 'failed') reportState('failed');
+      };
       if (isOfferer) {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
@@ -464,14 +484,35 @@ window.getNetworkTypeLabel = getNetworkTypeLabel;
 // — remis à 60 m pour retirer complètement la distance de l'équation
 // pendant qu'on isole la vraie cause.
 const PROX_VOICE_RADIUS = 15;
+// Diagnostic supplémentaire : si personne à portée n'a désiré de connexion
+// (donc ProxVoice.connect() n'est JAMAIS appelé), aucune des deux annonces
+// "Connexion établie/impossible" ci-dessus ne peut se déclencher — silence
+// total, sans le moindre indice pour distinguer "vraiment seul" de "l'autre
+// joueur croit avoir activé son micro mais ça n'a pas marché de son côté".
+// On ne l'annonce qu'UNE fois par entrée dans cet état (pas à chaque tick).
+let proxReachabilityAnnounced = false;
 function evaluateProxVoice() {
-  if (!Game.voiceOpen || !Net.connected) { if (ProxVoice.peers.size) ProxVoice.evaluate(new Set()); return; }
+  if (!Game.voiceOpen || !Net.connected) { if (ProxVoice.peers.size) ProxVoice.evaluate(new Set()); proxReachabilityAnnounced = false; return; }
   const desired = new Set();
+  const nearbyMicOff = [];
   Net.remotePlayers.forEach((p, pid) => {
-    if (p.voiceOpen && UTIL.dist(Game, p) <= PROX_VOICE_RADIUS) desired.add(pid);
+    const d = UTIL.dist(Game, p);
+    if (d > PROX_VOICE_RADIUS) return;
+    if (p.voiceOpen) desired.add(pid);
+    else nearbyMicOff.push(p);
   });
   ProxVoice.evaluate(desired);
   updateProxVoiceSpatial();
+  if (desired.size === 0 && nearbyMicOff.length) {
+    if (!proxReachabilityAnnounced) {
+      proxReachabilityAnnounced = true;
+      const names = nearbyMicOff.slice(0, 3).map(p => `${p.firstName} ${p.lastName}`).join(', ');
+      const plural = nearbyMicOff.length > 1;
+      announce(`${names} ${plural ? 'sont à portée mais n\'ont pas activé leur' : 'est à portée mais n\'a pas activé son'} micro de proximité.`, 'polite');
+    }
+  } else {
+    proxReachabilityAnnounced = false;
+  }
 }
 function evaluateTalkieVoice() {
   if (!Game.talkie.on || !Net.connected) { if (TalkieVoice.peers.size) TalkieVoice.evaluate(new Set()); return; }
