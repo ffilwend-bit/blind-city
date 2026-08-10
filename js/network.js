@@ -342,10 +342,19 @@ const Net = {
     } else if (msg.type === 'job_granted') {
       Roles.pending = null;
       Roles.set(msg.role);
+      // Grade posé côté serveur à l'octroi (audit métiers/staff, item 8-9) :
+      // on aligne sur ce que le serveur a réellement retenu plutôt que sur
+      // le 'agent' par défaut posé localement par Roles.set(), pour éviter
+      // toute désynchro si le serveur avait déjà un grade différent.
+      if (msg.role === 'police' && msg.policeRank) Game.policeRank = msg.policeRank;
       announce(`${msg.byName} vous accorde le métier ${msg.roleName || (Roles.list[msg.role] && Roles.list[msg.role].name) || msg.role}.`, 'assertive');
     } else if (msg.type === 'job_rejected') {
       Roles.pending = null;
       announce(`Votre demande de métier « ${msg.roleName} » a été refusée par ${msg.byName}.`, 'assertive');
+    } else if (msg.type === 'job_request_replaced') {
+      // Audit métiers/staff, item 14 : avant, une nouvelle candidature
+      // écrasait la précédente en silence côté serveur.
+      announce(`Votre candidature pour ${msg.oldRoleName} est remplacée par celle pour ${msg.newRoleName}.`, 'polite');
     } else if (msg.type === 'staff_review_result') {
       announce(`Compte @${msg.username} : ${msg.status === 'approved' ? 'approuvé' : 'rejeté'}.`, 'assertive');
     } else if (msg.type === 'register_result' || msg.type === 'login_result' || msg.type === 'security_question_result' || msg.type === 'reset_password_result') {

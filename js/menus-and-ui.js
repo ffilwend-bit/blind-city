@@ -395,14 +395,25 @@ function openRoleMenu() {
     desc: v.free ? 'Rôle libre, aucune validation nécessaire.' : `Compétences : ${v.perms.join(', ')}. Nécessite la validation d'un administrateur ou d'un recruteur habilité.`
   }));
   if (Roles.pending) items.unshift({ id: 'pending_info', title: `⏳ Candidature en attente : ${Roles.list[Roles.pending.role].name}`, desc: 'Un administrateur ou un recruteur doit encore valider votre demande.' });
-  if (StaffMode.active && Roles.pending) {
-    items.push({ id: 'approve', title: '✅ Approuver (staff)', desc: 'Valider la candidature en attente.' });
-    items.push({ id: 'reject', title: '❌ Refuser (staff)', desc: 'Refuser la candidature en attente.' });
-  }
+  // Auto-approbation retirée (audit métiers/staff, item 2/5) : StaffMode.active
+  // implique toujours Net.connected (voir StaffMode.toggle), donc ce bouton
+  // ne pouvait QUE porter sur la candidature du joueur LOCAL lui-même (jamais
+  // celle d'un autre) — un staff pouvait ainsi s'auto-accorder n'importe quel
+  // métier payant sans jamais passer par le serveur. Seule la validation par
+  // un AUTRE administrateur (« Demandes de métier des joueurs ») compte
+  // désormais en multijoueur ; Roles.approve()/reject() restent utilisables
+  // hors ligne (solo) au besoin, via le code, plus par ce menu.
+  if (Roles.current !== 'citoyen') items.push({ id: 'resign', title: '🚪 Démissionner', desc: `Redevenir citoyen (actuellement ${Roles.list[Roles.current].name}).` });
+  // Accès recruteur (audit métiers/staff, item 7) : visible si nommé
+  // recruteur pour au moins un métier — mène aux mêmes candidatures que le
+  // panneau staff, mais filtrées à ce(s) métier(s) uniquement (voir serveur).
+  const myName = Game.player ? `${Game.player.firstName} ${Game.player.lastName}` : null;
+  const isRecruiter = myName && Object.values(Roles.recruiters || {}).some(list => list.includes(myName));
+  if (isRecruiter) items.push({ id: 'recruiter_requests', title: '📨 Demandes pour mon métier (recruteur)', desc: 'Voir et traiter les candidatures pour le(s) métier(s) où vous recrutez.' });
   renderMenu(items, (it) => {
     if (it.id === 'pending_info') return;
-    if (it.id === 'approve') { Roles.approve(); closeMenu(); return; }
-    if (it.id === 'reject') { Roles.reject(); closeMenu(); return; }
+    if (it.id === 'resign') { Roles.resign(); closeMenu(); return; }
+    if (it.id === 'recruiter_requests') { closeMenu(); openStaffJobRequestsMenu(); return; }
     Roles.applyFor(it.id); closeMenu();
   });
 }
@@ -442,11 +453,12 @@ function openAdminMenu() {
       items.push({ id: 'unban', title: '🔓 Gérer les bannissements', desc: 'Voir et lever les bannissements existants.' });
       items.push({ id: 'codes', title: '🔑 Changer les codes admin', desc: 'Réservé à l\'administrateur principal.' });
     }
-    items.push({ id: 'pending', title: '📋 Candidature en attente', desc: Roles.pending ? `${Roles.pending.applicant} demande : ${Roles.list[Roles.pending.role].name}.` : 'Aucune candidature en attente.' });
-    if (Roles.pending) {
-      items.push({ id: 'approve', title: '✅ Approuver la candidature', desc: 'Valide le métier demandé.' });
-      items.push({ id: 'reject', title: '❌ Refuser la candidature', desc: 'Refuse le métier demandé.' });
-    }
+    // L'ancienne entrée « Candidature en attente » ne portait en réalité QUE
+    // sur la propre candidature de l'admin lui-même (Roles.pending est local
+    // à chaque client, jamais celle d'un autre joueur) — confusion et faille
+    // d'auto-approbation (audit métiers/staff, item 2/5/11 : « fusionner ou
+    // clarifier les deux entrées candidatures »). Une seule entrée
+    // désormais, la file serveur, seule source de vérité en multijoueur.
     items.push({ id: 'jobrequests', title: '📨 Demandes de métier des joueurs', desc: 'Voir les candidatures de métier envoyées par les joueurs connectés, et les accorder ou refuser.' });
     items.push({ id: 'players', title: '🧭 Superviser les joueurs connectés', desc: `Position en temps réel et inventaire de chacun (${Net.connected ? Net.remotePlayers.size + 1 : 0} connecté(s)).` });
     items.push({ id: 'recruiter', title: '🧑‍💼 Nommer un recruteur', desc: 'Autoriser une personne à valider les candidatures d\'un métier précis (chaque patron peut recruter ses employés).' });
@@ -464,8 +476,6 @@ function openAdminMenu() {
     else if (it.id === 'ban') { openStaffBanMenu(); }
     else if (it.id === 'unban') { openStaffUnbanMenu(); }
     else if (it.id === 'codes') { openStaffCodeMenu(); }
-    else if (it.id === 'approve') { Roles.approve(); closeMenu(); }
-    else if (it.id === 'reject') { Roles.reject(); closeMenu(); }
     else if (it.id === 'recruiter') { openRecruiterAppointMenu(); }
     else if (it.id === 'jobrequests') { openStaffJobRequestsMenu(); }
     else if (it.id === 'pendingaccounts') { openStaffPendingAccountsMenu(); }
@@ -607,7 +617,13 @@ function openStaffJobRequestsMenu() {
       ];
       renderMenu(sub, (s) => {
         if (s.id === 'back') return openStaffJobRequestsMenu();
-        Net.send({ type: 'staff_grant_job', targetId: sel.req.id, role: sel.req.role, approve: s.id === 'grant' });
+        // Un non-staff qui arrive ici n'est jamais qu'un recruteur (le
+        // serveur a déjà filtré la liste à son métier, voir
+        // staff_list_job_requests) — audit métiers/staff, item 7 : envoyer
+        // le bon type de message pour que le serveur applique la bonne
+        // vérification d'autorisation (staffRole vs appartenance recruteur).
+        const msgType = StaffMode.active ? 'staff_grant_job' : 'recruiter_grant_job';
+        Net.send({ type: msgType, targetId: sel.req.id, role: sel.req.role, approve: s.id === 'grant' });
         closeMenu();
       });
     });
@@ -836,8 +852,25 @@ function openStaffLogMenu() {
 }
 function openStaffRoleTestMenu() {
   el('menuTitle').textContent = 'Tester un métier';
-  const items = Object.keys(Roles.list).map(id => ({ id, title: Roles.list[id].name, desc: id === Roles.current ? 'Métier actuel.' : 'Basculer sur ce métier pour test.' }));
-  renderMenu(items, (it) => { Roles.set(it.id); closeMenu(); });
+  // Isolation du rôle de test (audit métiers/staff, item 10) : mémorise le
+  // VRAI rôle avant le premier basculement, pour le restaurer automatiquement
+  // à la désactivation du mode staff (voir StaffMode.toggle) — sans ça, un
+  // rôle de test pouvait finir sauvegardé (save_progress) comme s'il
+  // s'agissait du vrai métier du compte. Whitelist serveur (item 3) en
+  // dernier filet si jamais ça arrivait quand même.
+  if (Game._realRoleBeforeTest === undefined) Game._realRoleBeforeTest = { role: Roles.current, policeRank: Game.policeRank };
+  const items = [{ id: '_restore', title: '↩️ Revenir à mon vrai métier', desc: `${Roles.list[Game._realRoleBeforeTest.role].name} — annule le test en cours.` }];
+  items.push(...Object.keys(Roles.list).map(id => ({ id, title: Roles.list[id].name, desc: id === Roles.current ? 'Métier actuel (test).' : 'Basculer sur ce métier pour test.' })));
+  renderMenu(items, (it) => {
+    if (it.id === '_restore') {
+      Roles.set(Game._realRoleBeforeTest.role);
+      Game.policeRank = Game._realRoleBeforeTest.policeRank;
+      Game._realRoleBeforeTest = undefined;
+    } else {
+      Roles.set(it.id);
+    }
+    closeMenu();
+  });
 }
 function openStaffCheatMenu() {
   el('menuTitle').textContent = 'Accès total (staff)';
