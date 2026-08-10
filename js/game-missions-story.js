@@ -399,8 +399,9 @@ Object.assign(Game, {
       if (UTIL.dist({ x: this.x, y: this.y }, m) < 3) {
         const distMeters = UTIL.dist({ x: m.x, y: m.y }, { x: m.dropX, y: m.dropY }) * CONFIG.METERS_PER_TILE;
         const timeLimit = Math.round(distMeters / 3) * 1000 + 25000;
-        this.fragileState = { missionId: m.id, condition: 100, deadline: Date.now() + timeLimit };
+        this.fragileState = { missionId: m.id, condition: 100, deadline: Date.now() + timeLimit, lastReminder: Date.now() };
         announce(`Colis récupéré ! Livrez-le à ${m.dropName} avant environ ${Math.round(timeLimit / 1000)} secondes. Évitez les chocs.`, 'assertive');
+        this.setGuidance({ name: m.dropName || 'le point de livraison', x: m.dropX, y: m.dropY });
       }
       return;
     }
@@ -408,6 +409,17 @@ Object.assign(Game, {
       announce('Trop de temps écoulé : le client renonce à la livraison.', 'assertive');
       this.fragileState = null; this.activeMission = null;
       return;
+    }
+    // Rappel périodique toutes les ~25s (audit accessibilité missions, fiche
+    // colis fragile P1) : temps restant + direction/distance de la dépose —
+    // avant, seul le choc était annoncé, rien ne rappelait l'échéance en cours de route.
+    const nowReminder = Date.now();
+    if (nowReminder - (this.fragileState.lastReminder || 0) > 25000) {
+      this.fragileState.lastReminder = nowReminder;
+      const remaining = Math.max(0, Math.round((this.fragileState.deadline - nowReminder) / 1000));
+      const dropDist = Math.round(UTIL.dist(this, { x: m.dropX, y: m.dropY }) * CONFIG.METERS_PER_TILE);
+      const dropDir = UTIL.bearing(m.dropX - this.x, m.dropY - this.y);
+      announce(`Il reste ${remaining} secondes. Destination : ${m.dropName}, à ${dropDist} mètres, vers le ${dropDir}.`, 'polite');
     }
     if (UTIL.dist({ x: this.x, y: this.y }, { x: m.dropX, y: m.dropY }) < 3) {
       const cond = Math.round(this.fragileState.condition);
@@ -431,6 +443,10 @@ Object.assign(Game, {
     npc.dead = true; npc.x = -999; // le PNJ "monte" : on le retire du monde pendant la course
     this.taxiState = { missionId: m.id, satisfaction: 100, lastSpeed: 0, wasBraking: false };
     announce(`${npc.name} monte à bord. Conduisez-le à ${m.dropName} en douceur.`, 'assertive');
+    // Guidage forcé dès l'embarquement (audit accessibilité missions, fiche
+    // taxi soigné P1) : avant, il fallait appuyer sur Maj+M soi-même pour
+    // obtenir la direction — désormais le GPS piéton/véhicule démarre seul.
+    this.setGuidance({ name: m.dropName || 'la destination du client', x: m.dropX, y: m.dropY });
   },
   // Menu d'embarquement, ouvert une seule fois sur demande (touche E) — pas
   // à chaque image, ce qui rendait le menu inutilisable auparavant.
@@ -454,7 +470,17 @@ Object.assign(Game, {
   },
   tickTaxiSoigne(m) {
     if (!this.taxiState) return; // en attente d'embarquement, voir interact() / boardTaxiClient
-    if (!this.inVehicle || !this.vehicle) return; // client à bord, en pause tant qu'on n'est pas au volant
+    if (!this.inVehicle || !this.vehicle) {
+      // Rappel throttlé (audit accessibilité missions, fiche taxi soigné P1) :
+      // avant, sortir du véhicule avec le client à bord mettait la mission en
+      // pause dans un silence total, sans dire pourquoi rien ne progressait.
+      const now = Date.now();
+      if (now - (this._taxiExitReminderAt || 0) > 8000) {
+        this._taxiExitReminderAt = now;
+        announce('Le client vous attend dans le véhicule : remontez au volant pour continuer la course.', 'polite');
+      }
+      return;
+    }
     if (UTIL.dist(this.vehicle, { x: m.dropX, y: m.dropY }) < 4) {
       const sat = Math.round(this.taxiState.satisfaction);
       const amount = Math.round(m.reward * Math.max(0.2, sat / 100));
@@ -575,14 +601,17 @@ Object.assign(Game, {
     this.vehicle.passengers.push({ id: npc.id, name: npc.name, health: npc.health });
     this.escorteState = { missionId: m.id, clientId: npc.id, ambushDone: false, npcIds: [] };
     announce(`${npc.name} monte, nerveux. Direction ${m.dropName}. Restez sur vos gardes.`, 'assertive');
+    // Guidage forcé dès l'embarquement (audit accessibilité missions, fiche
+    // escorte P1) : avant, Maj+M était nécessaire pour obtenir la direction.
+    this.setGuidance({ name: m.dropName || "le point d'arrivée", x: m.dropX, y: m.dropY });
   },
   triggerEscorteAmbush() {
     const es = this.escorteState; if (!es || !this.vehicle) return;
-    announce('Une embuscade armée vous prend pour cible !', 'assertive');
     this.reportCrimeToPolice('coups_de_feu', 'Fusillade lors d\'une escorte');
     const firstNames = ['Rachid', 'Sidiki', 'Tahirou', 'Abdoul'];
     const lastNames = ['Barry', 'Cissé', 'Diakité'];
     const count = UTIL.randInt(1, 2);
+    let firstSpawn = null;
     for (let i = 0; i < count; i++) {
       const gender = UTIL.pick(['homme', 'femme']);
       const npc = {
@@ -592,7 +621,12 @@ Object.assign(Game, {
         weapon: UTIL.pick(['pistolet_9', 'uzi']), outfit: generateNPCAppearance('ganger'),
       };
       City.npcs.push(npc); es.npcIds.push(npc.id);
+      if (!firstSpawn) firstSpawn = npc;
     }
+    // Direction des assaillants (audit accessibilité missions, fiche escorte
+    // P1) : avant, l'annonce ne disait ni combien ni d'où ils arrivaient.
+    const dir = firstSpawn ? UTIL.bearing(firstSpawn.x - this.vehicle.x, firstSpawn.y - this.vehicle.y) : null;
+    announce(`Une embuscade armée vous prend pour cible${dir ? ', depuis le ' + dir : ''} !`, 'assertive');
     // Réplique hostile AVANT le premier tir (pas seulement pendant l'échange,
     // voir resolveNpcShotAtPlayer) : le joueur entend l'embuscade réagir dès
     // qu'elle se déclenche, avant de commencer à essuyer des tirs.
@@ -627,7 +661,16 @@ Object.assign(Game, {
       updateHud();
       return;
     }
-    if (!this.inVehicle || !this.vehicle) return;
+    if (!this.inVehicle || !this.vehicle) {
+      // Rappel throttlé (audit accessibilité missions, fiche escorte P1) :
+      // avant, sortir du véhicule avec le client à bord ne disait rien.
+      const now = Date.now();
+      if (now - (this._escorteExitReminderAt || 0) > 8000) {
+        this._escorteExitReminderAt = now;
+        announce(`${client.name} vous attend dans le véhicule : remontez au volant pour continuer.`, 'polite');
+      }
+      return;
+    }
     if (!es.ambushDone && Math.random() < 0.008) { es.ambushDone = true; this.triggerEscorteAmbush(); }
     if (es.npcIds.length) {
       const squad = es.npcIds.map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
@@ -715,8 +758,14 @@ Object.assign(Game, {
         if (!this.inVehicle || !this.vehicle) return announce('Trouvez un véhicule pour transporter le blessé.', 'assertive');
         this.vehicle.passengers = this.vehicle.passengers || [];
         this.vehicle.passengers.push({ id: victim.id, name: victim.name, health: victim.health });
-        this.medicalState = { missionId: m.id, victimId: victim.id, lastTick: Date.now() };
-        announce(`${victim.name} est installé(e) dans le véhicule. Direction l'hôpital, vite !`, 'assertive');
+        this.medicalState = { missionId: m.id, victimId: victim.id, lastTick: Date.now(), lastThreshold: 100 };
+        // Santé annoncée au chargement + guidage hôpital immédiat (audit
+        // accessibilité missions, fiche urgence médicale P1) : avant, il
+        // fallait attendre l'arrivée pour connaître l'état du blessé, et
+        // Maj+M pour obtenir la direction.
+        const hopitalNow = City.pois.find(p => p.type === 'hopital');
+        announce(`${victim.name} est installé(e) dans le véhicule, santé à ${Math.round(victim.health)}%. Direction l'hôpital, vite !`, 'assertive');
+        if (hopitalNow) this.setGuidance({ name: "l'hôpital", x: hopitalNow.x, y: hopitalNow.y });
         return;
       }
       const now = Date.now();
@@ -732,14 +781,19 @@ Object.assign(Game, {
     const now = Date.now();
     const dt = Math.min(2000, now - ms.lastTick); ms.lastTick = now;
     victim.health = Math.max(0, victim.health - dt / 1000 * 0.6);
-    // Seuil de vie critique (audit accessibilité missions) : avant, la
+    // Trois seuils de vie (75/50/25%, fiche urgence médicale P1) : avant, la
     // dégradation passive du blessé était totalement silencieuse jusqu'à sa
     // mort — aucun moyen de savoir qu'il fallait accélérer avant qu'il ne
-    // soit trop tard.
-    if (victim.health <= 25 && !ms.warnedCritical) {
-      ms.warnedCritical = true;
+    // soit trop tard. Un seul palier à la fois (ms.lastThreshold ne baisse
+    // jamais deux fois pour le même passage).
+    const thresholds = [75, 50, 25];
+    const crossed = thresholds.find(t => victim.health <= t && ms.lastThreshold > t);
+    if (crossed !== undefined) {
+      ms.lastThreshold = crossed;
       Audio.suspicionAlert();
-      announce(`Attention : ${victim.name} est en danger critique, ${Math.round(victim.health)}% de vie. Foncez vers l'hôpital !`, 'assertive');
+      announce(crossed <= 25
+        ? `Attention : ${victim.name} est en danger critique, ${Math.round(victim.health)}% de vie. Foncez vers l'hôpital !`
+        : `${victim.name} : ${Math.round(victim.health)}% de vie.`, 'assertive');
     }
     if (victim.health <= 0) {
       announce(`${victim.name} n'a pas survécu. Mission échouée.`, 'assertive');
@@ -847,6 +901,27 @@ Object.assign(Game, {
       });
       return;
     }
+    // Proximité des gardes annoncée en continu + zone "repéré" avant le
+    // combat ouvert (audit accessibilité missions, fiche sabotage P1) :
+    // avant, rien n'était dit tant que le tir n'avait pas commencé — aucun
+    // moyen de savoir qu'on approchait trop près pour rester discret.
+    let nearestGuard = null, nearestGuardDist = Infinity;
+    guards.forEach(g => { const d = UTIL.dist(g, this); if (d < nearestGuardDist) { nearestGuardDist = d; nearestGuard = g; } });
+    if (nearestGuard && nearestGuardDist < 12) {
+      const now = Date.now();
+      if (now - (this._sabotageGuardMsgAt || 0) > 4000) {
+        this._sabotageGuardMsgAt = now;
+        const dm = Math.round(nearestGuardDist * CONFIG.METERS_PER_TILE);
+        const dir = UTIL.bearing(nearestGuard.x - this.x, nearestGuard.y - this.y);
+        announce(`${nearestGuard.name} à ${dm} mètres, vers le ${dir}.`, 'polite');
+      }
+      if (nearestGuardDist < 8 && !this._sabotageZoneWarned) {
+        this._sabotageZoneWarned = true;
+        announce(`Vous entrez dans le champ de vision de ${nearestGuard.name} : restez discret.`, 'assertive');
+      }
+    } else {
+      this._sabotageZoneWarned = false;
+    }
     // Détection : chance croissante à mesure qu'un garde s'approche.
     guards.forEach(g => {
       const d = UTIL.dist(g, this);
@@ -889,6 +964,26 @@ Object.assign(Game, {
         const dir = station ? UTIL.bearing(station.x - this.x, station.y - this.y) : '';
         const dist = station ? Math.round(UTIL.dist(station, this) * CONFIG.METERS_PER_TILE) : 0;
         announce(`${fugitive.name} est maîtrisé et vous suit. Emmenez-le vivant à ${this.bountyState.stationName}, vers le ${dir}, à ${dist} mètres.`, 'assertive');
+        // Guidage forcé dès le menottage (audit accessibilité missions, fiche
+        // chasse aux primes P1) : avant, Maj+M était nécessaire.
+        if (station) this.setGuidance({ name: station.name || 'le commissariat', x: station.x, y: station.y });
+      } else {
+        // États oraux + distance/direction pendant la traque, avant
+        // menottage (audit accessibilité missions, fiche chasse aux primes
+        // P1) : avant, rien n'était annoncé tant que le fugitif n'était pas
+        // capturé — impossible de le retrouver sans viser au hasard.
+        const now = Date.now();
+        if (now - (this._bountyChaseMsgAt || 0) > 4000) {
+          this._bountyChaseMsgAt = now;
+          const d = Math.round(UTIL.dist(fugitive, this) * CONFIG.METERS_PER_TILE);
+          const dir = UTIL.bearing(fugitive.x - this.x, fugitive.y - this.y);
+          const state = fugitive.menotte ? 'menotté' : (fugitive.health < 40 ? 'affaibli' : 'libre');
+          announce(`${fugitive.name} : ${state}, à ${d} mètres, vers le ${dir}.`, 'polite');
+        }
+        if (fugitive.health < 40 && !fugitive._weakWarned) {
+          fugitive._weakWarned = true;
+          announce(`${fugitive.name} est affaibli : vous pouvez tenter de le menotter.`, 'assertive');
+        }
       }
       return;
     }

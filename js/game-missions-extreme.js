@@ -99,9 +99,13 @@ Object.assign(Game, {
     const vaultCovered = meAtVault || others.some(p => UTIL.dist(p, m.vaultPoint) < 3);
     if (!this.extremeHeistState) {
       if (meAtServer || meAtVault) {
+        // Rôle du joueur local annoncé (audit accessibilité missions, fiche
+        // casse à deux rôles P1) : avant, rien ne disait explicitement à
+        // quel poste on se trouvait soi-même, seulement l'état des deux.
+        const myRole = meAtServer ? 'la salle des serveurs' : 'la chambre forte';
         if (serverCovered && vaultCovered) {
           this.extremeHeistState = { missionId: m.id, startedAt: Date.now(), crackTime: 25000, lastProgressMsg: Date.now() };
-          announce('Les deux postes sont occupés à la fois ! Piratage et perçage démarrent en parallèle. Restez chacun à votre poste.', 'assertive');
+          announce(`Les deux postes sont occupés à la fois ! Vous êtes à ${myRole}. Piratage et perçage démarrent en parallèle — restez à votre poste.`, 'assertive');
           if (UTIL.chance(0.3)) this.extremeHeistState.alarmTimer = setTimeout(() => this.reportCrimeToPolice('braquage_banque', 'Casse à deux rôles en cours'), UTIL.randInt(5000, 15000));
         } else {
           // Throttlé à ~5s (audit accessibilité missions) : sans ça, ce
@@ -110,7 +114,7 @@ Object.assign(Game, {
           const now = Date.now();
           if (now - (this._casseCoverageMsgAt || 0) > 5000) {
             this._casseCoverageMsgAt = now;
-            announce(`Casse à deux rôles : il faut un joueur réel à la salle des serveurs ET un autre à la chambre forte, en même temps. Serveur ${serverCovered ? 'couvert' : 'non couvert'}, coffre ${vaultCovered ? 'couvert' : 'non couvert'}.`, 'assertive', { tag: 'casse-checklist' });
+            announce(`Vous êtes à ${myRole}. Casse à deux rôles : il faut un joueur réel à la salle des serveurs ET un autre à la chambre forte, en même temps. Serveur ${serverCovered ? 'couvert' : 'non couvert'}, coffre ${vaultCovered ? 'couvert' : 'non couvert'}.`, 'assertive', { tag: 'casse-checklist' });
           }
         }
       }
@@ -169,9 +173,13 @@ Object.assign(Game, {
         }
       }
       if (frontEngaged && rearEngaged) {
-        this.convoyState = { missionId: m.id, lastReinforce: 0 };
+        this.convoyState = { missionId: m.id };
         this.reportCrimeToPolice('coups_de_feu', 'Fusillade lors d\'une attaque de convoi');
-        announce('Les deux extrémités du convoi sont engagées à la fois ! Neutralisez les gardes avant qu\'un camp ne reçoive du renfort.', 'assertive');
+        // Assignation claire (audit accessibilité missions, fiche convoi
+        // blindé P1) : avant, rien ne disait explicitement à quelle
+        // extrémité on se trouvait soi-même.
+        const mySide = UTIL.dist(this, m.frontPoint) < 6 ? "l'avant" : "l'arrière";
+        announce(`Les deux extrémités du convoi sont engagées à la fois ! Vous engagez ${mySide}. Neutralisez les gardes avant qu'un camp ne reçoive du renfort.`, 'assertive');
         // Réplique hostile AVANT le premier tir (pas seulement pendant
         // l'échange, voir resolveNpcShotAtPlayer).
         this.npcVoiceReaction(m.frontPoint.x, m.frontPoint.y, { group: 'enerve', count: 1, radius: 20 });
@@ -189,17 +197,43 @@ Object.assign(Game, {
       // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
       if (weapon && UTIL.chance(Math.max(0.1, 0.43 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 22);
     });
+    // Pré-avertissement 5s avant le renfort (audit accessibilité missions,
+    // fiche convoi blindé P1) : avant, le renfort tombait sans prévenir,
+    // annoncé seulement après coup. Chaque camp vide sans adversaire en face
+    // a son propre chrono (déclenché dès qu'il se vide) : avertissement à
+    // 10s, renfort effectif à 15s — direction donnée pour se repositionner.
     const now = Date.now();
-    if (frontSquad.length === 0 && rearSquad.length > 0 && !rearEngaged && now - this.convoyState.lastReinforce > 15000) {
-      this.convoyState.lastReinforce = now;
-      this.reinforceConvoySide(m, 'rear');
-      announce('L\'arrière du convoi, laissé sans adversaire, reçoit du renfort !', 'assertive');
-    }
-    if (rearSquad.length === 0 && frontSquad.length > 0 && !frontEngaged && now - this.convoyState.lastReinforce > 15000) {
-      this.convoyState.lastReinforce = now;
-      this.reinforceConvoySide(m, 'front');
-      announce('L\'avant du convoi, laissé sans adversaire, reçoit du renfort !', 'assertive');
-    }
+    const cs = this.convoyState;
+    if (frontSquad.length === 0 && rearSquad.length > 0 && !rearEngaged) {
+      if (!cs.rearEmptyAt) cs.rearEmptyAt = now;
+      const elapsed = now - cs.rearEmptyAt;
+      if (elapsed > 10000 && !cs.rearWarned) {
+        cs.rearWarned = true;
+        const dir = UTIL.bearing(m.rearPoint.x - this.x, m.rearPoint.y - this.y);
+        announce(`Attention : l'arrière du convoi, vers le ${dir}, va recevoir du renfort dans 5 secondes si personne ne s'y engage !`, 'assertive');
+      }
+      if (elapsed > 15000) {
+        cs.rearEmptyAt = null; cs.rearWarned = false;
+        const dir = UTIL.bearing(m.rearPoint.x - this.x, m.rearPoint.y - this.y);
+        this.reinforceConvoySide(m, 'rear');
+        announce(`L'arrière du convoi, laissé sans adversaire, reçoit du renfort, vers le ${dir} !`, 'assertive');
+      }
+    } else { cs.rearEmptyAt = null; cs.rearWarned = false; }
+    if (rearSquad.length === 0 && frontSquad.length > 0 && !frontEngaged) {
+      if (!cs.frontEmptyAt) cs.frontEmptyAt = now;
+      const elapsed = now - cs.frontEmptyAt;
+      if (elapsed > 10000 && !cs.frontWarned) {
+        cs.frontWarned = true;
+        const dir = UTIL.bearing(m.frontPoint.x - this.x, m.frontPoint.y - this.y);
+        announce(`Attention : l'avant du convoi, vers le ${dir}, va recevoir du renfort dans 5 secondes si personne ne s'y engage !`, 'assertive');
+      }
+      if (elapsed > 15000) {
+        cs.frontEmptyAt = null; cs.frontWarned = false;
+        const dir = UTIL.bearing(m.frontPoint.x - this.x, m.frontPoint.y - this.y);
+        this.reinforceConvoySide(m, 'front');
+        announce(`L'avant du convoi, laissé sans adversaire, reçoit du renfort, vers le ${dir} !`, 'assertive');
+      }
+    } else { cs.frontEmptyAt = null; cs.frontWarned = false; }
     if (frontSquad.length === 0 && rearSquad.length === 0) {
       const amount = m.reward;
       this.dirtyMoney += amount; Audio.cash();
