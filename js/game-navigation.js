@@ -218,6 +218,17 @@ Object.assign(Game, {
       const dir = UTIL.bearing(suspect.x - this.x, suspect.y - this.y);
       return announce(`${suspect.name} à ${meters} mètres, vers le ${dir}. Restez entre 12 et 20 mètres pour ne pas le perdre ni vous faire repérer.`, 'assertive');
     }
+    const target = this.resolveMissionTarget(m);
+    if (!target) return announce('Impossible de déterminer une direction pour cette mission.', 'assertive');
+    this.setGuidance(target);
+  },
+  // Cible de guidage pertinente pour la PHASE ACTIVE de la mission (hors
+  // filature, qui a son propre cas particulier ci-dessus) — extrait ici pour
+  // être partagé avec announceActiveMissionId (F8, audit accessibilité
+  // missions) : avant, F8 pointait toujours vers le point de départ brut de
+  // la mission (m.x/m.y), même une fois le colis en main ou le blessé
+  // chargé, une info devenue fausse dès la prise en charge.
+  resolveMissionTarget(m) {
     let target = null;
     if (m.type === 'recel_vehicule' || m.type === 'convoyage') {
       // Pas encore au volant du véhicule visé : direction vers LUI. Une fois
@@ -289,8 +300,7 @@ Object.assign(Game, {
       // y revenir récupérer le butin une fois les gardes éliminés.
       target = { name: m.title || "l'objectif de la mission", x: m.x, y: m.y };
     }
-    if (!target) return announce('Impossible de déterminer une direction pour cette mission.', 'assertive');
-    this.setGuidance(target);
+    return target;
   },
   // Guidage automatique EN DIRECT vers un joueur réel qui a partagé sa position
   // GPS avec vous. Le chemin (qui contourne les murs) se met à jour au fur et à
@@ -1306,6 +1316,15 @@ Object.assign(Game, {
             Audio.impact(0);
             this.playNpcHitCry(npc);
             announce(`Touché ${target.name} à la ${this.aimPart}. ${Math.round(dmg)} dégâts.`, 'assertive');
+            // Seuil de vie pour un PNJ protégé qu'il ne faut PAS tuer (chasse
+            // aux primes : capture vivante exigée — audit accessibilité
+            // missions) : sans ça, rien ne distinguait ce coup d'un coup sur
+            // n'importe quel autre PNJ, jusqu'à l'échec de mission constaté
+            // après coup.
+            if (npc.health > 0 && this.activeMission && this.activeMission.type === 'chasse_primes' && this.activeMission.fugitiveId === npc.id && npc.health <= 25) {
+              Audio.suspicionAlert();
+              announce(`Attention : ${npc.name} est à ${Math.round(npc.health)}% de vie — un coup de plus risque de le tuer, et la prime exige une capture vivante !`, 'assertive');
+            }
             if (npc.health <= 0) { this.killNPC(npc); }
             else {
               if (npc.hostile) npc.relation -= 40;

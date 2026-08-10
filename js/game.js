@@ -1024,8 +1024,24 @@ const Game = {
     if (!m) return announce('Aucune mission active pour le moment.', 'assertive');
     const parts = [`Mission active : ${m.title}, identifiant ${m.id}, récompense ${UTIL.formatMoney(m.reward)}`];
     if (m.authorizedIds && m.authorizedIds.length) parts.push(`identifiants autorisés : ${m.authorizedIds.join(', ')}`);
-    const d = Math.round(UTIL.dist(m, this) * CONFIG.METERS_PER_TILE);
-    parts.push(`objectif à ${d} mètres, vers le ${UTIL.bearing(m.x - this.x, m.y - this.y)}`);
+    // Objectif de la PHASE ACTIVE plutôt que du point de départ brut (audit
+    // accessibilité missions) : réutilise resolveMissionTarget (voir
+    // game-navigation.js), partagé avec guideToMissionObjective/Maj+M, pour
+    // que F8 dise la même chose que le guidage plutôt qu'une info obsolète
+    // dès que le colis est en main, le blessé chargé, etc.
+    if (m.type === 'filature') {
+      const suspect = City.npcs.find(n => n.id === m.suspectId && !n.dead);
+      if (suspect) {
+        const d = Math.round(UTIL.dist(suspect, this) * CONFIG.METERS_PER_TILE);
+        parts.push(`étape actuelle : filer ${suspect.name} à distance, actuellement à ${d} mètres, vers le ${UTIL.bearing(suspect.x - this.x, suspect.y - this.y)}`);
+      }
+    } else {
+      const target = this.resolveMissionTarget(m);
+      if (target) {
+        const d = Math.round(UTIL.dist(target, this) * CONFIG.METERS_PER_TILE);
+        parts.push(`objectif actuel : ${target.name}, à ${d} mètres, vers le ${UTIL.bearing(target.x - this.x, target.y - this.y)}`);
+      }
+    }
     announce(parts.join(', ') + '.', 'assertive');
   },
   // Missions à IDs façon GTA : au lancement d'une mission (sauf celles

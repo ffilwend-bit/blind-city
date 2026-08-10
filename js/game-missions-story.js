@@ -100,6 +100,16 @@ Object.assign(Game, {
       }
     }
     this.heistState.crackTimer = setTimeout(() => this.finishVaultBreach(1), crackTime);
+    // Progression orale toutes les ~5s (audit accessibilité missions) : avant,
+    // les 6 à 18 secondes de perçage/piratage restaient totalement muettes
+    // entre le lancement et la fin, sans aucun repère de temps restant.
+    const verb = forced ? 'Perçage forcé' : (bank.vaultType === 'electronique' ? 'Piratage' : 'Perçage discret');
+    for (let t = 5000; t < crackTime - 1500; t += 5000) {
+      const remaining = Math.round((crackTime - t) / 1000);
+      setTimeout(() => {
+        if (this.heistState && this.heistState.crackTimer) announce(`${verb} en cours : encore environ ${remaining} secondes.`, 'polite');
+      }, t);
+    }
   },
   executeExplosiveHeist(bank) {
     const grenade = this.inventory.find(i => i.category === 'explosif');
@@ -634,6 +644,11 @@ Object.assign(Game, {
               const dmg = Math.round(weapon.dmg * 0.6);
               client.health = Math.max(0, client.health - dmg);
               announce(`${client.name} est touché ! Santé : ${Math.round(client.health)}%.`, 'assertive');
+              // Seuil de vie critique (audit accessibilité missions) : un
+              // signal distinct, une seule fois, pour qu'un joueur non-voyant
+              // sache que le client risque de mourir avant le prochain coup,
+              // pas seulement "touché" comme n'importe quel autre coup.
+              if (client.health <= 25 && !es.warnedCritical) { es.warnedCritical = true; Audio.suspicionAlert(); }
             } else {
               this.resolveNpcShotAtPlayer(n, weapon, d, 12);
             }
@@ -717,6 +732,15 @@ Object.assign(Game, {
     const now = Date.now();
     const dt = Math.min(2000, now - ms.lastTick); ms.lastTick = now;
     victim.health = Math.max(0, victim.health - dt / 1000 * 0.6);
+    // Seuil de vie critique (audit accessibilité missions) : avant, la
+    // dégradation passive du blessé était totalement silencieuse jusqu'à sa
+    // mort — aucun moyen de savoir qu'il fallait accélérer avant qu'il ne
+    // soit trop tard.
+    if (victim.health <= 25 && !ms.warnedCritical) {
+      ms.warnedCritical = true;
+      Audio.suspicionAlert();
+      announce(`Attention : ${victim.name} est en danger critique, ${Math.round(victim.health)}% de vie. Foncez vers l'hôpital !`, 'assertive');
+    }
     if (victim.health <= 0) {
       announce(`${victim.name} n'a pas survécu. Mission échouée.`, 'assertive');
       this.medicalState = null; this.activeMission = null;
@@ -763,6 +787,20 @@ Object.assign(Game, {
       announce(`${m.rivalName} franchit la ligne d'arrivée avant vous. Course perdue.`, 'assertive');
       this.courseState = null; this.activeMission = null;
       return;
+    }
+    // Position relative du rival, toutes les ~5s (audit accessibilité
+    // missions) : avant, rien ne disait si on menait la course ou non avant
+    // l'arrivée ou la défaite — impossible de savoir s'il fallait pousser
+    // le véhicule ou si la victoire était déjà assurée.
+    const now = Date.now();
+    if (now - (cs.lastPosMsg || 0) > 5000) {
+      cs.lastPosMsg = now;
+      const myPos = this.inVehicle && this.vehicle ? this.vehicle : this;
+      const playerToDrop = UTIL.dist(myPos, { x: m.dropX, y: m.dropY });
+      const rivalToDrop = UTIL.dist(cs.rival, { x: m.dropX, y: m.dropY });
+      const ahead = playerToDrop < rivalToDrop;
+      const gap = Math.round(Math.abs(playerToDrop - rivalToDrop) * CONFIG.METERS_PER_TILE);
+      announce(`${m.rivalName} ${ahead ? 'derrière vous' : 'devant vous'}, écart d'environ ${gap} mètres.`, 'polite');
     }
     if (!this.inVehicle || !this.vehicle) return;
     const cls = VEHICLE_CATALOG[this.vehicle.type];
