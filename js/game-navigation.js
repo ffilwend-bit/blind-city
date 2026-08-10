@@ -187,8 +187,18 @@ Object.assign(Game, {
     this.guidanceTarget = poi;
     this.guidanceAxis = null; this.guidanceFollowId = null;
     this.guidancePath = null; this._pathGoal = null; // force un nouveau calcul de chemin
+    this._offRouteWarned = false; // nouvelle destination : pas de sortie de trajectoire à signaler pour l'instant
     announce(`Guidage activé vers ${poi.name}. Je vous indique la direction au fur et à mesure, en contournant les obstacles.`, 'interrupt');
     this._lastGuidanceMsg = 0;
+    // Rappel Maj+N (bips GPS), une seule fois par navigateur, à la première
+    // activation du guidage EN VÉHICULE (audit véhicules/GPS, item 2) :
+    // moteur échantillonné + guidage + éventuellement une mission qui parle
+    // en même temps peuvent vite saturer la voix, et Maj+N n'était sinon
+    // découvrable que via l'aide complète (Maj+C), jamais vue par beaucoup.
+    if (this.inVehicle && !localStorage.getItem('blind_city_gps_veh_tip_shown')) {
+      localStorage.setItem('blind_city_gps_veh_tip_shown', '1');
+      speak('En conduite, vous pouvez activer les bips GPS avec Maj+N pour ne pas saturer la voix.', 'polite');
+    }
     this.updateGuidance(true);
   },
   stopGuidance() {
@@ -214,9 +224,20 @@ Object.assign(Game, {
     if (m.type === 'filature') {
       const suspect = City.npcs.find(n => n.id === m.suspectId && !n.dead);
       if (!suspect) return announce('Suspect introuvable pour le moment.', 'assertive');
-      const meters = Math.round(UTIL.dist(suspect, this) * CONFIG.METERS_PER_TILE);
+      const dTiles = UTIL.dist(suspect, this);
+      const meters = Math.round(dTiles * CONFIG.METERS_PER_TILE);
       const dir = UTIL.bearing(suspect.x - this.x, suspect.y - this.y);
-      return announce(`${suspect.name} à ${meters} mètres, vers le ${dir}. Restez entre 12 et 20 mètres pour ne pas le perdre ni vous faire repérer.`, 'assertive');
+      // Seuils réutilisés depuis tickFilature (game-missions-story.js), pas
+      // recopiés en mètres à la main (audit véhicules/GPS, item 1) : avant,
+      // ce message disait « restez entre 12 et 20 mètres », un chiffre
+      // inventé qui ne correspondait ni aux seuils réels du tick (3/12/20
+      // CASES, soit 12/48/80 mètres), ni à la zone actuellement affichée par
+      // le suivi périodique — de quoi pousser le joueur droit vers l'échec.
+      const t = this.FILATURE_THRESHOLDS;
+      const closeM = Math.round(t.close * CONFIG.METERS_PER_TILE);
+      const goodM = Math.round(t.good * CONFIG.METERS_PER_TILE);
+      const zone = dTiles < t.close ? 'trop près' : dTiles <= t.good ? 'bonne distance' : 'trop loin';
+      return announce(`${suspect.name} à ${meters} mètres, vers le ${dir} — ${zone}. Restez entre ${closeM} et ${goodM} mètres pour ne pas le perdre ni vous faire repérer.`, 'assertive');
     }
     const target = this.resolveMissionTarget(m);
     if (!target) return announce('Impossible de déterminer une direction pour cette mission.', 'assertive');
@@ -389,6 +410,16 @@ Object.assign(Game, {
     const prevTurnDiff = this._lastTurnDiff;
     let instruction;
     if (vcls && vcls.flies && this.vehicle.altitude > 0) {
+      // Précision donnée UNE FOIS par navigateur, au tout premier guidage en
+      // vol (audit véhicules/GPS, item 9) : sans ça, le guidage aérien
+      // réutilise le même style de consigne ("Tournez à droite, puis X
+      // mètres") que le guidage au sol, sans jamais dire que c'est
+      // maintenant une ligne droite qui survole tout, pas un chemin qui
+      // contourne les bâtiments comme à pied ou en voiture.
+      if (!localStorage.getItem('blind_city_gps_flight_tip_shown')) {
+        localStorage.setItem('blind_city_gps_flight_tip_shown', '1');
+        speak('Guidage aérien : cap direct, les bâtiments sont survolés.', 'polite');
+      }
       instruction = this._flightInstruction(t);
     } else {
       // Guidage le long d'un VRAI chemin praticable (contourne les bâtiments et
@@ -491,6 +522,18 @@ Object.assign(Game, {
         if (d < best) { best = d; bi = i; }
       }
       this._pathIdx = bi; offPath = best > 1;
+      // Déviation IMPORTANTE (bien au-delà de la simple imprécision d'un pas
+      // qui déclenche déjà le recalcul silencieux ci-dessous) : une annonce
+      // dédiée, une seule fois par sortie de trajectoire — audit véhicules/
+      // GPS, item 7. Avant, après un mauvais virage qui écarte franchement
+      // du chemin, seul le contenu de la consigne changeait sans prévenir,
+      // aucun signal explicite que le trajet entier venait d'être recalculé.
+      if (best > 10 && !this._offRouteWarned) {
+        this._offRouteWarned = true;
+        speak('Hors itinéraire, recalcul du chemin.', 'assertive', { tag: 'guidance-offroute' });
+      } else if (best <= 3) {
+        this._offRouteWarned = false;
+      }
     }
     const stale = now - (this._pathComputedAt || 0) > 6000;
     if (goalMoved || !this.guidancePath || !this.guidancePath.length || offPath || stale) {

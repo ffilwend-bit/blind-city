@@ -536,12 +536,19 @@ Object.assign(Game, {
      ========================================================== */
 
   // 1. Filature discrète : rester dans la bonne fourchette de distance.
+  // Seuils en CASES, seule source de vérité pour tickFilature ET pour le
+  // message de Maj+M (guideToMissionObjective, game-navigation.js) — audit
+  // véhicules/GPS, item 1 : avant, le message Maj+M recopiait des mètres
+  // inventés à la main ("entre 12 et 20 mètres"), désynchronisés des vrais
+  // seuils ci-dessous (3/12/20 cases, soit 12/48/80 mètres à 4 m/case).
+  FILATURE_THRESHOLDS: { close: 3, good: 12, lost: 20 },
   filatureState: null,
   tickFilature(m) {
     const suspect = City.npcs.find(n => n.id === m.suspectId && !n.dead);
     if (!suspect) { this.activeMission = null; this.filatureState = null; return; }
     if (!this.filatureState) this.filatureState = { goodMs: 0, lastTick: Date.now(), lastWander: 0, suspicion: 0, lastStatusMsg: 0, wasHighSuspicion: false };
     const fs = this.filatureState;
+    const t = this.FILATURE_THRESHOLDS;
     const now = Date.now();
     const dt = Math.min(2000, now - fs.lastTick); fs.lastTick = now;
     if (now - fs.lastWander > 2000) {
@@ -551,14 +558,14 @@ Object.assign(Game, {
     }
     const myPos = this.inVehicle && this.vehicle ? this.vehicle : this;
     const d = UTIL.dist(suspect, myPos);
-    if (d < 3) {
+    if (d < t.close) {
       fs.suspicion += dt / 1000 * 15;
       if (fs.suspicion > 100) {
         announce(`${suspect.name} vous a repéré et s'enfuit ! Filature ratée.`, 'assertive');
         this.filatureState = null; this.activeMission = null;
         return;
       }
-    } else if (d <= 12) {
+    } else if (d <= t.good) {
       fs.suspicion = Math.max(0, fs.suspicion - dt / 1000 * 5);
       fs.goodMs += dt;
       if (fs.goodMs > 40000) {
@@ -574,7 +581,7 @@ Object.assign(Game, {
       }
     } else {
       fs.goodMs = Math.max(0, fs.goodMs - dt * 2);
-      if (d > 20) {
+      if (d > t.lost) {
         announce('Vous avez perdu le suspect de vue. Filature ratée.', 'assertive');
         this.filatureState = null; this.activeMission = null;
         return;
@@ -588,7 +595,7 @@ Object.assign(Game, {
     if (now - fs.lastStatusMsg > 3500) {
       fs.lastStatusMsg = now;
       const meters = Math.round(d * CONFIG.METERS_PER_TILE);
-      const zone = d < 3 ? 'trop près' : d <= 12 ? 'bonne distance' : 'trop loin';
+      const zone = d < t.close ? 'trop près' : d <= t.good ? 'bonne distance' : 'trop loin';
       const suspicionLevel = fs.suspicion > 66 ? 'élevée' : fs.suspicion > 33 ? 'moyenne' : 'faible';
       announce(`${suspect.name} à ${meters} mètres — ${zone}. Suspicion : ${suspicionLevel}.`, 'polite');
     }
