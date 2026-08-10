@@ -399,12 +399,26 @@ const Net = {
       VoiceChat.handleIce(msg.callId, msg.data);
     } else if (msg.type === 'voice_toggle') {
       Phone.onPeerVoiceToggle(msg.callId, !!msg.on);
+    // Bug corrigé : le ternaire précédent (talkie ? TalkieVoice : ProxVoice)
+    // envoyait TOUT canal différent de 'talkie' à ProxVoice — y compris
+    // 'music' (voir MusicVoice plus bas), dont les offres/réponses/ICE
+    // atterrissaient donc sur le mauvais maillage. Au mieux la musique ne se
+    // connectait jamais réellement (silencieuse chez les autres), au pire une
+    // offre 'music' pouvait renégocier par erreur une connexion 'prox' déjà
+    // établie avec ce même joueur (même peerId dans les deux maillages),
+    // cassant potentiellement une voix de proximité qui fonctionnait. Table
+    // de correspondance explicite pour que chaque canal aille au bon endroit,
+    // et pour qu'un futur canal mal orthographié n'atterrisse plus nulle part
+    // par erreur au lieu d'échouer silencieusement vers prox.
     } else if (msg.type === 'mesh_offer') {
-      (msg.channel === 'talkie' ? TalkieVoice : ProxVoice).handleOffer(msg.fromId, msg.data);
+      const mesh = { prox: ProxVoice, talkie: TalkieVoice, music: MusicVoice }[msg.channel];
+      if (mesh) mesh.handleOffer(msg.fromId, msg.data);
     } else if (msg.type === 'mesh_answer') {
-      (msg.channel === 'talkie' ? TalkieVoice : ProxVoice).handleAnswer(msg.fromId, msg.data);
+      const mesh = { prox: ProxVoice, talkie: TalkieVoice, music: MusicVoice }[msg.channel];
+      if (mesh) mesh.handleAnswer(msg.fromId, msg.data);
     } else if (msg.type === 'mesh_ice') {
-      (msg.channel === 'talkie' ? TalkieVoice : ProxVoice).handleIce(msg.fromId, msg.data);
+      const mesh = { prox: ProxVoice, talkie: TalkieVoice, music: MusicVoice }[msg.channel];
+      if (mesh) mesh.handleIce(msg.fromId, msg.data);
     } else if (msg.type === 'staff_auth_result') {
       StaffMode.onAuthResult(!!msg.ok, msg.staffRole, !!msg.auto);
     } else if (msg.type === 'staff_log') {
