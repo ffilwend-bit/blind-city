@@ -6,6 +6,32 @@
    équipe d'intervention, course-poursuite, convoyage de véhicule.
 ============================================================ */
 Object.assign(Game, {
+  // Statut d'équipe (qui couvre quel poste) pour les 3 missions collectives,
+  // utilisé UNIQUEMENT sur demande par F8 (announceActiveMissionId, voir
+  // game.js) — règle commune des fiches collectives ("bouton statut équipe"),
+  // implémentée en réutilisant l'état déjà présent plutôt qu'en ajoutant une
+  // annonce automatique de plus. Retourne null pour tout autre type de mission.
+  collectiveTeamStatus(m) {
+    const others = Net.connected ? Array.from(Net.remotePlayers.values()) : [];
+    if (m.type === 'defense_territoire' && m.entrances) {
+      const parts = m.entrances.map((e, i) => {
+        const covered = UTIL.dist(this, e) < 6 || others.some(p => UTIL.dist(p, e) < 6);
+        return `${e.name || `entrée ${i + 1}`} ${covered ? 'couverte' : 'libre'}`;
+      });
+      return `statut équipe : ${parts.join(', ')}`;
+    }
+    if (m.type === 'casse_extreme' && m.serverPoint && m.vaultPoint) {
+      const serverCovered = UTIL.dist(this, m.serverPoint) < 3 || others.some(p => UTIL.dist(p, m.serverPoint) < 3);
+      const vaultCovered = UTIL.dist(this, m.vaultPoint) < 3 || others.some(p => UTIL.dist(p, m.vaultPoint) < 3);
+      return `statut équipe : serveur ${serverCovered ? 'couvert' : 'libre'}, coffre ${vaultCovered ? 'couvert' : 'libre'}`;
+    }
+    if (m.type === 'convoi_blinde' && m.frontPoint && m.rearPoint) {
+      const frontEngaged = UTIL.dist(this, m.frontPoint) < 6 || others.some(p => UTIL.dist(p, m.frontPoint) < 6);
+      const rearEngaged = UTIL.dist(this, m.rearPoint) < 6 || others.some(p => UTIL.dist(p, m.rearPoint) < 6);
+      return `statut équipe : avant ${frontEngaged ? 'engagé' : 'libre'}, arrière ${rearEngaged ? 'engagé' : 'libre'}`;
+    }
+    return null;
+  },
   /* ==========================================================
      MISSION EXTRÊME — DÉFENSE DE TERRITOIRE (multijoueur obligatoire)
      3 entrées distinctes à couvrir en même temps par de vrais joueurs
@@ -33,7 +59,9 @@ Object.assign(Game, {
         }
         this.defenseState = { missionId: m.id, wave: 1, npcIds: [] };
         this.reportCrimeToPolice('coups_de_feu', `Fusillade au repaire des ${m.gangName}`);
-        announce(`Les 3 entrées sont couvertes ! La défense du repaire des ${m.gangName} commence.`, 'assertive');
+        // Suggestion de partage GPS, une seule fois au démarrage (audit
+        // accessibilité missions, fiche défense de territoire P1).
+        announce(`Les 3 entrées sont couvertes ! La défense du repaire des ${m.gangName} commence. Partagez votre position GPS entre vous si besoin de vous retrouver.`, 'assertive');
         this.spawnDefenseWave(m);
       }
       return;
@@ -69,8 +97,10 @@ Object.assign(Game, {
   spawnDefenseWave(m) {
     const ds = this.defenseState; if (!ds) return;
     const count = UTIL.randInt(2, 3) * ds.wave;
+    const perEntrance = new Map(); // audit accessibilité missions : compte par entrée pour un seul récap, pas une annonce par assaillant
     for (let i = 0; i < count; i++) {
       const entrance = UTIL.pick(m.entrances);
+      perEntrance.set(entrance, (perEntrance.get(entrance) || 0) + 1);
       const gender = UTIL.pick(['homme', 'femme']);
       const npc = {
         id: 'defwave_' + Date.now() + '_' + i, name: `Assaillant ${i + 1}`, job: 'ganger', gender,
@@ -80,6 +110,14 @@ Object.assign(Game, {
       };
       City.npcs.push(npc); ds.npcIds.push(npc.id);
     }
+    // Direction d'arrivée des ennemis, en un seul récap par vague (audit
+    // accessibilité missions, fiche défense de territoire P1) : chaque
+    // joueur entend d'où les assaillants arrivent PAR RAPPORT À LUI, pas
+    // seulement leur nombre.
+    const arrival = Array.from(perEntrance.entries())
+      .map(([e, n]) => `${n} vers le ${UTIL.bearing(e.x - this.x, e.y - this.y)}`)
+      .join(', ');
+    announce(`Assaillants en approche : ${arrival}.`, 'assertive');
     // Réplique hostile AVANT le premier tir (pas seulement pendant
     // l'échange, voir resolveNpcShotAtPlayer).
     this.npcVoiceReaction(this.x, this.y, { group: 'enerve', count: Math.min(2, count), radius: 20 });

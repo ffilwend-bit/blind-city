@@ -206,8 +206,15 @@ Object.assign(Game, {
     m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
     RPJournal.log('Mission', `Braquage réussi : ${UTIL.formatMoney(amount)} d'argent sale.`, 'alert');
     const alarmed = this.heistState.alarmed;
+    const bank = this.heistState.bank;
     this.heistState = null;
-    announce(`Coffre percé ! Vous embarquez ${UTIL.formatMoney(amount)}. ${alarmed ? 'Fuyez avant que la police n\'arrive !' : 'Personne n\'a rien remarqué.'}`, 'assertive');
+    // Direction de fuite (audit accessibilité missions, fiche braquage P2) :
+    // en cas d'alarme, une direction concrète pour s'éloigner de la banque,
+    // pas seulement « fuyez » sans savoir vers où.
+    const fleeMsg = alarmed
+      ? (bank ? ` Fuyez vers le ${UTIL.bearing(this.x - bank.x, this.y - bank.y)}, loin de la banque, avant que la police n'arrive !` : ' Fuyez avant que la police n\'arrive !')
+      : ' Personne n\'a rien remarqué.';
+    announce(`Coffre percé ! Vous embarquez ${UTIL.formatMoney(amount)}.${fleeMsg}`, 'assertive');
     updateHud();
   },
   abortBankHeist() {
@@ -302,6 +309,15 @@ Object.assign(Game, {
     if (myVcls && myVcls.flies && this.altitude > 5) return;
     const squad = rs.npcIds.map(id => City.npcs.find(n => n.id === id)).filter(n => n && !n.dead);
     if (!squad.length) return this.finishGangCombat(rs.gang, true);
+    // Nombre d'ennemis restants, annoncé UNIQUEMENT quand il change (un
+    // membre neutralisé) — audit accessibilité missions, fiche raid de gang
+    // P2. Pas de répétition périodique : un rappel à chaque mort suffit, et
+    // évite le bavardage inutile pendant l'échange de tirs.
+    if (rs.lastCount === undefined) rs.lastCount = squad.length;
+    if (squad.length < rs.lastCount) {
+      rs.lastCount = squad.length;
+      announce(`Ennemi neutralisé. ${squad.length} restant${squad.length > 1 ? 's' : ''}.`, 'polite');
+    }
     if (UTIL.dist(rs.gang, this) > 20) {
       this.gangRaidState = null;
       announce('Vous vous êtes trop éloigné : le repaire reste sous le contrôle du gang.', 'polite');
@@ -716,6 +732,10 @@ Object.assign(Game, {
           const risky = sel.id === 'centre';
           this.contrebandeState = { missionId: m.id, risky };
           announce(`Cargaison de ${m.cargo} récupérée, itinéraire ${risky ? 'par le centre-ville' : 'par la périphérie'}.`, 'assertive');
+          // Guidage vers le point de dépose pendant tout le trajet (audit
+          // accessibilité missions, fiche contrebande P2) : avant, seul
+          // Maj+M à la demande donnait une direction.
+          this.setGuidance({ name: m.dropName || 'le point de dépose', x: m.dropX, y: m.dropY });
         });
       }
       return;
@@ -731,6 +751,18 @@ Object.assign(Game, {
       announce(`Cargaison livrée sans encombre ! Vous touchez ${UTIL.formatMoney(amount)}.`, 'assertive');
       updateHud();
       return;
+    }
+    // Risque signalé à l'approche d'un vrai policier (audit accessibilité
+    // missions, fiche contrebande P2) : throttlé à une fois toutes les 20s
+    // pour ne pas devenir un bavardage inutile — un seul rappel suffit pour
+    // savoir qu'il vaut mieux s'écarter, pas un toutes les quelques secondes.
+    const nearCop = City.npcs.find(n => !n.dead && n.job === 'policier' && UTIL.dist(n, this) < 10);
+    if (nearCop) {
+      const now = Date.now();
+      if (now - (cs.lastCopWarning || 0) > 20000) {
+        cs.lastCopWarning = now;
+        announce('Un policier patrouille à proximité : évitez-le avec la cargaison.', 'polite');
+      }
     }
     const chance = cs.risky ? 0.003 : 0.001;
     if (Math.random() < chance) {

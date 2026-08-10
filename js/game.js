@@ -1042,6 +1042,12 @@ const Game = {
         parts.push(`objectif actuel : ${target.name}, à ${d} mètres, vers le ${UTIL.bearing(target.x - this.x, target.y - this.y)}`);
       }
     }
+    // Statut d'équipe pour les missions collectives, SUR DEMANDE uniquement
+    // via F8 (audit accessibilité missions, règles communes collectives) —
+    // pas d'annonce automatique périodique en plus des checklists déjà
+    // throttlées, pour ne pas ajouter de bavardage inutile.
+    const teamStatus = this.collectiveTeamStatus(m);
+    if (teamStatus) parts.push(teamStatus);
     announce(parts.join(', ') + '.', 'assertive');
   },
   // Missions à IDs façon GTA : au lancement d'une mission (sauf celles
