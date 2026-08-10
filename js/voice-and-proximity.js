@@ -226,7 +226,16 @@ function createPeerVoiceMesh(opts) {
       if (this.peers.has(peerId) || this.connecting.has(peerId)) return;
       this.connecting.add(peerId);
       let stream;
-      try { stream = await this.ensureLocalStream(); } finally { this.connecting.delete(peerId); }
+      try {
+        // La toute première connexion d'une session peut survenir avant que
+        // /ice-servers (voir menus-and-ui.js loadIceServers) ait répondu —
+        // sans cette attente, ICE_SERVERS ne contient encore que le repli
+        // local (STUN + TURN gratuit openrelay, sans le relais Cloudflare),
+        // moins fiable sur données mobiles/CGNAT. Plafonnée à 4 s, ne bloque
+        // donc jamais durablement une tentative de connexion.
+        if (window.iceServersReady) await window.iceServersReady;
+        stream = await this.ensureLocalStream();
+      } finally { this.connecting.delete(peerId); }
       if (!stream) return;
       if (this.peers.has(peerId)) return; // connecté entre-temps par l'autre côté
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
@@ -285,12 +294,31 @@ function createPeerVoiceMesh(opts) {
     async handleOffer(fromId, data) {
       if (!this.peers.has(fromId)) await this.connect(fromId, false);
       const entry = this.peers.get(fromId);
-      if (!entry) return; // pas de micro disponible localement
+      // Pas de micro disponible localement (permission refusée, périphérique
+      // occupé...) : avant, l'offre était jetée EN SILENCE — l'offreur restait
+      // bloqué à attendre indéfiniment une réponse qui n'arriverait jamais,
+      // sans le moindre indice de son côté pour comprendre pourquoi. On
+      // prévient maintenant explicitement l'offreur (mesh_reject) pour qu'il
+      // puisse l'annoncer et arrêter d'attendre.
+      if (!entry) { Net.send({ type: 'mesh_reject', toId: fromId, channel: this.channel }); return; }
       await entry.pc.setRemoteDescription(new RTCSessionDescription(data));
       this.flushIce(entry);
       const answer = await entry.pc.createAnswer();
       await entry.pc.setLocalDescription(answer);
       Net.send({ type: 'mesh_answer', toId: fromId, channel: this.channel, data: answer });
+    },
+
+    // Reçu par l'OFFREUR : le pair visé n'a pas pu répondre (pas de micro
+    // disponible de son côté). On avait déjà créé notre propre entrée dans
+    // this.peers en envoyant l'offre (voir connect() ci-dessus) — on la
+    // referme proprement au lieu de la laisser pendre indéfiniment.
+    onRejected(peerId) {
+      if (this.channel === 'prox') {
+        const p = Net.remotePlayers.get(peerId);
+        const name = p ? `${p.firstName} ${p.lastName}` : 'un joueur proche';
+        announce(`Connexion audio impossible avec ${name} (micro indisponible de son côté).`, 'polite');
+      }
+      this.disconnect(peerId);
     },
 
     async handleAnswer(fromId, data) {

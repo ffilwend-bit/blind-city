@@ -1839,6 +1839,21 @@ let ICE_SERVERS = [
 // Cloudflare (dernier recours) SEULEMENT s'il est configuré côté serveur —
 // voir server.js /ice-servers. ICE_SERVERS est lu au moment de l'appel (pas
 // figé), donc cette mise à jour profite à tout appel lancé après coup.
+// Attendu par createPeerVoiceMesh().connect() (voir voice-and-proximity.js)
+// avant d'ouvrir la toute première RTCPeerConnection d'une session : sans
+// ça, une connexion tentée dans la fraction de seconde suivant l'arrivée en
+// jeu utilisait le repli local (STUN + openrelay uniquement, pas de relais
+// Cloudflare) au lieu de la vraie liste — pas bloquant en soi (l'évaluation
+// toutes les 1 s reconnecte automatiquement avec la liste à jour si ce
+// premier essai échoue), mais autant partir du bon pied dès le premier
+// essai. Plafonné à 4 s pour ne jamais bloquer la voix indéfiniment si
+// /ice-servers ne répond jamais.
+let resolveIceServersReady;
+const iceServersReadyPromise = new Promise((resolve) => { resolveIceServersReady = resolve; });
+window.iceServersReady = Promise.race([
+  iceServersReadyPromise,
+  new Promise((resolve) => setTimeout(resolve, 4000)),
+]);
 async function loadIceServers() {
   try {
     const res = await fetch('/ice-servers');
@@ -1847,6 +1862,8 @@ async function loadIceServers() {
     if (data.iceServers && data.iceServers.length) ICE_SERVERS = data.iceServers;
   } catch (e) {
     console.warn('[TURN] Liste ICE du serveur indisponible, on garde le repli local.', e);
+  } finally {
+    resolveIceServersReady();
   }
 }
 // En local (file://), ce fetch échoue toujours (politique CORS du navigateur,
@@ -1854,6 +1871,7 @@ async function loadIceServers() {
 // audio-engine.js) — on ne le tente donc qu'en vrai déploiement (http/https),
 // pour ne pas polluer la console d'erreurs inutiles en local.
 if (typeof location !== 'undefined' && location.protocol !== 'file:') loadIceServers();
+else resolveIceServersReady(); // file:// local : jamais tenté, on ne bloque pas la voix pour autant
 // Demande l'accès au micro en prévenant d'abord l'utilisateur, une seule fois
 // par session : la fenêtre d'autorisation du navigateur est une fenêtre système
 // que le jeu ne peut pas rendre accessible lui-même, et certains lecteurs
