@@ -21,6 +21,19 @@ Object.assign(Game, {
     Net.send({ type: 'mission_reward_claim', missionType, amount: Math.round(amount) || 0, dirty: !!dirty });
   },
 
+  // Annonce de choc unifiée (audit accessibilité missions) : avant, un choc
+  // pendant colis fragile ou course VIP soignée dégradait bien la
+  // condition/satisfaction en silence, SANS jamais le dire — un joueur
+  // non-voyant n'avait aucun moyen de savoir où il en était avant l'échec.
+  // Point d'entrée unique, réutilisé par colis fragile, course VIP, urgence
+  // médicale (déjà annoncé mais réunifié ici) et n'importe quelle autre
+  // mission sensible aux chocs à l'avenir : son distinct + annonce avec le
+  // pourcentage restant, systématiquement.
+  announceShock(label, percent) {
+    Audio.impact();
+    announce(`Choc ! ${label} : ${Math.max(0, Math.round(percent))}%.`, 'assertive');
+  },
+
   /* ==========================================================
      BRAQUAGE DE BANQUE — mission complète, jamais la même routine :
      chaque banque a un profil de sécurité propre (révélé au repérage),
@@ -423,7 +436,11 @@ Object.assign(Game, {
   taxiRoughEvent(severity) {
     if (!this.taxiState) return;
     this.taxiState.satisfaction = Math.max(0, this.taxiState.satisfaction - severity);
-    if (severity > 5) announce(UTIL.pick(['Aïe ! Doucement !', 'Vous auriez pu freiner plus tôt !', 'C\'est bien secouant, tout ça...']), 'polite');
+    // Avant : phrase de circonstance SANS le pourcentage (« Aïe ! Doucement ! »)
+    // — impossible de savoir où en était vraiment la satisfaction avant la fin
+    // de la course. Le pourcentage réel prime sur la fioriture ; pas de double
+    // annonce pour rester concis (le véhicule "parle" déjà beaucoup par ailleurs).
+    if (severity > 5) this.announceShock('Satisfaction client', this.taxiState.satisfaction);
   },
   tickTaxiSoigne(m) {
     if (!this.taxiState) return; // en attente d'embarquement, voir interact() / boardTaxiClient

@@ -437,11 +437,14 @@ const Game = {
       if (!alreadyColliding) {
         const impactDmg = Math.round(Math.abs(v.speed) * 40 * (1 - (cls.armor || 0)));
         v.hp = Math.max(0, v.hp - impactDmg);
-        if (this.fragileState) this.fragileState.condition = Math.max(0, this.fragileState.condition - UTIL.randInt(15, 35));
+        if (this.fragileState) {
+          this.fragileState.condition = Math.max(0, this.fragileState.condition - UTIL.randInt(15, 35));
+          this.announceShock('Colis', this.fragileState.condition);
+        }
         if (this.taxiState) this.taxiRoughEvent(UTIL.randInt(15, 30));
         if (this.medicalState) {
           const victim = City.npcs.find(n => n.id === this.medicalState.victimId);
-          if (victim) { victim.health = Math.max(0, victim.health - UTIL.randInt(8, 18)); announce(`Le blessé encaisse le choc ! Santé : ${Math.round(victim.health)}%.`, 'assertive'); }
+          if (victim) { victim.health = Math.max(0, victim.health - UTIL.randInt(8, 18)); this.announceShock('État du blessé', victim.health); }
         }
         const otherVehicleHere = City.vehicles.some(ov => ov.id !== v.id && UTIL.dist(ov, { x: nx, y: ny }) < 1.5);
         // Diffusée aux joueurs proches (passager compris, qui se trouve à la
