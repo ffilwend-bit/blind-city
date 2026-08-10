@@ -699,6 +699,24 @@ wss.on('connection', (ws, req) => {
       send(ws, { type: 'staff_job_review_result', name: req.name, roleName: req.roleName, approved: !!msg.approve });
       broadcastStaffLog(`${player.firstName} ${player.lastName} a ${msg.approve ? 'accordé' : 'refusé'} le métier « ${req.roleName} » à ${req.name}.`);
     }
+
+    // Révocation de métier : jusqu'ici, staff_grant_job permettait
+    // d'ACCORDER un métier mais rien ne permettait de le RETIRER une fois
+    // attribué (audit structurel — trouvé aucune trace de révocation dans
+    // tout le code, client ou serveur). Réservé au staff, symétrique à
+    // staff_grant_job.
+    else if (msg.type === 'staff_revoke_job') {
+      if (!player.staffRole) { send(ws, { type: 'staff_error', text: 'Réservé au mode staff.' }); return; }
+      const target = players.get(msg.targetId);
+      if (!target) { send(ws, { type: 'staff_error', text: 'Joueur introuvable (déconnecté ?).' }); return; }
+      if (!target.role || target.role === 'citoyen') { send(ws, { type: 'staff_error', text: 'Ce joueur n\'a déjà aucun métier.' }); return; }
+      const oldRole = target.role;
+      target.role = 'citoyen';
+      target.policeRank = null;
+      send(target.ws, { type: 'job_revoked', oldRole, byName: `${player.firstName} ${player.lastName}` });
+      send(ws, { type: 'staff_job_review_result', name: `${target.firstName} ${target.lastName}`, roleName: oldRole, revoked: true });
+      broadcastStaffLog(`${player.firstName} ${player.lastName} a révoqué le métier de ${target.firstName} ${target.lastName} (était « ${oldRole} »).`);
+    }
     // Le staff demande à voir ce qu'un joueur connecté possède (inventaire,
     // véhicules, argent) : le serveur ne stocke pas ces données lui-même (le
     // jeu est côté client pour l'inventaire), donc il relaie la demande au

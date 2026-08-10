@@ -567,7 +567,22 @@ function openStaffPlayersMenu() {
         { id: 'inv', title: `🎒 Inventaire : ${(d.inventory || []).length ? d.inventory.join(', ') : 'vide'}`, desc: '' },
         { id: 'back', title: '↩️ Retour à la liste', desc: '' },
       ];
-      renderMenu(detailItems, (it) => { if (it.id === 'back') openStaffPlayersMenu(); });
+      // Révoquer un métier déjà accordé : aucun outil n'existait pour ça
+      // jusqu'ici (audit structurel) — staff_grant_job permettait
+      // d'accorder, jamais de retirer.
+      if (d.role && d.role !== 'citoyen') {
+        detailItems.splice(detailItems.length - 1, 0, { id: 'revoke', title: `🚫 Révoquer le métier (${d.role})`, desc: 'Remet ce joueur citoyen sans métier. Confirmation demandée.' });
+      }
+      renderMenu(detailItems, (it) => {
+        if (it.id === 'back') { openStaffPlayersMenu(); return; }
+        if (it.id === 'revoke') {
+          AccessibleConfirm.open('Révoquer le métier', `Retirer le métier « ${d.role} » à ${res.name} et le remettre citoyen ?`, (confirmed) => {
+            if (!confirmed) return;
+            Net.send({ type: 'staff_revoke_job', targetId: sel.id });
+            announce(`Révocation envoyée pour ${res.name}.`, 'assertive');
+          });
+        }
+      });
       announce(`${res.name} : à ${Math.round(d.x)}, ${Math.round(d.y)}. ${(d.inventory || []).length} objet(s) en poche.`, 'polite');
     };
     Net.send({ type: 'staff_inspect_request', targetId: sel.id });
