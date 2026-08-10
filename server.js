@@ -326,6 +326,14 @@ const newsArticles = [];
 const calls = new Map();
 /** @type {Map<string, {id:string,name:string,role:string,roleName:string,time:number}>} candidatures de métier en attente, par id de joueur */
 const jobRequests = new Map();
+// Offres de vente maison/véhicule en attente (voir house_sale_offer/
+// vehicle_sale_offer plus bas) : mémorise le prix NÉGOCIÉ (déjà plausibilisé
+// à l'offre) pour payer le vendeur avec une valeur de confiance quand
+// l'acheteur confirme, plutôt qu'une valeur reforgeable à l'étape de la
+// réponse. Clé : `${kind}:${sellerId}:${buyerId}`. Purgée à la réponse (ou
+// ignorée si trop ancienne, voir plus bas) — pas de nettoyage périodique
+// nécessaire pour ce volume.
+const pendingSales = new Map();
 
 // Météo PARTAGÉE par tout le monde sur ce serveur : avant, chaque client
 // tirait sa propre pluie au hasard, donc deux joueurs côte à côte pouvaient
@@ -816,10 +824,22 @@ wss.on('connection', (ws, req) => {
       send(target.ws, { type: 'share_gps', fromId: id, fromName: `${player.firstName} ${player.lastName}` });
     }
 
+    // Vente maison/véhicule entre deux vrais joueurs : bug trouvé en creusant
+    // l'économie (audit structurel) — l'acheteur payait bien (déduit en
+    // local avant l'envoi de sa réponse), mais le VENDEUR ne recevait
+    // jamais l'argent : seul un message "vente conclue" s'affichait chez
+    // lui, sans le moindre crédit. Le serveur mémorise maintenant le prix
+    // NÉGOCIÉ (déjà plausibilisé ci-dessous, borne à 500 millions) au moment
+    // de l'offre, et paie réellement le vendeur — via le même message
+    // 'money_received' que give_money, déjà géré côté client — dès que
+    // l'acheteur confirme avoir accepté. Le prix utilisé pour payer vient de
+    // cet enregistrement serveur, jamais d'une valeur reforgeable à l'étape
+    // de la réponse.
     else if (msg.type === 'house_sale_offer') {
       const target = players.get(msg.targetId);
       if (!target) return;
       const price = Math.max(1, Math.min(500000000, parseInt(msg.price, 10) || 0));
+      pendingSales.set(`house:${id}:${msg.targetId}`, { price, at: Date.now() });
       send(target.ws, { type: 'house_sale_offer', fromId: id, fromName: `${player.firstName} ${player.lastName}`, houseId: msg.houseId, houseName: safeName(msg.houseName, 'une maison', 60), price });
     }
 
@@ -827,13 +847,32 @@ wss.on('connection', (ws, req) => {
       const target = players.get(msg.targetId);
       if (!target) return;
       send(target.ws, { type: 'house_sale_response', accepted: !!msg.accepted, houseId: msg.houseId, byName: `${player.firstName} ${player.lastName}` });
+      const saleKey = `house:${msg.targetId}:${id}`; // targetId = vendeur (offreur d'origine), id = acheteur (répond ici)
+      const pending = pendingSales.get(saleKey);
+      pendingSales.delete(saleKey);
+      if (msg.accepted && pending && Date.now() - pending.at < 10 * 60 * 1000) {
+        send(target.ws, { type: 'money_received', fromName: `${player.firstName} ${player.lastName}`, amount: pending.price });
+      }
     }
 
     else if (msg.type === 'vehicle_sale_offer') {
       const target = players.get(msg.targetId);
       if (!target) return;
       const price = Math.max(1, Math.min(500000000, parseInt(msg.price, 10) || 0));
+      pendingSales.set(`vehicle:${id}:${msg.targetId}`, { price, at: Date.now() });
       send(target.ws, { type: 'vehicle_sale_offer', fromId: id, fromName: `${player.firstName} ${player.lastName}`, vehicleType: safeName(msg.vehicleType, '', 40), vehicleName: safeName(msg.vehicleName, 'un véhicule', 60), price });
+    }
+
+    else if (msg.type === 'vehicle_sale_response') {
+      const target = players.get(msg.targetId);
+      if (!target) return;
+      send(target.ws, { type: 'vehicle_sale_response', accepted: !!msg.accepted, byName: `${player.firstName} ${player.lastName}` });
+      const saleKey = `vehicle:${msg.targetId}:${id}`;
+      const pending = pendingSales.get(saleKey);
+      pendingSales.delete(saleKey);
+      if (msg.accepted && pending && Date.now() - pending.at < 10 * 60 * 1000) {
+        send(target.ws, { type: 'money_received', fromName: `${player.firstName} ${player.lastName}`, amount: pending.price });
+      }
     }
 
     else if (msg.type === 'taxi_request') {

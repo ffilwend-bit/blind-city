@@ -239,6 +239,17 @@ const Net = {
         Net.send({ type: 'house_sale_response', targetId: msg.fromId, accepted, houseId: msg.houseId });
       });
     } else if (msg.type === 'house_sale_response' || msg.type === 'vehicle_sale_response') {
+      // Le paiement au vendeur arrive séparément, via un message
+      // 'money_received' envoyé directement par le serveur (voir server.js —
+      // avant, le vendeur ne recevait jamais l'argent, seule cette annonce
+      // s'affichait). Ici on retire simplement la maison vendue de notre
+      // propre liste ownedHouses (les véhicules ne s'y prêtent pas : cette
+      // vente-là crée un véhicule NEUF chez l'acheteur, comme un
+      // concessionnaire, le vendeur n'en possédait pas d'exemplaire précis).
+      if (msg.accepted && msg.type === 'house_sale_response' && msg.houseId) {
+        const idx = Game.ownedHouses.indexOf(msg.houseId);
+        if (idx !== -1) Game.ownedHouses.splice(idx, 1);
+      }
       announce(msg.accepted ? `${msg.byName} accepte votre offre de vente. La vente est conclue.` : `${msg.byName} refuse votre offre de vente.`, 'assertive');
     } else if (msg.type === 'vehicle_sale_offer') {
       AudioLib.playNotification();
