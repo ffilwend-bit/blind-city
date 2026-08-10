@@ -393,6 +393,23 @@ function isRateLimited(player, key, ms) {
   return false;
 }
 
+// Solde "au mieux" pour give_money/give_ammo (voir plus bas) : le serveur
+// n'a pas d'autorité complète sur l'argent/l'inventaire (chantier plus large,
+// non fait ici), mais peut au moins mémoriser le dernier solde connu du
+// compte authentifié (rafraîchi à la connexion et à chaque save_progress —
+// autosave client toutes les 60 s, voir js/menus-and-ui.js) pour repérer un
+// don manifestement forgé (donner des dizaines de millions alors que la
+// dernière sauvegarde connue montre un compte à sec). Volontairement permissif
+// (marges ci-dessous) pour ne jamais bloquer un don légitime juste après un
+// gros gain (mission, vente...) que la sauvegarde périodique n'a pas encore
+// eu le temps de rattraper.
+function cacheEconomyFromSaveData(player, saveData) {
+  if (!saveData || typeof saveData !== 'object') return;
+  if (typeof saveData.money === 'number' && Number.isFinite(saveData.money)) player.cachedMoney = saveData.money;
+  if (typeof saveData.dirtyMoney === 'number' && Number.isFinite(saveData.dirtyMoney)) player.cachedDirtyMoney = saveData.dirtyMoney;
+  if (saveData.ammoReserve && typeof saveData.ammoReserve === 'object') player.cachedAmmoReserve = saveData.ammoReserve;
+}
+
 // Démarre un appel entre deux joueurs, que ce soit via un contact (call_offer)
 // ou en composant un numéro (dial_number) — même minuterie de 30 secondes,
 // même relais des messages une fois décroché.
@@ -531,6 +548,7 @@ wss.on('connection', (ws, req) => {
         if (typeof account.saveData.role === 'string') player.role = account.saveData.role;
         if (typeof account.saveData.policeRank === 'string' || account.saveData.policeRank === null) player.policeRank = account.saveData.policeRank;
       }
+      cacheEconomyFromSaveData(player, account.saveData);
       send(ws, { type: 'login_result', ok: true, username, saveData: account.saveData || null });
       console.log(`[compte] Connexion : ${username}`);
       grantOwnerStaffIfEligible(ws, player, username, account);
@@ -607,6 +625,7 @@ wss.on('connection', (ws, req) => {
       }
       account.saveData = data;
       account.lastSaveAt = Date.now();
+      cacheEconomyFromSaveData(player, data);
       saveAccountsData();
     }
 
@@ -714,6 +733,18 @@ wss.on('connection', (ws, req) => {
       if (!target) return;
       const qty = Math.max(1, Math.min(10000, parseInt(msg.qty, 10) || 0));
       const ammoType = safeName(msg.ammoType, '', 20);
+      // Plausibilité contre le dernier solde CONNU (voir cacheEconomyFromSaveData) :
+      // le client a déjà décompté sa propre réserve en local avant d'envoyer
+      // ce message (optimiste), donc un refus doit le lui rendre — d'où
+      // 'give_ammo_denied' plutôt qu'un rejet silencieux qui ferait
+      // simplement disparaître les munitions chez l'expéditeur sans jamais
+      // arriver chez personne.
+      const AMMO_GIVE_BUFFER = 300; // marge généreuse : sauvegarde toutes les 60 s, ne doit jamais bloquer un don légitime juste après un gain récent
+      const known = (player.cachedAmmoReserve && player.cachedAmmoReserve[ammoType]) || 0;
+      if (qty > known + AMMO_GIVE_BUFFER) {
+        send(ws, { type: 'give_ammo_denied', targetId: msg.targetId, ammoType, qty });
+        return;
+      }
       send(target.ws, { type: 'ammo_received', fromName: `${player.firstName} ${player.lastName}`, ammoType, qty });
     }
 
@@ -744,6 +775,23 @@ wss.on('connection', (ws, req) => {
       const target = players.get(msg.targetId);
       if (!target) return;
       const amount = Math.max(1, Math.min(50000000, parseInt(msg.amount, 10) || 0));
+      // Plausibilité contre le dernier solde CONNU (dernière save_progress ou
+      // connexion, voir cacheEconomyFromSaveData) : n'empêche pas un
+      // tricheur déterminé de forger UNE sauvegarde gonflée au préalable
+      // (chantier d'autorité complète plus large, pas fait ici), mais bloque
+      // le cas le plus grossier — un compte manifestement à sec qui tente de
+      // faire apparaître des dizaines de millions chez un complice. Marge
+      // généreuse (2 M) pour ne jamais bloquer un don légitime juste après un
+      // gros gain (mission, vente...) que l'autosave (60 s) n'a pas encore eu
+      // le temps de rattraper. Le client a déjà décompté localement avant
+      // d'envoyer (optimiste) : un refus doit le lui rendre, d'où
+      // 'give_money_denied' plutôt qu'un rejet silencieux.
+      const MONEY_GIVE_BUFFER = 2_000_000;
+      const known = player.cachedMoney || 0;
+      if (amount > known + MONEY_GIVE_BUFFER) {
+        send(ws, { type: 'give_money_denied', targetId: msg.targetId, amount });
+        return;
+      }
       send(target.ws, { type: 'money_received', fromName: `${player.firstName} ${player.lastName}`, amount });
     }
 

@@ -104,6 +104,15 @@ const Net = {
       Game.ammoReserve[msg.ammoType] = (Game.ammoReserve[msg.ammoType] || 0) + msg.qty;
       announce(`${msg.fromName} vous donne ${msg.qty} ${(AMMO_CATALOG[msg.ammoType]?.name || msg.ammoType).toLowerCase()} en réserve. Rechargez (R) pour les charger dans votre arme.`, 'assertive');
       updateHud();
+    } else if (msg.type === 'give_ammo_denied') {
+      // Le serveur a refusé ce don (quantité invraisemblable par rapport à la
+      // dernière sauvegarde connue du compte) — on avait déjà décompté en
+      // local de façon optimiste avant l'envoi (voir Game.giveAmmo), il
+      // faut donc rendre les munitions au lieu de les laisser disparaître
+      // silencieusement.
+      Game.ammoReserve[msg.ammoType] = (Game.ammoReserve[msg.ammoType] || 0) + msg.qty;
+      announce('Don de munitions refusé par le serveur (quantité invraisemblable par rapport à votre dernière sauvegarde). Vos munitions vous sont rendues.', 'assertive');
+      updateHud();
     } else if (msg.type === 'you_are_cuffed') {
       Game.isCuffed = !!msg.cuffed;
       announce(msg.cuffed ? `${msg.byName} vous menotte. Vous ne pouvez plus vous déplacer ni agir.` : `${msg.byName} vous démenotte.`, 'assertive');
@@ -124,6 +133,15 @@ const Net = {
       Game.money += msg.amount;
       Audio.cash();
       announce(`${msg.fromName} vous donne ${UTIL.formatMoney(msg.amount)} en liquide.`, 'assertive');
+      updateHud();
+    } else if (msg.type === 'give_money_denied') {
+      // Le serveur a refusé ce don (montant invraisemblable par rapport à la
+      // dernière sauvegarde connue du compte) — on avait déjà décompté en
+      // local de façon optimiste avant l'envoi (voir Game.giveMoney), il
+      // faut donc rendre l'argent au lieu de le laisser disparaître
+      // silencieusement.
+      Game.money += msg.amount;
+      announce('Don refusé par le serveur (montant invraisemblable par rapport à votre dernière sauvegarde). Votre argent vous est rendu.', 'assertive');
       updateHud();
     } else if (msg.type === 'share_gps') {
       // Quelqu'un partage sa position GPS : on propose le guidage automatique
