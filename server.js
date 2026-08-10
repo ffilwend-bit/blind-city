@@ -368,6 +368,18 @@ function dayNightTick() {
 }
 setInterval(dayNightTick, 60000);
 
+// Retire _ownerAccount (voir world_edit / house_owner plus bas) des éditions
+// envoyées aux clients — champ de vérification interne au serveur, jamais
+// censé faire partie du protocole que le client lit. Note : ce n'est pas
+// une fuite de vie privée en soi (publicState ci-dessous diffuse déjà
+// accountUsername pour chaque joueur à tout le monde), juste de l'hygiène
+// de protocole.
+function publicWorldEdits(edits) {
+  return (edits || []).map(e => (e.payload && e.payload._ownerAccount)
+    ? { op: e.op, payload: { ...e.payload, _ownerAccount: undefined } }
+    : e);
+}
+
 function publicState(p) {
   return {
     id: p.id, firstName: p.firstName, lastName: p.lastName, gender: p.gender,
@@ -391,6 +403,23 @@ function isRateLimited(player, key, ms) {
   if (now - (player._rateLimits[key] || 0) < ms) return true;
   player._rateLimits[key] = now;
   return false;
+}
+
+// Solde "au mieux" pour give_money/give_ammo (voir plus bas) : le serveur
+// n'a pas d'autorité complète sur l'argent/l'inventaire (chantier plus large,
+// non fait ici), mais peut au moins mémoriser le dernier solde connu du
+// compte authentifié (rafraîchi à la connexion et à chaque save_progress —
+// autosave client toutes les 60 s, voir js/menus-and-ui.js) pour repérer un
+// don manifestement forgé (donner des dizaines de millions alors que la
+// dernière sauvegarde connue montre un compte à sec). Volontairement permissif
+// (marges ci-dessous) pour ne jamais bloquer un don légitime juste après un
+// gros gain (mission, vente...) que la sauvegarde périodique n'a pas encore
+// eu le temps de rattraper.
+function cacheEconomyFromSaveData(player, saveData) {
+  if (!saveData || typeof saveData !== 'object') return;
+  if (typeof saveData.money === 'number' && Number.isFinite(saveData.money)) player.cachedMoney = saveData.money;
+  if (typeof saveData.dirtyMoney === 'number' && Number.isFinite(saveData.dirtyMoney)) player.cachedDirtyMoney = saveData.dirtyMoney;
+  if (saveData.ammoReserve && typeof saveData.ammoReserve === 'object') player.cachedAmmoReserve = saveData.ammoReserve;
 }
 
 // Démarre un appel entre deux joueurs, que ce soit via un contact (call_offer)
@@ -531,6 +560,7 @@ wss.on('connection', (ws, req) => {
         if (typeof account.saveData.role === 'string') player.role = account.saveData.role;
         if (typeof account.saveData.policeRank === 'string' || account.saveData.policeRank === null) player.policeRank = account.saveData.policeRank;
       }
+      cacheEconomyFromSaveData(player, account.saveData);
       send(ws, { type: 'login_result', ok: true, username, saveData: account.saveData || null });
       console.log(`[compte] Connexion : ${username}`);
       grantOwnerStaffIfEligible(ws, player, username, account);
@@ -607,6 +637,7 @@ wss.on('connection', (ws, req) => {
       }
       account.saveData = data;
       account.lastSaveAt = Date.now();
+      cacheEconomyFromSaveData(player, data);
       saveAccountsData();
     }
 
@@ -714,6 +745,18 @@ wss.on('connection', (ws, req) => {
       if (!target) return;
       const qty = Math.max(1, Math.min(10000, parseInt(msg.qty, 10) || 0));
       const ammoType = safeName(msg.ammoType, '', 20);
+      // Plausibilité contre le dernier solde CONNU (voir cacheEconomyFromSaveData) :
+      // le client a déjà décompté sa propre réserve en local avant d'envoyer
+      // ce message (optimiste), donc un refus doit le lui rendre — d'où
+      // 'give_ammo_denied' plutôt qu'un rejet silencieux qui ferait
+      // simplement disparaître les munitions chez l'expéditeur sans jamais
+      // arriver chez personne.
+      const AMMO_GIVE_BUFFER = 300; // marge généreuse : sauvegarde toutes les 60 s, ne doit jamais bloquer un don légitime juste après un gain récent
+      const known = (player.cachedAmmoReserve && player.cachedAmmoReserve[ammoType]) || 0;
+      if (qty > known + AMMO_GIVE_BUFFER) {
+        send(ws, { type: 'give_ammo_denied', targetId: msg.targetId, ammoType, qty });
+        return;
+      }
       send(target.ws, { type: 'ammo_received', fromName: `${player.firstName} ${player.lastName}`, ammoType, qty });
     }
 
@@ -744,6 +787,23 @@ wss.on('connection', (ws, req) => {
       const target = players.get(msg.targetId);
       if (!target) return;
       const amount = Math.max(1, Math.min(50000000, parseInt(msg.amount, 10) || 0));
+      // Plausibilité contre le dernier solde CONNU (dernière save_progress ou
+      // connexion, voir cacheEconomyFromSaveData) : n'empêche pas un
+      // tricheur déterminé de forger UNE sauvegarde gonflée au préalable
+      // (chantier d'autorité complète plus large, pas fait ici), mais bloque
+      // le cas le plus grossier — un compte manifestement à sec qui tente de
+      // faire apparaître des dizaines de millions chez un complice. Marge
+      // généreuse (2 M) pour ne jamais bloquer un don légitime juste après un
+      // gros gain (mission, vente...) que l'autosave (60 s) n'a pas encore eu
+      // le temps de rattraper. Le client a déjà décompté localement avant
+      // d'envoyer (optimiste) : un refus doit le lui rendre, d'où
+      // 'give_money_denied' plutôt qu'un rejet silencieux.
+      const MONEY_GIVE_BUFFER = 2_000_000;
+      const known = player.cachedMoney || 0;
+      if (amount > known + MONEY_GIVE_BUFFER) {
+        send(ws, { type: 'give_money_denied', targetId: msg.targetId, amount });
+        return;
+      }
       send(target.ws, { type: 'money_received', fromName: `${player.firstName} ${player.lastName}`, amount });
     }
 
@@ -933,7 +993,7 @@ wss.on('connection', (ws, req) => {
         type: 'welcome', id, seed: WORLD_SEED, weather: weatherState, dayPhase, gameHour: getGameHour(),
         players: Array.from(players.values()).filter(p => p.id !== id && p.joined).map(publicState),
         cityEdits: staffData.cityEdits || [],
-        worldEdits: staffData.worldEdits || [],
+        worldEdits: publicWorldEdits(staffData.worldEdits),
         morgue: staffData.morgue || [],
         graves: staffData.graves || [],
         news: newsArticles,
@@ -1272,13 +1332,48 @@ wss.on('connection', (ws, req) => {
         if (typeof payload.fuel === 'number') payload.fuel = Math.max(0, Math.min(1, payload.fuel));
         if (typeof payload.hp === 'number') payload.hp = Math.max(0, Math.min(100, payload.hp));
       }
+      // Propriété des maisons : owner: 'player' est une chaîne générique
+      // (voir js/game-interiors-economy.js), le serveur ne peut donc PAS s'y
+      // fier pour savoir QUI possède réellement la maison — 'house_owner'
+      // reste ouvert à tout joueur connecté (achat normal ET revente
+      // légitime entre deux vrais joueurs via house_sale_offer/response,
+      // voir js/network.js) : le serveur ne PEUT pas distinguer un achat
+      // légitime d'une usurpation à partir de ce seul message. Mais il
+      // mémorise systématiquement l'identité RÉELLE de la connexion
+      // (player.accountUsername, jamais fournie par le payload) comme
+      // "propriétaire actuel connu" sur l'édition elle-même (_ownerAccount,
+      // champ ajouté ICI par le serveur, jamais lu depuis le client) — cette
+      // valeur se met donc à jour correctement à chaque revente légitime.
+      //
+      // C'est 'house_keys' qui profite de cette identité fiable : avant,
+      // n'IMPORTE quel joueur connecté pouvait renvoyer 'house_keys' avec sa
+      // propre liste authorizedUsers pour une maison qu'il ne possède même
+      // pas, s'accordant un accès permanent sans jamais l'avoir achetée ni
+      // reçu les clés du vrai propriétaire. Réservé maintenant au
+      // propriétaire connu, à l'agent immobilier (Roles.current ===
+      // 'agent_immo', qui peut légitimement remettre les clés au nom du
+      // propriétaire — même règle déjà appliquée côté client dans
+      // Game.giveHouseKeys) ou au staff. Permissif si _ownerAccount n'est pas
+      // encore connu (maison déjà possédée avant ce correctif) : impossible
+      // de deviner rétroactivement qui en est le vrai propriétaire, donc pas
+      // de rupture pour les joueurs déjà installés.
+      if (msg.op === 'house_keys' && !player.staffRole && player.role !== 'agent_immo') {
+        const existing = staffData.worldEdits.find(e => e.op === 'house_owner' && e.payload && e.payload.id === payload.id);
+        const knownOwner = existing && existing.payload && existing.payload._ownerAccount;
+        if (knownOwner && knownOwner !== player.accountUsername) {
+          send(ws, { type: 'world_edit_denied', op: msg.op, id: payload.id });
+          return;
+        }
+      }
+      if (msg.op === 'house_owner' && player.accountUsername) payload._ownerAccount = player.accountUsername;
       const key = msg.op + ':' + payload.id;
       const idx = staffData.worldEdits.findIndex(e => (e.op + ':' + (e.payload && e.payload.id)) === key);
       const edit = { op: msg.op, payload };
       if (idx >= 0) staffData.worldEdits[idx] = edit; else staffData.worldEdits.push(edit);
       if (staffData.worldEdits.length > 3000) staffData.worldEdits.splice(0, staffData.worldEdits.length - 3000);
       saveStaffData();
-      for (const p of players.values()) send(p.ws, { type: 'world_edit', op: edit.op, payload: edit.payload });
+      const [publicEdit] = publicWorldEdits([edit]);
+      for (const p of players.values()) send(p.ws, { type: 'world_edit', op: publicEdit.op, payload: publicEdit.payload });
     }
 
     else if (msg.type === 'staff_list_bans') {
