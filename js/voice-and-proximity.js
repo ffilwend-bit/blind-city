@@ -175,6 +175,42 @@ window.VoiceChat = VoiceChat;
    Le serveur ne relaie que la signalisation (mesh_offer/answer/ice) ;
    l'audio circule directement entre les appareils une fois connectés.
 ============================================================ */
+// Test de niveau du micro local : "permission accordée" ne prouve pas que
+// le micro capte réellement du son (mauvais périphérique sélectionné par le
+// système, casque Bluetooth débranché mais toujours choisi par défaut,
+// micro coupé au niveau de l'OS...). Analyse le flux pendant ~1 s après la
+// toute première obtention du micro et annonce si aucun signal n'est
+// détecté, plutôt que de laisser croire que tout va bien simplement parce
+// que la permission a été accordée. Ne bloque jamais la connexion en cours
+// (appelé sans attendre son résultat) et échoue silencieusement si
+// l'analyse elle-même pose problème (jamais bloquant).
+async function testMicLevelAndAnnounce(stream) {
+  try {
+    const ctx = Audio.ensure();
+    const src = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    src.connect(analyser); // jamais connecté à Audio.master : pas d'écho de sa propre voix
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    let peak = 0;
+    const start = Date.now();
+    while (Date.now() - start < 1000) {
+      analyser.getByteTimeDomainData(data);
+      for (let i = 0; i < data.length; i++) {
+        const v = Math.abs(data[i] - 128);
+        if (v > peak) peak = v;
+      }
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    src.disconnect();
+    if (peak < 4) {
+      announce('Micro activé, mais aucun son détecté dessus : vérifiez qu\'il ne s\'agit pas du mauvais périphérique, ou qu\'il n\'est pas coupé dans les réglages du système.', 'polite');
+    } else {
+      announce('Micro opérationnel : du son est bien détecté.', 'polite');
+    }
+  } catch (e) { /* diagnostic non bloquant : un échec ici ne doit jamais casser la connexion */ }
+}
+
 function createPeerVoiceMesh(opts) {
   return {
     channel: opts.channel,
@@ -201,6 +237,11 @@ function createPeerVoiceMesh(opts) {
         this.localStream.getAudioTracks().forEach(t => { t.enabled = this.micEnabled; });
         this.micFailedAt = 0;
         this.micFailAnnounced = false;
+        // Uniquement pour ProxVoice (opts.testMicLevel) : la permission
+        // accordée ne prouve pas que du son est réellement capté. Lancé sans
+        // attendre (le connect() en cours ne doit pas être retardé d'1 s pour
+        // ce diagnostic).
+        if (opts.testMicLevel) testMicLevelAndAnnounce(this.localStream);
       } catch (e) {
         this.micFailedAt = now;
         this.localStream = null;
@@ -263,7 +304,10 @@ function createPeerVoiceMesh(opts) {
       const entry = { pc, pendingIce: [], remoteEl: null, audioNodes: null, announcedState: null, sending: !!stream };
       this.peers.set(peerId, entry);
       pc.onicecandidate = (e) => { if (e.candidate) Net.send({ type: 'mesh_ice', toId: peerId, channel: this.channel, data: e.candidate }); };
-      pc.ontrack = (e) => opts.onRemoteStream(peerId, e.streams[0], entry);
+      // remoteStream mémorisé pour le contrôle de santé du track ci-dessous
+      // (reportState) : "connexion établie" (ICE) ne garantit PAS que
+      // l'audio circule réellement (piste fermée, coupée côté émetteur...).
+      pc.ontrack = (e) => { entry.remoteStream = e.streams[0]; opts.onRemoteStream(peerId, e.streams[0], entry); };
       // Diagnostic vocal manquant jusque-là : la connexion échouait EN
       // SILENCE (juste this.disconnect(peerId), aucun retour). Impossible de
       // distinguer "ça sonne mais personne ne parle" de "la connexion audio
@@ -289,10 +333,39 @@ function createPeerVoiceMesh(opts) {
         if (this.channel === 'prox') {
           const p = Net.remotePlayers.get(peerId);
           const name = p ? `${p.firstName} ${p.lastName}` : 'un joueur proche';
-          if (state === 'connected') announce(`Connexion audio établie avec ${name}.`, 'polite');
-          else announce(`Connexion audio impossible avec ${name} (échec réseau).`, 'polite');
+          if (state === 'connected') {
+            announce(`Connexion audio établie avec ${name}.`, 'polite');
+            // "Connexion établie" (ICE) ne prouve PAS que l'audio circule
+            // réellement — piste distante fermée (readyState 'ended') ou
+            // coupée (muted, ex. périphérique débranché côté émetteur) sont
+            // deux façons d'avoir un silence total malgré une connexion
+            // WebRTC réussie. Vérifié après un court délai (laisser le temps
+            // à un sursaut de démarrage normal de se résorber) plutôt
+            // qu'immédiatement, pour ne pas fausser le diagnostic.
+            setTimeout(() => {
+              if (this.peers.get(peerId) !== entry) return; // déconnecté/reconnecté entre-temps
+              const track = entry.remoteStream && entry.remoteStream.getAudioTracks()[0];
+              if (track && (track.readyState !== 'live' || track.muted)) {
+                announce(`Connexion établie avec ${name}, mais aucun son ne semble arriver (piste audio ${track.readyState !== 'live' ? 'fermée' : 'coupée'} de son côté).`, 'polite');
+              }
+            }, 2500);
+          } else {
+            announce(`Connexion audio impossible avec ${name} (échec réseau).`, 'polite');
+          }
         }
-        if (state === 'failed') this.disconnect(peerId);
+        if (state === 'failed') {
+          this.disconnect(peerId);
+          // Retente une fois, rapidement, plutôt que d'attendre jusqu'à 1 s
+          // le prochain cycle evaluate() : pas un vrai iceRestart (demanderait
+          // une renégociation via onnegotiationneeded, que ce maillage
+          // volontairement simple ne gère pas), mais une reconnexion fraîche
+          // complète — tout aussi efficace ici puisque connect() recrée déjà
+          // une RTCPeerConnection propre à chaque appel. Si le pair n'est
+          // plus désiré entre-temps (hors de portée, micro fermé...), le
+          // prochain cycle evaluate() la refermera normalement — retenter
+          // une fois pour rien ne fait pas de mal.
+          setTimeout(() => this.connect(peerId, isOfferer), 400);
+        }
       };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'connected' || pc.connectionState === 'failed') reportState(pc.connectionState);
@@ -424,6 +497,7 @@ const ProxVoice = createPeerVoiceMesh({
   // une connexion uniquement pour ÉCOUTER quelqu'un qui diffuse, sans avoir
   // ouvert le sien (connect() bascule alors sur un transceiver recvonly).
   wantsToSend: () => Game.voiceOpen,
+  testMicLevel: true, // voir testMicLevelAndAnnounce : "permission accordée" ne prouve pas que du son est réellement capté
   onRemoteStream(peerId, stream, entry) {
     const ctx = Audio.ensure();
     const src = ctx.createMediaStreamSource(stream);
