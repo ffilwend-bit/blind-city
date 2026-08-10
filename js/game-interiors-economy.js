@@ -1412,17 +1412,50 @@ Object.assign(Game, {
       }
     );
   },
+  // Condition d'échec explicite, en une phrase, pour les missions où elle
+  // n'était pas déjà évidente rien qu'à la description (audit accessibilité
+  // missions) — un joueur non-voyant doit savoir dès le départ ce qui fait
+  // perdre la mission, pas le découvrir au moment où ça arrive.
+  MISSION_FAILURE_CONDITIONS: {
+    colis_fragile: "Le colis se dégrade à chaque choc et le temps est limité : s'il tombe à 0% ou que le temps s'écoule, la livraison échoue.",
+    taxi_soigne: 'Chaque choc ou freinage brutal réduit la satisfaction du client, et donc votre pourboire — aucun échec dur, mais mieux vaut conduire en douceur.',
+    urgence_medicale: 'Si le blessé meurt avant votre arrivée à l\'hôpital, la mission échoue.',
+    escorte: 'Si le client meurt pendant le trajet, la mission échoue.',
+    chasse_primes: 'Si le fugitif meurt, la mission échoue : affaiblissez-le sans le tuer.',
+    filature: 'Trop près, vous vous faites repérer ; trop loin, vous perdez le suspect — dans les deux cas, la mission échoue.',
+    extraction_vip: 'Si la personne à exfiltrer meurt, la mission échoue.',
+    defense_territoire: "Il faut un joueur réel à chacune des trois entrées en même temps ; une entrée sans personne laisse passer l'assaut.",
+    casse_extreme: "Il faut un joueur réel à la salle des serveurs ET un autre à la chambre forte en même temps ; un poste abandonné réinitialise la progression.",
+    convoi_blinde: "Il faut engager l'avant et l'arrière du convoi en même temps ; le camp laissé seul reçoit du renfort.",
+  },
+  // Rappel de coordination + effectif requis pour les missions collectives
+  // (audit accessibilité missions) : avant, rien n'indiquait au lancement
+  // combien de joueurs réels étaient nécessaires ni qu'il fallait activer un
+  // moyen de communication (micro de proximité ou talkie) pour s'organiser.
+  // Ne touche ni PROX_VOICE_RADIUS ni la logique WebRTC — un simple rappel oral.
+  MISSION_COOP_REMINDER: {
+    defense_territoire: 'Cette mission nécessite 3 joueurs réels, un par entrée, en même temps. Activez le micro de proximité ou un talkie pour vous coordonner.',
+    casse_extreme: 'Cette mission nécessite 2 joueurs réels, un par poste, en même temps. Activez le micro de proximité ou un talkie pour vous coordonner.',
+    convoi_blinde: 'Cette mission nécessite au moins 2 joueurs réels, un par extrémité, en même temps. Activez le micro de proximité ou un talkie pour vous coordonner.',
+  },
   finishActivateMission(m) {
     // Guidage adapté à chaque mission : celles qui ont déjà leur propre
     // repérage sonore (objet perdu, urgence médicale) le gardent tel quel ;
     // toutes les autres sont guidées automatiquement (GPS piéton) vers le
     // point de départ, la complexité/distance variant d'une mission à l'autre.
     const selfGuidedTypes = ['objet_perdu', 'urgence_medicale'];
+    // Au lancement : titre + objectif (desc) + condition d'échec explicite
+    // (si connue pour ce type) + ordre de grandeur de la récompense —
+    // avant, seuls le titre et la description générique étaient annoncés.
+    const failCondition = this.MISSION_FAILURE_CONDITIONS[m.type];
+    const coopReminder = this.MISSION_COOP_REMINDER[m.type];
+    const rewardPhrase = ` Récompense : environ ${UTIL.formatMoney(m.reward)}.`;
+    const fullDesc = `${m.desc}${failCondition ? ' ' + failCondition : ''}${rewardPhrase}${coopReminder ? ' ' + coopReminder : ''}`;
     if (!selfGuidedTypes.includes(m.type)) {
-      announce(`Mission activée : ${m.title}. ${m.desc}`, 'assertive');
+      announce(`Mission activée : ${m.title}. ${fullDesc}`, 'assertive');
       this.setGuidance({ name: m.title, x: m.x, y: m.y });
     } else {
-      announce(`Mission activée : ${m.title}. ${m.desc}. Un repérage sonore vous guidera une fois à proximité.`, 'assertive');
+      announce(`Mission activée : ${m.title}. ${fullDesc} Un repérage sonore vous guidera une fois à proximité.`, 'assertive');
     }
     updateHud();
   },

@@ -205,10 +205,35 @@ Object.assign(Game, {
   guideToMissionObjective() {
     const m = this.activeMission;
     if (!m) return announce('Aucune mission active pour le moment.', 'assertive');
+    // Filature : arriver JUSQU'AU suspect est un échec (trop près = repéré),
+    // pas un objectif — le guidage habituel (chemin + "vous êtes arrivé")
+    // n'a donc pas de sens ici. À la place, une annonce ponctuelle de
+    // distance/cap vers le suspect, comme le fait déjà updateProxVoiceSpatial
+    // pour d'autres cibles hostiles/mobiles (voir tickFilature pour le suivi
+    // périodique automatique pendant la mission).
+    if (m.type === 'filature') {
+      const suspect = City.npcs.find(n => n.id === m.suspectId && !n.dead);
+      if (!suspect) return announce('Suspect introuvable pour le moment.', 'assertive');
+      const meters = Math.round(UTIL.dist(suspect, this) * CONFIG.METERS_PER_TILE);
+      const dir = UTIL.bearing(suspect.x - this.x, suspect.y - this.y);
+      return announce(`${suspect.name} à ${meters} mètres, vers le ${dir}. Restez entre 12 et 20 mètres pour ne pas le perdre ni vous faire repérer.`, 'assertive');
+    }
+    const target = this.resolveMissionTarget(m);
+    if (!target) return announce('Impossible de déterminer une direction pour cette mission.', 'assertive');
+    this.setGuidance(target);
+  },
+  // Cible de guidage pertinente pour la PHASE ACTIVE de la mission (hors
+  // filature, qui a son propre cas particulier ci-dessus) — extrait ici pour
+  // être partagé avec announceActiveMissionId (F8, audit accessibilité
+  // missions) : avant, F8 pointait toujours vers le point de départ brut de
+  // la mission (m.x/m.y), même une fois le colis en main ou le blessé
+  // chargé, une info devenue fausse dès la prise en charge.
+  resolveMissionTarget(m) {
     let target = null;
-    if (m.type === 'recel_vehicule') {
+    if (m.type === 'recel_vehicule' || m.type === 'convoyage') {
       // Pas encore au volant du véhicule visé : direction vers LUI. Une fois
-      // dedans : direction vers le point de livraison (voir tickRecelVehicule).
+      // dedans : direction vers le point de livraison (voir tickRecelVehicule
+      // / startVehicleDelivery, communs aux deux types).
       const vehicle = City.vehicles.find(v => v.id === m.vehicleId);
       if (this.inVehicle && this.vehicle && vehicle && this.vehicle.id === vehicle.id) {
         target = { name: m.dropName || 'le point de livraison', x: m.dropX, y: m.dropY };
@@ -226,16 +251,56 @@ Object.assign(Game, {
       target = { name: "l'objectif de sabotage", x: m.objectiveX, y: m.objectiveY };
     } else if (m.type === 'chasse_primes' && this.bountyState) {
       target = { name: this.bountyState.stationName || 'le commissariat', x: this.bountyState.stationX, y: this.bountyState.stationY };
+    } else if ((m.type === 'urgence_medicale' || m.type === 'medical')) {
+      // Pas encore récupéré le blessé : direction vers lui. Une fois à bord
+      // (this.medicalState existe, voir tickUrgenceMedicale) : direction vers
+      // l'hôpital le plus proche, déjà calculé dans le tick.
+      const victim = this.medicalState ? City.npcs.find(n => n.id === this.medicalState.victimId) : null;
+      if (this.medicalState) {
+        const hopital = City.pois.find(p => p.type === 'hopital');
+        if (hopital) target = { name: "l'hôpital", x: hopital.x, y: hopital.y };
+      } else if (victim) {
+        target = { name: victim.name || 'le blessé', x: victim.x, y: victim.y };
+      }
+    } else if (this.fragileState && (m.type === 'colis_fragile')) {
+      target = { name: m.dropName || 'le point de livraison', x: m.dropX, y: m.dropY };
+    } else if (this.taxiState && (m.type === 'taxi_soigne' || m.type === 'taxi')) {
+      target = { name: m.dropName || 'la destination du client', x: m.dropX, y: m.dropY };
+    } else if (this.escorteState && m.type === 'escorte') {
+      target = { name: m.dropName || "le point d'arrivée", x: m.dropX, y: m.dropY };
+    } else if (this.contrebandeState && m.type === 'contrebande') {
+      target = { name: m.dropName || 'le point de dépose', x: m.dropX, y: m.dropY };
+    } else if (this.courseState && (m.type === 'course_clandestine' || m.type === 'race')) {
+      target = { name: m.dropName || "la ligne d'arrivée", x: m.dropX, y: m.dropY };
+    } else if (m.type === 'defense_territoire' && !this.defenseState) {
+      // Pas encore lancée : guide vers une entrée pas encore couverte plutôt
+      // que vers le repaire lui-même (audit accessibilité missions) — la
+      // "cible" utile ici est le poste à aller occuper, pas un point unique.
+      const others = Net.connected ? Array.from(Net.remotePlayers.values()) : [];
+      const uncovered = (m.entrances || []).find(e => UTIL.dist(this, e) >= 6 && !others.some(p => UTIL.dist(p, e) < 6));
+      if (uncovered) target = { name: uncovered.name || 'une entrée à couvrir', x: uncovered.x, y: uncovered.y };
+    } else if (m.type === 'casse_extreme' && !this.extremeHeistState) {
+      const others = Net.connected ? Array.from(Net.remotePlayers.values()) : [];
+      const serverCovered = UTIL.dist(this, m.serverPoint) < 3 || others.some(p => UTIL.dist(p, m.serverPoint) < 3);
+      const vaultCovered = UTIL.dist(this, m.vaultPoint) < 3 || others.some(p => UTIL.dist(p, m.vaultPoint) < 3);
+      if (!serverCovered) target = { name: 'la salle des serveurs', x: m.serverPoint.x, y: m.serverPoint.y };
+      else if (!vaultCovered) target = { name: 'la chambre forte', x: m.vaultPoint.x, y: m.vaultPoint.y };
+    } else if (m.type === 'convoi_blinde' && !this.convoyState) {
+      const others = Net.connected ? Array.from(Net.remotePlayers.values()) : [];
+      const frontEngaged = UTIL.dist(this, m.frontPoint) < 6 || others.some(p => UTIL.dist(p, m.frontPoint) < 6);
+      const rearEngaged = UTIL.dist(this, m.rearPoint) < 6 || others.some(p => UTIL.dist(p, m.rearPoint) < 6);
+      if (!frontEngaged) target = { name: "l'avant du convoi", x: m.frontPoint.x, y: m.frontPoint.y };
+      else if (!rearEngaged) target = { name: "l'arrière du convoi", x: m.rearPoint.x, y: m.rearPoint.y };
     } else if (typeof m.x === 'number' && typeof m.y === 'number') {
       // Cas général (planque gardée, dépôt d'armes de gang, convoi blindé,
-      // défense de territoire, casse à deux rôles, braquage de banque...) :
+      // défense de territoire, casse à deux rôles, braquage de banque, et
+      // toutes les missions ci-dessus AVANT leur phase de prise en charge) :
       // le point d'origine de la mission EST le point pertinent — que ce
       // soit pour s'y rendre au départ, ou (planque gardée notamment) pour
       // y revenir récupérer le butin une fois les gardes éliminés.
       target = { name: m.title || "l'objectif de la mission", x: m.x, y: m.y };
     }
-    if (!target) return announce('Impossible de déterminer une direction pour cette mission.', 'assertive');
-    this.setGuidance(target);
+    return target;
   },
   // Guidage automatique EN DIRECT vers un joueur réel qui a partagé sa position
   // GPS avec vous. Le chemin (qui contourne les murs) se met à jour au fur et à
@@ -1251,6 +1316,15 @@ Object.assign(Game, {
             Audio.impact(0);
             this.playNpcHitCry(npc);
             announce(`Touché ${target.name} à la ${this.aimPart}. ${Math.round(dmg)} dégâts.`, 'assertive');
+            // Seuil de vie pour un PNJ protégé qu'il ne faut PAS tuer (chasse
+            // aux primes : capture vivante exigée — audit accessibilité
+            // missions) : sans ça, rien ne distinguait ce coup d'un coup sur
+            // n'importe quel autre PNJ, jusqu'à l'échec de mission constaté
+            // après coup.
+            if (npc.health > 0 && this.activeMission && this.activeMission.type === 'chasse_primes' && this.activeMission.fugitiveId === npc.id && npc.health <= 25) {
+              Audio.suspicionAlert();
+              announce(`Attention : ${npc.name} est à ${Math.round(npc.health)}% de vie — un coup de plus risque de le tuer, et la prime exige une capture vivante !`, 'assertive');
+            }
             if (npc.health <= 0) { this.killNPC(npc); }
             else {
               if (npc.hostile) npc.relation -= 40;

@@ -430,6 +430,38 @@ function cacheEconomyFromSaveData(player, saveData) {
   if (saveData.ammoReserve && typeof saveData.ammoReserve === 'object') player.cachedAmmoReserve = saveData.ammoReserve;
 }
 
+// Récompense MAX de référence par type de mission (voir js/city.js
+// generateMissions — quand un type apparaît plusieurs fois avec des
+// récompenses différentes, la plus haute est prise ici pour ne jamais
+// flaguer un gain légitime). Le serveur ne suit PAS l'état des missions
+// (chantier bien plus vaste : il faudrait reproduire toute la logique de
+// chaque type de mission côté serveur pour calculer un montant exact —
+// hors scope ici). Ce qu'il PEUT faire sans ça : comparer chaque
+// récompense réclamée (voir mission_reward_claim plus bas) à un plafond
+// plausible dérivé de ce catalogue, et journaliser (visible au staff) tout
+// écart flagrant — mieux qu'une confiance aveugle totale, sans risquer de
+// casser une seule mission en tentant de revalider leur logique complète.
+const MISSION_BASE_REWARDS = {
+  transport: 100000, convoyage: 90000, colis_fragile: 20000, taxi_soigne: 30000,
+  objet_perdu: 15000, filature: 45000, escorte: 130000, contrebande: 100000,
+  urgence_medicale: 55000, course_clandestine: 70000, sabotage: 110000, chasse_primes: 95000,
+  defense_territoire: 250000, casse_extreme: 350000, convoi_blinde: 300000,
+  depot_armes_gang: 320000, extraction_vip: 290000, braquage_superette: 60000,
+  gofast: 220000, planque_gardee: 240000, recel_vehicule: 150000,
+  race: 80000, police: 85000, mine: 90000, combat: 150000, trade: 70000,
+  medical: 40000, air: 120000, heist: 300000, hunt: 110000,
+  taxi: 50000, fishing: 25000, repair: 20000,
+};
+// Marge généreuse au-delà du plafond catalogue : couvre tous les bonus déjà
+// présents dans le code (lootMultiplier du braquage ×1, variance aléatoire
+// jusqu'à +150 000 sur certaines missions extrêmes...) sans jamais flaguer
+// un gain légitime. Un type de mission inconnu (absent du catalogue
+// ci-dessus) retombe sur un plafond générique prudent.
+function maxPlausibleMissionReward(missionType) {
+  const base = MISSION_BASE_REWARDS[missionType];
+  return (base ? base * 2 : 250000) + 300000;
+}
+
 // Démarre un appel entre deux joueurs, que ce soit via un contact (call_offer)
 // ou en composant un numéro (dial_number) — même minuterie de 30 secondes,
 // même relais des messages une fois décroché.
@@ -802,6 +834,23 @@ wss.on('connection', (ws, req) => {
       const target = players.get(msg.targetId);
       if (!target) return;
       send(target.ws, { type: 'you_are_jailed', jailed: !!msg.jailed, byName: msg.byName || `${player.firstName} ${player.lastName}` });
+    }
+
+    // Récompense de mission réclamée par le client : purement informatif,
+    // n'affecte JAMAIS le crédit local (déjà fait côté client, voir
+    // Game.reportMissionReward) — le serveur ne suit pas l'état des
+    // missions, il ne peut donc pas revalider la logique exacte de chacune
+    // sans un chantier bien plus vaste (hors scope). Ce qu'il fait : compare
+    // au plafond plausible dérivé du catalogue et journalise (staff) tout
+    // écart flagrant, pour au moins avoir une trace au lieu d'une confiance
+    // aveugle totale sur l'économie des missions.
+    else if (msg.type === 'mission_reward_claim') {
+      const amount = Math.max(0, Math.round(Number(msg.amount) || 0));
+      const missionType = safeName(msg.missionType, '', 40);
+      const maxPlausible = maxPlausibleMissionReward(missionType);
+      if (amount > maxPlausible) {
+        broadcastStaffLog(`⚠️ ${player.firstName} ${player.lastName} réclame ${amount} FCFA pour une mission « ${missionType || '?'} » (plafond plausible ${maxPlausible}) — à vérifier.`);
+      }
     }
 
     else if (msg.type === 'give_money') {

@@ -437,11 +437,14 @@ const Game = {
       if (!alreadyColliding) {
         const impactDmg = Math.round(Math.abs(v.speed) * 40 * (1 - (cls.armor || 0)));
         v.hp = Math.max(0, v.hp - impactDmg);
-        if (this.fragileState) this.fragileState.condition = Math.max(0, this.fragileState.condition - UTIL.randInt(15, 35));
+        if (this.fragileState) {
+          this.fragileState.condition = Math.max(0, this.fragileState.condition - UTIL.randInt(15, 35));
+          this.announceShock('Colis', this.fragileState.condition);
+        }
         if (this.taxiState) this.taxiRoughEvent(UTIL.randInt(15, 30));
         if (this.medicalState) {
           const victim = City.npcs.find(n => n.id === this.medicalState.victimId);
-          if (victim) { victim.health = Math.max(0, victim.health - UTIL.randInt(8, 18)); announce(`Le blessé encaisse le choc ! Santé : ${Math.round(victim.health)}%.`, 'assertive'); }
+          if (victim) { victim.health = Math.max(0, victim.health - UTIL.randInt(8, 18)); this.announceShock('État du blessé', victim.health); }
         }
         const otherVehicleHere = City.vehicles.some(ov => ov.id !== v.id && UTIL.dist(ov, { x: nx, y: ny }) < 1.5);
         // Diffusée aux joueurs proches (passager compris, qui se trouve à la
@@ -1021,8 +1024,30 @@ const Game = {
     if (!m) return announce('Aucune mission active pour le moment.', 'assertive');
     const parts = [`Mission active : ${m.title}, identifiant ${m.id}, récompense ${UTIL.formatMoney(m.reward)}`];
     if (m.authorizedIds && m.authorizedIds.length) parts.push(`identifiants autorisés : ${m.authorizedIds.join(', ')}`);
-    const d = Math.round(UTIL.dist(m, this) * CONFIG.METERS_PER_TILE);
-    parts.push(`objectif à ${d} mètres, vers le ${UTIL.bearing(m.x - this.x, m.y - this.y)}`);
+    // Objectif de la PHASE ACTIVE plutôt que du point de départ brut (audit
+    // accessibilité missions) : réutilise resolveMissionTarget (voir
+    // game-navigation.js), partagé avec guideToMissionObjective/Maj+M, pour
+    // que F8 dise la même chose que le guidage plutôt qu'une info obsolète
+    // dès que le colis est en main, le blessé chargé, etc.
+    if (m.type === 'filature') {
+      const suspect = City.npcs.find(n => n.id === m.suspectId && !n.dead);
+      if (suspect) {
+        const d = Math.round(UTIL.dist(suspect, this) * CONFIG.METERS_PER_TILE);
+        parts.push(`étape actuelle : filer ${suspect.name} à distance, actuellement à ${d} mètres, vers le ${UTIL.bearing(suspect.x - this.x, suspect.y - this.y)}`);
+      }
+    } else {
+      const target = this.resolveMissionTarget(m);
+      if (target) {
+        const d = Math.round(UTIL.dist(target, this) * CONFIG.METERS_PER_TILE);
+        parts.push(`objectif actuel : ${target.name}, à ${d} mètres, vers le ${UTIL.bearing(target.x - this.x, target.y - this.y)}`);
+      }
+    }
+    // Statut d'équipe pour les missions collectives, SUR DEMANDE uniquement
+    // via F8 (audit accessibilité missions, règles communes collectives) —
+    // pas d'annonce automatique périodique en plus des checklists déjà
+    // throttlées, pour ne pas ajouter de bavardage inutile.
+    const teamStatus = this.collectiveTeamStatus(m);
+    if (teamStatus) parts.push(teamStatus);
     announce(parts.join(', ') + '.', 'assertive');
   },
   // Missions à IDs façon GTA : au lancement d'une mission (sauf celles

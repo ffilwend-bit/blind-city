@@ -6,6 +6,32 @@
    équipe d'intervention, course-poursuite, convoyage de véhicule.
 ============================================================ */
 Object.assign(Game, {
+  // Statut d'équipe (qui couvre quel poste) pour les 3 missions collectives,
+  // utilisé UNIQUEMENT sur demande par F8 (announceActiveMissionId, voir
+  // game.js) — règle commune des fiches collectives ("bouton statut équipe"),
+  // implémentée en réutilisant l'état déjà présent plutôt qu'en ajoutant une
+  // annonce automatique de plus. Retourne null pour tout autre type de mission.
+  collectiveTeamStatus(m) {
+    const others = Net.connected ? Array.from(Net.remotePlayers.values()) : [];
+    if (m.type === 'defense_territoire' && m.entrances) {
+      const parts = m.entrances.map((e, i) => {
+        const covered = UTIL.dist(this, e) < 6 || others.some(p => UTIL.dist(p, e) < 6);
+        return `${e.name || `entrée ${i + 1}`} ${covered ? 'couverte' : 'libre'}`;
+      });
+      return `statut équipe : ${parts.join(', ')}`;
+    }
+    if (m.type === 'casse_extreme' && m.serverPoint && m.vaultPoint) {
+      const serverCovered = UTIL.dist(this, m.serverPoint) < 3 || others.some(p => UTIL.dist(p, m.serverPoint) < 3);
+      const vaultCovered = UTIL.dist(this, m.vaultPoint) < 3 || others.some(p => UTIL.dist(p, m.vaultPoint) < 3);
+      return `statut équipe : serveur ${serverCovered ? 'couvert' : 'libre'}, coffre ${vaultCovered ? 'couvert' : 'libre'}`;
+    }
+    if (m.type === 'convoi_blinde' && m.frontPoint && m.rearPoint) {
+      const frontEngaged = UTIL.dist(this, m.frontPoint) < 6 || others.some(p => UTIL.dist(p, m.frontPoint) < 6);
+      const rearEngaged = UTIL.dist(this, m.rearPoint) < 6 || others.some(p => UTIL.dist(p, m.rearPoint) < 6);
+      return `statut équipe : avant ${frontEngaged ? 'engagé' : 'libre'}, arrière ${rearEngaged ? 'engagé' : 'libre'}`;
+    }
+    return null;
+  },
   /* ==========================================================
      MISSION EXTRÊME — DÉFENSE DE TERRITOIRE (multijoueur obligatoire)
      3 entrées distinctes à couvrir en même temps par de vrais joueurs
@@ -19,12 +45,23 @@ Object.assign(Game, {
         const coverage = m.entrances.map(e => (UTIL.dist(this, e) < 6 ? 1 : 0) + others.filter(p => UTIL.dist(p, e) < 6).length);
         const coveredCount = coverage.filter(c => c > 0).length;
         if (coveredCount < 3) {
-          announce(`Mission extrême "Défense de territoire" : il faut un joueur réel posté à chacune des 3 entrées en même temps pour déclencher l'assaut. Actuellement ${coveredCount} sur 3 couvertes. Coordonnez-vous.`, 'assertive');
+          // Checklist nommée, throttlée à ~5s (audit accessibilité missions) :
+          // avant, ce message tournait à ~60 appels/seconde (checkMission()
+          // tourne à chaque frame) sans jamais nommer les entrées, noyant la
+          // synthèse vocale sous des annonces identiques et illisibles.
+          const now = Date.now();
+          if (now - (this._defenseCoverageMsgAt || 0) > 5000) {
+            this._defenseCoverageMsgAt = now;
+            const checklist = m.entrances.map((e, i) => `${e.name || `entrée ${i + 1}`} : ${coverage[i] > 0 ? 'couverte' : 'libre'}`).join(', ');
+            announce(`Mission extrême "Défense de territoire" — ${checklist}. ${coveredCount} sur 3 couvertes. Coordonnez-vous.`, 'assertive', { tag: 'defense-checklist' });
+          }
           return;
         }
         this.defenseState = { missionId: m.id, wave: 1, npcIds: [] };
         this.reportCrimeToPolice('coups_de_feu', `Fusillade au repaire des ${m.gangName}`);
-        announce(`Les 3 entrées sont couvertes ! La défense du repaire des ${m.gangName} commence.`, 'assertive');
+        // Suggestion de partage GPS, une seule fois au démarrage (audit
+        // accessibilité missions, fiche défense de territoire P1).
+        announce(`Les 3 entrées sont couvertes ! La défense du repaire des ${m.gangName} commence. Partagez votre position GPS entre vous si besoin de vous retrouver.`, 'assertive');
         this.spawnDefenseWave(m);
       }
       return;
@@ -44,6 +81,7 @@ Object.assign(Game, {
       if (ds.wave >= 3) {
         const amount = m.reward;
         this.dirtyMoney += amount; Audio.cash();
+        this.reportMissionReward(m.type, amount, true);
         m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
         this.defenseState = null;
         RPJournal.log('Mission', `Défense de territoire réussie : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -59,8 +97,10 @@ Object.assign(Game, {
   spawnDefenseWave(m) {
     const ds = this.defenseState; if (!ds) return;
     const count = UTIL.randInt(2, 3) * ds.wave;
+    const perEntrance = new Map(); // audit accessibilité missions : compte par entrée pour un seul récap, pas une annonce par assaillant
     for (let i = 0; i < count; i++) {
       const entrance = UTIL.pick(m.entrances);
+      perEntrance.set(entrance, (perEntrance.get(entrance) || 0) + 1);
       const gender = UTIL.pick(['homme', 'femme']);
       const npc = {
         id: 'defwave_' + Date.now() + '_' + i, name: `Assaillant ${i + 1}`, job: 'ganger', gender,
@@ -70,6 +110,14 @@ Object.assign(Game, {
       };
       City.npcs.push(npc); ds.npcIds.push(npc.id);
     }
+    // Direction d'arrivée des ennemis, en un seul récap par vague (audit
+    // accessibilité missions, fiche défense de territoire P1) : chaque
+    // joueur entend d'où les assaillants arrivent PAR RAPPORT À LUI, pas
+    // seulement leur nombre.
+    const arrival = Array.from(perEntrance.entries())
+      .map(([e, n]) => `${n} vers le ${UTIL.bearing(e.x - this.x, e.y - this.y)}`)
+      .join(', ');
+    announce(`Assaillants en approche : ${arrival}.`, 'assertive');
     // Réplique hostile AVANT le premier tir (pas seulement pendant
     // l'échange, voir resolveNpcShotAtPlayer).
     this.npcVoiceReaction(this.x, this.y, { group: 'enerve', count: Math.min(2, count), radius: 20 });
@@ -89,12 +137,23 @@ Object.assign(Game, {
     const vaultCovered = meAtVault || others.some(p => UTIL.dist(p, m.vaultPoint) < 3);
     if (!this.extremeHeistState) {
       if (meAtServer || meAtVault) {
+        // Rôle du joueur local annoncé (audit accessibilité missions, fiche
+        // casse à deux rôles P1) : avant, rien ne disait explicitement à
+        // quel poste on se trouvait soi-même, seulement l'état des deux.
+        const myRole = meAtServer ? 'la salle des serveurs' : 'la chambre forte';
         if (serverCovered && vaultCovered) {
-          this.extremeHeistState = { missionId: m.id, startedAt: Date.now(), crackTime: 25000 };
-          announce('Les deux postes sont occupés à la fois ! Piratage et perçage démarrent en parallèle. Restez chacun à votre poste.', 'assertive');
+          this.extremeHeistState = { missionId: m.id, startedAt: Date.now(), crackTime: 25000, lastProgressMsg: Date.now() };
+          announce(`Les deux postes sont occupés à la fois ! Vous êtes à ${myRole}. Piratage et perçage démarrent en parallèle — restez à votre poste.`, 'assertive');
           if (UTIL.chance(0.3)) this.extremeHeistState.alarmTimer = setTimeout(() => this.reportCrimeToPolice('braquage_banque', 'Casse à deux rôles en cours'), UTIL.randInt(5000, 15000));
         } else {
-          announce(`Casse à deux rôles : il faut un joueur réel à la salle des serveurs ET un autre à la chambre forte, en même temps. Serveur ${serverCovered ? 'couvert' : 'non couvert'}, coffre ${vaultCovered ? 'couvert' : 'non couvert'}.`, 'assertive');
+          // Throttlé à ~5s (audit accessibilité missions) : sans ça, ce
+          // message tournait à ~60 appels/seconde (checkMission() tourne à
+          // chaque frame), noyant la synthèse vocale.
+          const now = Date.now();
+          if (now - (this._casseCoverageMsgAt || 0) > 5000) {
+            this._casseCoverageMsgAt = now;
+            announce(`Vous êtes à ${myRole}. Casse à deux rôles : il faut un joueur réel à la salle des serveurs ET un autre à la chambre forte, en même temps. Serveur ${serverCovered ? 'couvert' : 'non couvert'}, coffre ${vaultCovered ? 'couvert' : 'non couvert'}.`, 'assertive', { tag: 'casse-checklist' });
+          }
         }
       }
       return;
@@ -102,12 +161,25 @@ Object.assign(Game, {
     if (!(serverCovered && vaultCovered)) {
       clearTimeout(this.extremeHeistState.alarmTimer);
       this.extremeHeistState = null;
-      announce('Un des deux postes a été abandonné : le piratage et le perçage se réinitialisent !', 'assertive');
+      // Nomme le poste perdu (audit accessibilité missions) : avant, le
+      // message générique ne disait jamais LEQUEL des deux postes avait été
+      // abandonné.
+      announce(`Le poste ${!serverCovered ? 'de la salle des serveurs' : 'de la chambre forte'} a été abandonné : le piratage et le perçage se réinitialisent !`, 'assertive');
       return;
+    }
+    // Progression orale toutes les ~5s pendant le piratage/perçage (audit
+    // accessibilité missions) : avant, seuls le début et la fin étaient
+    // annoncés, laissant les 25 secondes d'action partagée totalement muettes.
+    const nowProgress = Date.now();
+    if (nowProgress - this.extremeHeistState.lastProgressMsg > 5000) {
+      this.extremeHeistState.lastProgressMsg = nowProgress;
+      const remaining = Math.max(0, Math.round((this.extremeHeistState.crackTime - (nowProgress - this.extremeHeistState.startedAt)) / 1000));
+      if (remaining > 0) announce(`Piratage et perçage en cours : encore ${remaining} secondes. Restez à votre poste.`, 'polite');
     }
     if (Date.now() - this.extremeHeistState.startedAt > this.extremeHeistState.crackTime) {
       const amount = m.reward + UTIL.randInt(-50000, 150000);
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.extremeHeistState = null;
       RPJournal.log('Mission', `Casse à deux rôles réussie : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -130,12 +202,22 @@ Object.assign(Game, {
     if (!this.convoyState) {
       const meNear = UTIL.dist(this, m.frontPoint) < 6 || UTIL.dist(this, m.rearPoint) < 6;
       if (meNear && !(frontEngaged && rearEngaged)) {
-        announce(`Attaque de convoi : il faut engager l'avant ET l'arrière en même temps, avec un joueur réel à chaque extrémité. Avant ${frontEngaged ? 'engagé' : 'libre'}, arrière ${rearEngaged ? 'engagé' : 'libre'}.`, 'assertive');
+        // Throttlé à ~5s (audit accessibilité missions) : sans ça, ce message
+        // tournait à ~60 appels/seconde (checkMission() tourne à chaque frame).
+        const now = Date.now();
+        if (now - (this._convoyCoverageMsgAt || 0) > 5000) {
+          this._convoyCoverageMsgAt = now;
+          announce(`Attaque de convoi : il faut engager l'avant ET l'arrière en même temps, avec un joueur réel à chaque extrémité. Avant ${frontEngaged ? 'engagé' : 'libre'}, arrière ${rearEngaged ? 'engagé' : 'libre'}.`, 'assertive', { tag: 'convoy-checklist' });
+        }
       }
       if (frontEngaged && rearEngaged) {
-        this.convoyState = { missionId: m.id, lastReinforce: 0 };
+        this.convoyState = { missionId: m.id };
         this.reportCrimeToPolice('coups_de_feu', 'Fusillade lors d\'une attaque de convoi');
-        announce('Les deux extrémités du convoi sont engagées à la fois ! Neutralisez les gardes avant qu\'un camp ne reçoive du renfort.', 'assertive');
+        // Assignation claire (audit accessibilité missions, fiche convoi
+        // blindé P1) : avant, rien ne disait explicitement à quelle
+        // extrémité on se trouvait soi-même.
+        const mySide = UTIL.dist(this, m.frontPoint) < 6 ? "l'avant" : "l'arrière";
+        announce(`Les deux extrémités du convoi sont engagées à la fois ! Vous engagez ${mySide}. Neutralisez les gardes avant qu'un camp ne reçoive du renfort.`, 'assertive');
         // Réplique hostile AVANT le premier tir (pas seulement pendant
         // l'échange, voir resolveNpcShotAtPlayer).
         this.npcVoiceReaction(m.frontPoint.x, m.frontPoint.y, { group: 'enerve', count: 1, radius: 20 });
@@ -153,20 +235,47 @@ Object.assign(Game, {
       // Chance de tir remontée (voir missionCombatTick, game-missions-story.js) : trop rare avant.
       if (weapon && UTIL.chance(Math.max(0.1, 0.43 - d * 0.015))) this.resolveNpcShotAtPlayer(n, weapon, d, 22);
     });
+    // Pré-avertissement 5s avant le renfort (audit accessibilité missions,
+    // fiche convoi blindé P1) : avant, le renfort tombait sans prévenir,
+    // annoncé seulement après coup. Chaque camp vide sans adversaire en face
+    // a son propre chrono (déclenché dès qu'il se vide) : avertissement à
+    // 10s, renfort effectif à 15s — direction donnée pour se repositionner.
     const now = Date.now();
-    if (frontSquad.length === 0 && rearSquad.length > 0 && !rearEngaged && now - this.convoyState.lastReinforce > 15000) {
-      this.convoyState.lastReinforce = now;
-      this.reinforceConvoySide(m, 'rear');
-      announce('L\'arrière du convoi, laissé sans adversaire, reçoit du renfort !', 'assertive');
-    }
-    if (rearSquad.length === 0 && frontSquad.length > 0 && !frontEngaged && now - this.convoyState.lastReinforce > 15000) {
-      this.convoyState.lastReinforce = now;
-      this.reinforceConvoySide(m, 'front');
-      announce('L\'avant du convoi, laissé sans adversaire, reçoit du renfort !', 'assertive');
-    }
+    const cs = this.convoyState;
+    if (frontSquad.length === 0 && rearSquad.length > 0 && !rearEngaged) {
+      if (!cs.rearEmptyAt) cs.rearEmptyAt = now;
+      const elapsed = now - cs.rearEmptyAt;
+      if (elapsed > 10000 && !cs.rearWarned) {
+        cs.rearWarned = true;
+        const dir = UTIL.bearing(m.rearPoint.x - this.x, m.rearPoint.y - this.y);
+        announce(`Attention : l'arrière du convoi, vers le ${dir}, va recevoir du renfort dans 5 secondes si personne ne s'y engage !`, 'assertive');
+      }
+      if (elapsed > 15000) {
+        cs.rearEmptyAt = null; cs.rearWarned = false;
+        const dir = UTIL.bearing(m.rearPoint.x - this.x, m.rearPoint.y - this.y);
+        this.reinforceConvoySide(m, 'rear');
+        announce(`L'arrière du convoi, laissé sans adversaire, reçoit du renfort, vers le ${dir} !`, 'assertive');
+      }
+    } else { cs.rearEmptyAt = null; cs.rearWarned = false; }
+    if (rearSquad.length === 0 && frontSquad.length > 0 && !frontEngaged) {
+      if (!cs.frontEmptyAt) cs.frontEmptyAt = now;
+      const elapsed = now - cs.frontEmptyAt;
+      if (elapsed > 10000 && !cs.frontWarned) {
+        cs.frontWarned = true;
+        const dir = UTIL.bearing(m.frontPoint.x - this.x, m.frontPoint.y - this.y);
+        announce(`Attention : l'avant du convoi, vers le ${dir}, va recevoir du renfort dans 5 secondes si personne ne s'y engage !`, 'assertive');
+      }
+      if (elapsed > 15000) {
+        cs.frontEmptyAt = null; cs.frontWarned = false;
+        const dir = UTIL.bearing(m.frontPoint.x - this.x, m.frontPoint.y - this.y);
+        this.reinforceConvoySide(m, 'front');
+        announce(`L'avant du convoi, laissé sans adversaire, reçoit du renfort, vers le ${dir} !`, 'assertive');
+      }
+    } else { cs.frontEmptyAt = null; cs.frontWarned = false; }
     if (frontSquad.length === 0 && rearSquad.length === 0) {
       const amount = m.reward;
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.convoyState = null;
       RPJournal.log('Mission', `Convoi blindé neutralisé : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -231,6 +340,7 @@ Object.assign(Game, {
     if (ds.cam >= 100 && ds.patrol >= 100 && ds.vault >= 100) {
       const amount = m.reward;
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.depotState = null;
       RPJournal.log('Mission', `Dépôt d'armes du gang neutralisé : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -286,6 +396,7 @@ Object.assign(Game, {
     if (UTIL.dist(this, { x: m.extractX, y: m.extractY }) < 3) {
       const amount = m.reward;
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       vip.follow = false; vip.dead = true; vip.x = -999;
       this.vipState = null;
@@ -315,6 +426,7 @@ Object.assign(Game, {
     if (Date.now() - this.superetteState.startedAt > this.superetteState.crackTime) {
       const amount = Math.max(20000, m.reward + UTIL.randInt(-10000, 20000));
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.superetteState = null;
       RPJournal.log('Mission', `Braquage de supérette réussi : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -358,6 +470,7 @@ Object.assign(Game, {
       if (gs.dropIdx >= m.drops.length) {
         const amount = m.reward;
         this.dirtyMoney += amount; Audio.cash();
+        this.reportMissionReward(m.type, amount, true);
         m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
         this.gofastState = null;
         if (this.guidanceTarget) this.stopGuidance();
@@ -380,6 +493,7 @@ Object.assign(Game, {
       if (UTIL.dist({ x: this.x, y: this.y }, m) < 3) {
         const amount = m.reward;
         this.dirtyMoney += amount;
+        this.reportMissionReward(m.type, amount, true);
         const pool = ['pistolet_9', 'uzi', 'ak47'];
         const weaponId = UTIL.pick(pool); const weapon = WEAPON_CATALOG[weaponId];
         const ammoQty = UTIL.randInt(30, 80);
@@ -459,6 +573,7 @@ Object.assign(Game, {
       const conditionFactor = Math.max(0.4, this.vehicle.hp / 100);
       const amount = Math.round(m.reward * conditionFactor);
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       const vId = this.vehicle.id;
       this.interactVehicle();
@@ -789,6 +904,7 @@ Object.assign(Game, {
     const amount = Math.round(m.reward * conditionFactor);
     const vId = this.vehicle.id;
     this.dirtyMoney += amount;
+    this.reportMissionReward(m.type, amount, true);
     m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
     this.deliveryState = null;
     if (this.guidanceTarget) this.stopGuidance();
