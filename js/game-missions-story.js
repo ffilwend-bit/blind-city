@@ -5,6 +5,22 @@
    faciles/moyennes/solo supplémentaires.
 ============================================================ */
 Object.assign(Game, {
+  // Rapport de récompense de mission au serveur (voir server.js,
+  // mission_reward_claim) : le serveur ne suit PAS l'état des missions
+  // (chantier bien plus vaste, hors scope ici — les missions restent
+  // entièrement calculées et créditées ICI, en local, exactement comme
+  // avant). Mais il compare désormais chaque récompense réclamée à un
+  // plafond plausible dérivé du catalogue (js/city.js JOBS) et journalise
+  // (visible au staff) tout écart flagrant — mieux qu'une confiance
+  // aveugle totale, sans risquer de casser une seule mission en tentant de
+  // revalider leur logique complète côté serveur. Purement informatif :
+  // n'affecte jamais le crédit local, ne bloque jamais la mission, ne fait
+  // rien en solo hors ligne (Net.connected faux).
+  reportMissionReward(missionType, amount, dirty) {
+    if (!Net.connected) return;
+    Net.send({ type: 'mission_reward_claim', missionType, amount: Math.round(amount) || 0, dirty: !!dirty });
+  },
+
   /* ==========================================================
      BRAQUAGE DE BANQUE — mission complète, jamais la même routine :
      chaque banque a un profil de sécurité propre (révélé au repérage),
@@ -163,6 +179,7 @@ Object.assign(Game, {
     if (!m) { this.heistState = null; return; }
     const amount = Math.max(30000, Math.round((m.reward + UTIL.randInt(-20000, 60000)) * lootMultiplier));
     this.dirtyMoney += amount;
+    this.reportMissionReward(m.type, amount, true);
     m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
     RPJournal.log('Mission', `Braquage réussi : ${UTIL.formatMoney(amount)} d'argent sale.`, 'alert');
     const alarmed = this.heistState.alarmed;
@@ -373,6 +390,7 @@ Object.assign(Game, {
       const cond = Math.round(this.fragileState.condition);
       const amount = Math.round(m.reward * Math.max(0.3, cond / 100));
       this.money += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, false);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.fragileState = null;
       RPJournal.log('Mission', `Colis livré à ${cond}% d'état : ${UTIL.formatMoney(amount)}.`, 'info');
@@ -414,6 +432,7 @@ Object.assign(Game, {
       const sat = Math.round(this.taxiState.satisfaction);
       const amount = Math.round(m.reward * Math.max(0.2, sat / 100));
       this.money += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, false);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.vehicle.passengers = (this.vehicle.passengers || []).filter(p => p.id !== m.clientId);
       this.taxiState = null;
@@ -429,6 +448,7 @@ Object.assign(Game, {
     if (d < 2) {
       const amount = m.reward;
       this.money += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, false);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       RPJournal.log('Mission', `Objet retrouvé : ${UTIL.formatMoney(amount)}.`, 'info');
       announce(`Objet retrouvé ! Vous touchez ${UTIL.formatMoney(amount)}.`, 'assertive');
@@ -474,6 +494,7 @@ Object.assign(Game, {
       if (fs.goodMs > 40000) {
         const amount = m.reward;
         this.dirtyMoney += amount; Audio.cash();
+        this.reportMissionReward(m.type, amount, true);
         m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
         this.filatureState = null;
         RPJournal.log('Mission', `Filature réussie : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -549,6 +570,7 @@ Object.assign(Game, {
     if (UTIL.dist(dropPos, { x: m.dropX, y: m.dropY }) < 5) {
       const amount = m.reward;
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       if (this.vehicle) this.vehicle.passengers = (this.vehicle.passengers || []).filter(p => p.id !== es.clientId);
       this.escorteState = null;
@@ -606,6 +628,7 @@ Object.assign(Game, {
     if (UTIL.dist({ x: this.x, y: this.y }, { x: m.dropX, y: m.dropY }) < 3) {
       const amount = m.reward;
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.contrebandeState = null;
       RPJournal.log('Mission', `Contrebande livrée : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -666,6 +689,7 @@ Object.assign(Game, {
     if (hopital && UTIL.dist(this.vehicle, hopital) < 4) {
       const amount = m.reward;
       this.money += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, false);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.vehicle.passengers = (this.vehicle.passengers || []).filter(p => p.id !== ms.victimId);
       victim.dead = true; victim.x = -999;
@@ -711,6 +735,7 @@ Object.assign(Game, {
     if (UTIL.dist(this.vehicle, { x: m.dropX, y: m.dropY }) < 3) {
       const amount = m.reward;
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.courseState = null;
       RPJournal.log('Mission', `Course clandestine gagnée : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -761,6 +786,7 @@ Object.assign(Game, {
     if (UTIL.dist({ x: this.x, y: this.y }, { x: m.objectiveX, y: m.objectiveY }) < 2 && !this.sabotageState?.combat) {
       const amount = m.reward;
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.sabotageState = null;
       RPJournal.log('Mission', `Sabotage réussi sans être repéré : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -793,6 +819,7 @@ Object.assign(Game, {
     if (UTIL.dist(this, { x: this.bountyState.stationX, y: this.bountyState.stationY }) < 3 && fugitive.menotte) {
       const amount = m.reward;
       this.money += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, false);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       fugitive.dead = true; fugitive.x = -999; fugitive.follow = false;
       this.bountyState = null;

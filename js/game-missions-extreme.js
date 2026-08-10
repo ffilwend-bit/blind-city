@@ -44,6 +44,7 @@ Object.assign(Game, {
       if (ds.wave >= 3) {
         const amount = m.reward;
         this.dirtyMoney += amount; Audio.cash();
+        this.reportMissionReward(m.type, amount, true);
         m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
         this.defenseState = null;
         RPJournal.log('Mission', `Défense de territoire réussie : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -108,6 +109,7 @@ Object.assign(Game, {
     if (Date.now() - this.extremeHeistState.startedAt > this.extremeHeistState.crackTime) {
       const amount = m.reward + UTIL.randInt(-50000, 150000);
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.extremeHeistState = null;
       RPJournal.log('Mission', `Casse à deux rôles réussie : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -167,6 +169,7 @@ Object.assign(Game, {
     if (frontSquad.length === 0 && rearSquad.length === 0) {
       const amount = m.reward;
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.convoyState = null;
       RPJournal.log('Mission', `Convoi blindé neutralisé : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -231,6 +234,7 @@ Object.assign(Game, {
     if (ds.cam >= 100 && ds.patrol >= 100 && ds.vault >= 100) {
       const amount = m.reward;
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.depotState = null;
       RPJournal.log('Mission', `Dépôt d'armes du gang neutralisé : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -286,6 +290,7 @@ Object.assign(Game, {
     if (UTIL.dist(this, { x: m.extractX, y: m.extractY }) < 3) {
       const amount = m.reward;
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       vip.follow = false; vip.dead = true; vip.x = -999;
       this.vipState = null;
@@ -315,6 +320,7 @@ Object.assign(Game, {
     if (Date.now() - this.superetteState.startedAt > this.superetteState.crackTime) {
       const amount = Math.max(20000, m.reward + UTIL.randInt(-10000, 20000));
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       this.superetteState = null;
       RPJournal.log('Mission', `Braquage de supérette réussi : ${UTIL.formatMoney(amount)}.`, 'alert');
@@ -358,6 +364,7 @@ Object.assign(Game, {
       if (gs.dropIdx >= m.drops.length) {
         const amount = m.reward;
         this.dirtyMoney += amount; Audio.cash();
+        this.reportMissionReward(m.type, amount, true);
         m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
         this.gofastState = null;
         if (this.guidanceTarget) this.stopGuidance();
@@ -380,6 +387,7 @@ Object.assign(Game, {
       if (UTIL.dist({ x: this.x, y: this.y }, m) < 3) {
         const amount = m.reward;
         this.dirtyMoney += amount;
+        this.reportMissionReward(m.type, amount, true);
         const pool = ['pistolet_9', 'uzi', 'ak47'];
         const weaponId = UTIL.pick(pool); const weapon = WEAPON_CATALOG[weaponId];
         const ammoQty = UTIL.randInt(30, 80);
@@ -459,6 +467,7 @@ Object.assign(Game, {
       const conditionFactor = Math.max(0.4, this.vehicle.hp / 100);
       const amount = Math.round(m.reward * conditionFactor);
       this.dirtyMoney += amount; Audio.cash();
+      this.reportMissionReward(m.type, amount, true);
       m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
       const vId = this.vehicle.id;
       this.interactVehicle();
@@ -789,6 +798,7 @@ Object.assign(Game, {
     const amount = Math.round(m.reward * conditionFactor);
     const vId = this.vehicle.id;
     this.dirtyMoney += amount;
+    this.reportMissionReward(m.type, amount, true);
     m.completed = true; this.activeMission = null; this.completedMissions.push(m.id);
     this.deliveryState = null;
     if (this.guidanceTarget) this.stopGuidance();
