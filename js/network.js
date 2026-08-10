@@ -334,7 +334,11 @@ const Net = {
       // ne jamais arriver.
       announce(`${msg.name} demande le métier « ${msg.roleName} ». Menu staff pour approuver ou refuser.`, 'assertive');
     } else if (msg.type === 'staff_job_review_result') {
-      announce(`${msg.name} : métier « ${msg.roleName} » ${msg.approved ? 'accordé' : 'refusé'}.`, 'assertive');
+      announce(`${msg.name} : métier « ${msg.roleName} » ${msg.revoked ? 'révoqué' : (msg.approved ? 'accordé' : 'refusé')}.`, 'assertive');
+    } else if (msg.type === 'job_revoked') {
+      Game.policeRank = null;
+      Roles.set('citoyen');
+      announce(`${msg.byName} vous retire votre métier de ${Roles.list[msg.oldRole]?.name || msg.oldRole}. Vous êtes de nouveau citoyen.`, 'assertive');
     } else if (msg.type === 'job_granted') {
       Roles.pending = null;
       Roles.set(msg.role);
