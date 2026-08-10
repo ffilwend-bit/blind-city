@@ -726,10 +726,14 @@ const City = {
         const gang = UTIL.pick(this.gangs);
         pos = { x: gang.x, y: gang.y };
         const angles = [0, 2.4, 4.8]; // trois directions bien réparties autour du repaire
-        const entrances = angles.map(a => ({
-          x: UTIL.clamp(Math.round(gang.x + Math.cos(a) * 10), 0, this.W - 1),
-          y: UTIL.clamp(Math.round(gang.y + Math.sin(a) * 10), 0, this.H - 1),
-        }));
+        const entrances = angles.map(a => {
+          const ex = UTIL.clamp(Math.round(gang.x + Math.cos(a) * 10), 0, this.W - 1);
+          const ey = UTIL.clamp(Math.round(gang.y + Math.sin(a) * 10), 0, this.H - 1);
+          // Nom parlant (audit accessibilité missions) : sans ça, la checklist
+          // vocale des postes ne pouvait dire que "entrée 1/2/3", impossible à
+          // relier à une direction réelle une fois sur le terrain.
+          return { x: ex, y: ey, name: `entrée ${UTIL.bearing(ex - gang.x, ey - gang.y)}` };
+        });
         extra = { entrances, gangName: gang.name };
       }
       else if (t.type === 'casse_extreme') {

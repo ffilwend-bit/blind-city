@@ -261,6 +261,25 @@ Object.assign(Game, {
       target = { name: m.dropName || 'le point de dépose', x: m.dropX, y: m.dropY };
     } else if (this.courseState && (m.type === 'course_clandestine' || m.type === 'race')) {
       target = { name: m.dropName || "la ligne d'arrivée", x: m.dropX, y: m.dropY };
+    } else if (m.type === 'defense_territoire' && !this.defenseState) {
+      // Pas encore lancée : guide vers une entrée pas encore couverte plutôt
+      // que vers le repaire lui-même (audit accessibilité missions) — la
+      // "cible" utile ici est le poste à aller occuper, pas un point unique.
+      const others = Net.connected ? Array.from(Net.remotePlayers.values()) : [];
+      const uncovered = (m.entrances || []).find(e => UTIL.dist(this, e) >= 6 && !others.some(p => UTIL.dist(p, e) < 6));
+      if (uncovered) target = { name: uncovered.name || 'une entrée à couvrir', x: uncovered.x, y: uncovered.y };
+    } else if (m.type === 'casse_extreme' && !this.extremeHeistState) {
+      const others = Net.connected ? Array.from(Net.remotePlayers.values()) : [];
+      const serverCovered = UTIL.dist(this, m.serverPoint) < 3 || others.some(p => UTIL.dist(p, m.serverPoint) < 3);
+      const vaultCovered = UTIL.dist(this, m.vaultPoint) < 3 || others.some(p => UTIL.dist(p, m.vaultPoint) < 3);
+      if (!serverCovered) target = { name: 'la salle des serveurs', x: m.serverPoint.x, y: m.serverPoint.y };
+      else if (!vaultCovered) target = { name: 'la chambre forte', x: m.vaultPoint.x, y: m.vaultPoint.y };
+    } else if (m.type === 'convoi_blinde' && !this.convoyState) {
+      const others = Net.connected ? Array.from(Net.remotePlayers.values()) : [];
+      const frontEngaged = UTIL.dist(this, m.frontPoint) < 6 || others.some(p => UTIL.dist(p, m.frontPoint) < 6);
+      const rearEngaged = UTIL.dist(this, m.rearPoint) < 6 || others.some(p => UTIL.dist(p, m.rearPoint) < 6);
+      if (!frontEngaged) target = { name: "l'avant du convoi", x: m.frontPoint.x, y: m.frontPoint.y };
+      else if (!rearEngaged) target = { name: "l'arrière du convoi", x: m.rearPoint.x, y: m.rearPoint.y };
     } else if (typeof m.x === 'number' && typeof m.y === 'number') {
       // Cas général (planque gardée, dépôt d'armes de gang, convoi blindé,
       // défense de territoire, casse à deux rôles, braquage de banque, et

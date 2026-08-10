@@ -19,7 +19,16 @@ Object.assign(Game, {
         const coverage = m.entrances.map(e => (UTIL.dist(this, e) < 6 ? 1 : 0) + others.filter(p => UTIL.dist(p, e) < 6).length);
         const coveredCount = coverage.filter(c => c > 0).length;
         if (coveredCount < 3) {
-          announce(`Mission extrême "Défense de territoire" : il faut un joueur réel posté à chacune des 3 entrées en même temps pour déclencher l'assaut. Actuellement ${coveredCount} sur 3 couvertes. Coordonnez-vous.`, 'assertive');
+          // Checklist nommée, throttlée à ~5s (audit accessibilité missions) :
+          // avant, ce message tournait à ~60 appels/seconde (checkMission()
+          // tourne à chaque frame) sans jamais nommer les entrées, noyant la
+          // synthèse vocale sous des annonces identiques et illisibles.
+          const now = Date.now();
+          if (now - (this._defenseCoverageMsgAt || 0) > 5000) {
+            this._defenseCoverageMsgAt = now;
+            const checklist = m.entrances.map((e, i) => `${e.name || `entrée ${i + 1}`} : ${coverage[i] > 0 ? 'couverte' : 'libre'}`).join(', ');
+            announce(`Mission extrême "Défense de territoire" — ${checklist}. ${coveredCount} sur 3 couvertes. Coordonnez-vous.`, 'assertive', { tag: 'defense-checklist' });
+          }
           return;
         }
         this.defenseState = { missionId: m.id, wave: 1, npcIds: [] };
@@ -91,11 +100,18 @@ Object.assign(Game, {
     if (!this.extremeHeistState) {
       if (meAtServer || meAtVault) {
         if (serverCovered && vaultCovered) {
-          this.extremeHeistState = { missionId: m.id, startedAt: Date.now(), crackTime: 25000 };
+          this.extremeHeistState = { missionId: m.id, startedAt: Date.now(), crackTime: 25000, lastProgressMsg: Date.now() };
           announce('Les deux postes sont occupés à la fois ! Piratage et perçage démarrent en parallèle. Restez chacun à votre poste.', 'assertive');
           if (UTIL.chance(0.3)) this.extremeHeistState.alarmTimer = setTimeout(() => this.reportCrimeToPolice('braquage_banque', 'Casse à deux rôles en cours'), UTIL.randInt(5000, 15000));
         } else {
-          announce(`Casse à deux rôles : il faut un joueur réel à la salle des serveurs ET un autre à la chambre forte, en même temps. Serveur ${serverCovered ? 'couvert' : 'non couvert'}, coffre ${vaultCovered ? 'couvert' : 'non couvert'}.`, 'assertive');
+          // Throttlé à ~5s (audit accessibilité missions) : sans ça, ce
+          // message tournait à ~60 appels/seconde (checkMission() tourne à
+          // chaque frame), noyant la synthèse vocale.
+          const now = Date.now();
+          if (now - (this._casseCoverageMsgAt || 0) > 5000) {
+            this._casseCoverageMsgAt = now;
+            announce(`Casse à deux rôles : il faut un joueur réel à la salle des serveurs ET un autre à la chambre forte, en même temps. Serveur ${serverCovered ? 'couvert' : 'non couvert'}, coffre ${vaultCovered ? 'couvert' : 'non couvert'}.`, 'assertive', { tag: 'casse-checklist' });
+          }
         }
       }
       return;
@@ -103,8 +119,20 @@ Object.assign(Game, {
     if (!(serverCovered && vaultCovered)) {
       clearTimeout(this.extremeHeistState.alarmTimer);
       this.extremeHeistState = null;
-      announce('Un des deux postes a été abandonné : le piratage et le perçage se réinitialisent !', 'assertive');
+      // Nomme le poste perdu (audit accessibilité missions) : avant, le
+      // message générique ne disait jamais LEQUEL des deux postes avait été
+      // abandonné.
+      announce(`Le poste ${!serverCovered ? 'de la salle des serveurs' : 'de la chambre forte'} a été abandonné : le piratage et le perçage se réinitialisent !`, 'assertive');
       return;
+    }
+    // Progression orale toutes les ~5s pendant le piratage/perçage (audit
+    // accessibilité missions) : avant, seuls le début et la fin étaient
+    // annoncés, laissant les 25 secondes d'action partagée totalement muettes.
+    const nowProgress = Date.now();
+    if (nowProgress - this.extremeHeistState.lastProgressMsg > 5000) {
+      this.extremeHeistState.lastProgressMsg = nowProgress;
+      const remaining = Math.max(0, Math.round((this.extremeHeistState.crackTime - (nowProgress - this.extremeHeistState.startedAt)) / 1000));
+      if (remaining > 0) announce(`Piratage et perçage en cours : encore ${remaining} secondes. Restez à votre poste.`, 'polite');
     }
     if (Date.now() - this.extremeHeistState.startedAt > this.extremeHeistState.crackTime) {
       const amount = m.reward + UTIL.randInt(-50000, 150000);
@@ -132,7 +160,13 @@ Object.assign(Game, {
     if (!this.convoyState) {
       const meNear = UTIL.dist(this, m.frontPoint) < 6 || UTIL.dist(this, m.rearPoint) < 6;
       if (meNear && !(frontEngaged && rearEngaged)) {
-        announce(`Attaque de convoi : il faut engager l'avant ET l'arrière en même temps, avec un joueur réel à chaque extrémité. Avant ${frontEngaged ? 'engagé' : 'libre'}, arrière ${rearEngaged ? 'engagé' : 'libre'}.`, 'assertive');
+        // Throttlé à ~5s (audit accessibilité missions) : sans ça, ce message
+        // tournait à ~60 appels/seconde (checkMission() tourne à chaque frame).
+        const now = Date.now();
+        if (now - (this._convoyCoverageMsgAt || 0) > 5000) {
+          this._convoyCoverageMsgAt = now;
+          announce(`Attaque de convoi : il faut engager l'avant ET l'arrière en même temps, avec un joueur réel à chaque extrémité. Avant ${frontEngaged ? 'engagé' : 'libre'}, arrière ${rearEngaged ? 'engagé' : 'libre'}.`, 'assertive', { tag: 'convoy-checklist' });
+        }
       }
       if (frontEngaged && rearEngaged) {
         this.convoyState = { missionId: m.id, lastReinforce: 0 };

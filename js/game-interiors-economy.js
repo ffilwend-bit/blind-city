@@ -1428,6 +1428,16 @@ Object.assign(Game, {
     casse_extreme: "Il faut un joueur réel à la salle des serveurs ET un autre à la chambre forte en même temps ; un poste abandonné réinitialise la progression.",
     convoi_blinde: "Il faut engager l'avant et l'arrière du convoi en même temps ; le camp laissé seul reçoit du renfort.",
   },
+  // Rappel de coordination + effectif requis pour les missions collectives
+  // (audit accessibilité missions) : avant, rien n'indiquait au lancement
+  // combien de joueurs réels étaient nécessaires ni qu'il fallait activer un
+  // moyen de communication (micro de proximité ou talkie) pour s'organiser.
+  // Ne touche ni PROX_VOICE_RADIUS ni la logique WebRTC — un simple rappel oral.
+  MISSION_COOP_REMINDER: {
+    defense_territoire: 'Cette mission nécessite 3 joueurs réels, un par entrée, en même temps. Activez le micro de proximité ou un talkie pour vous coordonner.',
+    casse_extreme: 'Cette mission nécessite 2 joueurs réels, un par poste, en même temps. Activez le micro de proximité ou un talkie pour vous coordonner.',
+    convoi_blinde: 'Cette mission nécessite au moins 2 joueurs réels, un par extrémité, en même temps. Activez le micro de proximité ou un talkie pour vous coordonner.',
+  },
   finishActivateMission(m) {
     // Guidage adapté à chaque mission : celles qui ont déjà leur propre
     // repérage sonore (objet perdu, urgence médicale) le gardent tel quel ;
@@ -1438,8 +1448,9 @@ Object.assign(Game, {
     // (si connue pour ce type) + ordre de grandeur de la récompense —
     // avant, seuls le titre et la description générique étaient annoncés.
     const failCondition = this.MISSION_FAILURE_CONDITIONS[m.type];
+    const coopReminder = this.MISSION_COOP_REMINDER[m.type];
     const rewardPhrase = ` Récompense : environ ${UTIL.formatMoney(m.reward)}.`;
-    const fullDesc = `${m.desc}${failCondition ? ' ' + failCondition : ''}${rewardPhrase}`;
+    const fullDesc = `${m.desc}${failCondition ? ' ' + failCondition : ''}${rewardPhrase}${coopReminder ? ' ' + coopReminder : ''}`;
     if (!selfGuidedTypes.includes(m.type)) {
       announce(`Mission activée : ${m.title}. ${fullDesc}`, 'assertive');
       this.setGuidance({ name: m.title, x: m.x, y: m.y });
