@@ -368,6 +368,18 @@ function dayNightTick() {
 }
 setInterval(dayNightTick, 60000);
 
+// Retire _ownerAccount (voir world_edit / house_owner plus bas) des éditions
+// envoyées aux clients — champ de vérification interne au serveur, jamais
+// censé faire partie du protocole que le client lit. Note : ce n'est pas
+// une fuite de vie privée en soi (publicState ci-dessous diffuse déjà
+// accountUsername pour chaque joueur à tout le monde), juste de l'hygiène
+// de protocole.
+function publicWorldEdits(edits) {
+  return (edits || []).map(e => (e.payload && e.payload._ownerAccount)
+    ? { op: e.op, payload: { ...e.payload, _ownerAccount: undefined } }
+    : e);
+}
+
 function publicState(p) {
   return {
     id: p.id, firstName: p.firstName, lastName: p.lastName, gender: p.gender,
@@ -981,7 +993,7 @@ wss.on('connection', (ws, req) => {
         type: 'welcome', id, seed: WORLD_SEED, weather: weatherState, dayPhase, gameHour: getGameHour(),
         players: Array.from(players.values()).filter(p => p.id !== id && p.joined).map(publicState),
         cityEdits: staffData.cityEdits || [],
-        worldEdits: staffData.worldEdits || [],
+        worldEdits: publicWorldEdits(staffData.worldEdits),
         morgue: staffData.morgue || [],
         graves: staffData.graves || [],
         news: newsArticles,
@@ -1320,13 +1332,48 @@ wss.on('connection', (ws, req) => {
         if (typeof payload.fuel === 'number') payload.fuel = Math.max(0, Math.min(1, payload.fuel));
         if (typeof payload.hp === 'number') payload.hp = Math.max(0, Math.min(100, payload.hp));
       }
+      // Propriété des maisons : owner: 'player' est une chaîne générique
+      // (voir js/game-interiors-economy.js), le serveur ne peut donc PAS s'y
+      // fier pour savoir QUI possède réellement la maison — 'house_owner'
+      // reste ouvert à tout joueur connecté (achat normal ET revente
+      // légitime entre deux vrais joueurs via house_sale_offer/response,
+      // voir js/network.js) : le serveur ne PEUT pas distinguer un achat
+      // légitime d'une usurpation à partir de ce seul message. Mais il
+      // mémorise systématiquement l'identité RÉELLE de la connexion
+      // (player.accountUsername, jamais fournie par le payload) comme
+      // "propriétaire actuel connu" sur l'édition elle-même (_ownerAccount,
+      // champ ajouté ICI par le serveur, jamais lu depuis le client) — cette
+      // valeur se met donc à jour correctement à chaque revente légitime.
+      //
+      // C'est 'house_keys' qui profite de cette identité fiable : avant,
+      // n'IMPORTE quel joueur connecté pouvait renvoyer 'house_keys' avec sa
+      // propre liste authorizedUsers pour une maison qu'il ne possède même
+      // pas, s'accordant un accès permanent sans jamais l'avoir achetée ni
+      // reçu les clés du vrai propriétaire. Réservé maintenant au
+      // propriétaire connu, à l'agent immobilier (Roles.current ===
+      // 'agent_immo', qui peut légitimement remettre les clés au nom du
+      // propriétaire — même règle déjà appliquée côté client dans
+      // Game.giveHouseKeys) ou au staff. Permissif si _ownerAccount n'est pas
+      // encore connu (maison déjà possédée avant ce correctif) : impossible
+      // de deviner rétroactivement qui en est le vrai propriétaire, donc pas
+      // de rupture pour les joueurs déjà installés.
+      if (msg.op === 'house_keys' && !player.staffRole && player.role !== 'agent_immo') {
+        const existing = staffData.worldEdits.find(e => e.op === 'house_owner' && e.payload && e.payload.id === payload.id);
+        const knownOwner = existing && existing.payload && existing.payload._ownerAccount;
+        if (knownOwner && knownOwner !== player.accountUsername) {
+          send(ws, { type: 'world_edit_denied', op: msg.op, id: payload.id });
+          return;
+        }
+      }
+      if (msg.op === 'house_owner' && player.accountUsername) payload._ownerAccount = player.accountUsername;
       const key = msg.op + ':' + payload.id;
       const idx = staffData.worldEdits.findIndex(e => (e.op + ':' + (e.payload && e.payload.id)) === key);
       const edit = { op: msg.op, payload };
       if (idx >= 0) staffData.worldEdits[idx] = edit; else staffData.worldEdits.push(edit);
       if (staffData.worldEdits.length > 3000) staffData.worldEdits.splice(0, staffData.worldEdits.length - 3000);
       saveStaffData();
-      for (const p of players.values()) send(p.ws, { type: 'world_edit', op: edit.op, payload: edit.payload });
+      const [publicEdit] = publicWorldEdits([edit]);
+      for (const p of players.values()) send(p.ws, { type: 'world_edit', op: publicEdit.op, payload: publicEdit.payload });
     }
 
     else if (msg.type === 'staff_list_bans') {

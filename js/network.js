@@ -143,6 +143,19 @@ const Net = {
       Game.money += msg.amount;
       announce('Don refusé par le serveur (montant invraisemblable par rapport à votre dernière sauvegarde). Votre argent vous est rendu.', 'assertive');
       updateHud();
+    } else if (msg.type === 'world_edit_denied') {
+      // Pour l'instant, seul 'house_keys' peut être refusé ainsi (voir
+      // server.js) : on n'est pas le propriétaire connu de cette maison (ni
+      // agent immobilier, ni staff). Game.giveHouseKeys avait déjà ajouté
+      // localement le destinataire à house.authorizedUsers avant l'envoi
+      // (optimiste) — on l'enlève, sinon la maison resterait affichée comme
+      // accessible chez nous alors que le serveur n'a jamais validé ce
+      // changement, et les autres joueurs ne le verront jamais.
+      if (msg.op === 'house_keys') {
+        const h = City.houses.find(h => h.id === msg.id);
+        if (h && Array.isArray(h.authorizedUsers)) h.authorizedUsers.pop();
+        announce('Ce changement de clés a été refusé par le serveur : vous n\'êtes pas reconnu comme propriétaire de cette maison.', 'assertive');
+      }
     } else if (msg.type === 'share_gps') {
       // Quelqu'un partage sa position GPS : on propose le guidage automatique
       // en direct jusqu'à lui.
