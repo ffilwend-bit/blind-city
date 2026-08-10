@@ -471,7 +471,7 @@ Object.assign(Game, {
   tickFilature(m) {
     const suspect = City.npcs.find(n => n.id === m.suspectId && !n.dead);
     if (!suspect) { this.activeMission = null; this.filatureState = null; return; }
-    if (!this.filatureState) this.filatureState = { goodMs: 0, lastTick: Date.now(), lastWander: 0, suspicion: 0 };
+    if (!this.filatureState) this.filatureState = { goodMs: 0, lastTick: Date.now(), lastWander: 0, suspicion: 0, lastStatusMsg: 0, wasHighSuspicion: false };
     const fs = this.filatureState;
     const now = Date.now();
     const dt = Math.min(2000, now - fs.lastTick); fs.lastTick = now;
@@ -487,6 +487,7 @@ Object.assign(Game, {
       if (fs.suspicion > 100) {
         announce(`${suspect.name} vous a repéré et s'enfuit ! Filature ratée.`, 'assertive');
         this.filatureState = null; this.activeMission = null;
+        return;
       }
     } else if (d <= 12) {
       fs.suspicion = Math.max(0, fs.suspicion - dt / 1000 * 5);
@@ -500,14 +501,34 @@ Object.assign(Game, {
         RPJournal.log('Mission', `Filature réussie : ${UTIL.formatMoney(amount)}.`, 'alert');
         announce(`Vous découvrez la destination du suspect ! Vous touchez ${UTIL.formatMoney(amount)}.`, 'assertive');
         updateHud();
+        return;
       }
     } else {
       fs.goodMs = Math.max(0, fs.goodMs - dt * 2);
       if (d > 20) {
         announce('Vous avez perdu le suspect de vue. Filature ratée.', 'assertive');
         this.filatureState = null; this.activeMission = null;
+        return;
       }
     }
+    // Retour vocal périodique manquant jusque-là : rien n'était annoncé entre
+    // le début de la filature et son échec/réussite — impossible pour un
+    // joueur non-voyant de savoir s'il tenait la bonne distance ou s'il
+    // dérivait vers l'échec. Toutes les ~3,5 s : distance réelle + zone
+    // (trop près / bonne distance / trop loin) + niveau de suspicion.
+    if (now - fs.lastStatusMsg > 3500) {
+      fs.lastStatusMsg = now;
+      const meters = Math.round(d * CONFIG.METERS_PER_TILE);
+      const zone = d < 3 ? 'trop près' : d <= 12 ? 'bonne distance' : 'trop loin';
+      const suspicionLevel = fs.suspicion > 66 ? 'élevée' : fs.suspicion > 33 ? 'moyenne' : 'faible';
+      announce(`${suspect.name} à ${meters} mètres — ${zone}. Suspicion : ${suspicionLevel}.`, 'polite');
+    }
+    // Son d'alerte distinct dès le franchissement du seuil (pas à chaque
+    // tick tant qu'on reste au-dessus, sinon le son deviendrait continu et
+    // masquerait le reste de l'ambiance) : prévient qu'il faut reculer AVANT
+    // l'échec à 100.
+    if (fs.suspicion > 60 && !fs.wasHighSuspicion) { fs.wasHighSuspicion = true; Audio.suspicionAlert(); }
+    else if (fs.suspicion <= 60) fs.wasHighSuspicion = false;
   },
 
   // 2. Escorte sous menace : client réel à bord, embuscade possible avec de

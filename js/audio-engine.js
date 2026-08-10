@@ -188,6 +188,15 @@ const Audio = {
       setTimeout(() => this.tone({ freq: 1000 + i * 220, type: 'square', duration: 0.09, gain: 0.16, pan, attack: 0.003, release: 0.06 }), delay);
     });
   },
+  // Alerte « suspicion en hausse » (voir Game.tickFilature) : deux bips
+  // graves, descendants, façon tension qui monte — délibérément différent de
+  // targetedWarning (montant, aigu, "on vous vise") pour ne jamais confondre
+  // les deux, tout en restant reconnaissable comme un avertissement.
+  suspicionAlert(pan = 0) {
+    [0, 140].forEach((delay, i) => {
+      setTimeout(() => this.tone({ freq: 480 - i * 120, type: 'triangle', duration: 0.15, gain: 0.14, pan, attack: 0.005, release: 0.1 }), delay);
+    });
+  },
   impact(pan = 0) { this.noise({ duration: 0.1, gain: 0.15, pan, filterFreq: 600, attack: 0.005, release: 0.06 }); },
   // Le joueur encaisse un coup : protected = casque (tête) ou gilet (corps) a
   // absorbé le choc -> son sourd et étouffé (grave, filtré bas) ; sinon, impact

@@ -205,10 +205,24 @@ Object.assign(Game, {
   guideToMissionObjective() {
     const m = this.activeMission;
     if (!m) return announce('Aucune mission active pour le moment.', 'assertive');
+    // Filature : arriver JUSQU'AU suspect est un échec (trop près = repéré),
+    // pas un objectif — le guidage habituel (chemin + "vous êtes arrivé")
+    // n'a donc pas de sens ici. À la place, une annonce ponctuelle de
+    // distance/cap vers le suspect, comme le fait déjà updateProxVoiceSpatial
+    // pour d'autres cibles hostiles/mobiles (voir tickFilature pour le suivi
+    // périodique automatique pendant la mission).
+    if (m.type === 'filature') {
+      const suspect = City.npcs.find(n => n.id === m.suspectId && !n.dead);
+      if (!suspect) return announce('Suspect introuvable pour le moment.', 'assertive');
+      const meters = Math.round(UTIL.dist(suspect, this) * CONFIG.METERS_PER_TILE);
+      const dir = UTIL.bearing(suspect.x - this.x, suspect.y - this.y);
+      return announce(`${suspect.name} à ${meters} mètres, vers le ${dir}. Restez entre 12 et 20 mètres pour ne pas le perdre ni vous faire repérer.`, 'assertive');
+    }
     let target = null;
-    if (m.type === 'recel_vehicule') {
+    if (m.type === 'recel_vehicule' || m.type === 'convoyage') {
       // Pas encore au volant du véhicule visé : direction vers LUI. Une fois
-      // dedans : direction vers le point de livraison (voir tickRecelVehicule).
+      // dedans : direction vers le point de livraison (voir tickRecelVehicule
+      // / startVehicleDelivery, communs aux deux types).
       const vehicle = City.vehicles.find(v => v.id === m.vehicleId);
       if (this.inVehicle && this.vehicle && vehicle && this.vehicle.id === vehicle.id) {
         target = { name: m.dropName || 'le point de livraison', x: m.dropX, y: m.dropY };
@@ -226,9 +240,31 @@ Object.assign(Game, {
       target = { name: "l'objectif de sabotage", x: m.objectiveX, y: m.objectiveY };
     } else if (m.type === 'chasse_primes' && this.bountyState) {
       target = { name: this.bountyState.stationName || 'le commissariat', x: this.bountyState.stationX, y: this.bountyState.stationY };
+    } else if ((m.type === 'urgence_medicale' || m.type === 'medical')) {
+      // Pas encore récupéré le blessé : direction vers lui. Une fois à bord
+      // (this.medicalState existe, voir tickUrgenceMedicale) : direction vers
+      // l'hôpital le plus proche, déjà calculé dans le tick.
+      const victim = this.medicalState ? City.npcs.find(n => n.id === this.medicalState.victimId) : null;
+      if (this.medicalState) {
+        const hopital = City.pois.find(p => p.type === 'hopital');
+        if (hopital) target = { name: "l'hôpital", x: hopital.x, y: hopital.y };
+      } else if (victim) {
+        target = { name: victim.name || 'le blessé', x: victim.x, y: victim.y };
+      }
+    } else if (this.fragileState && (m.type === 'colis_fragile')) {
+      target = { name: m.dropName || 'le point de livraison', x: m.dropX, y: m.dropY };
+    } else if (this.taxiState && (m.type === 'taxi_soigne' || m.type === 'taxi')) {
+      target = { name: m.dropName || 'la destination du client', x: m.dropX, y: m.dropY };
+    } else if (this.escorteState && m.type === 'escorte') {
+      target = { name: m.dropName || "le point d'arrivée", x: m.dropX, y: m.dropY };
+    } else if (this.contrebandeState && m.type === 'contrebande') {
+      target = { name: m.dropName || 'le point de dépose', x: m.dropX, y: m.dropY };
+    } else if (this.courseState && (m.type === 'course_clandestine' || m.type === 'race')) {
+      target = { name: m.dropName || "la ligne d'arrivée", x: m.dropX, y: m.dropY };
     } else if (typeof m.x === 'number' && typeof m.y === 'number') {
       // Cas général (planque gardée, dépôt d'armes de gang, convoi blindé,
-      // défense de territoire, casse à deux rôles, braquage de banque...) :
+      // défense de territoire, casse à deux rôles, braquage de banque, et
+      // toutes les missions ci-dessus AVANT leur phase de prise en charge) :
       // le point d'origine de la mission EST le point pertinent — que ce
       // soit pour s'y rendre au départ, ou (planque gardée notamment) pour
       // y revenir récupérer le butin une fois les gardes éliminés.
