@@ -225,7 +225,7 @@ function createPeerVoiceMesh(opts) {
       // en plus du précédent, encore jamais terminé.
       if (this.peers.has(peerId) || this.connecting.has(peerId)) return;
       this.connecting.add(peerId);
-      let stream;
+      let stream = null;
       try {
         // La toute première connexion d'une session peut survenir avant que
         // /ice-servers (voir menus-and-ui.js loadIceServers) ait répondu —
@@ -234,13 +234,33 @@ function createPeerVoiceMesh(opts) {
         // moins fiable sur données mobiles/CGNAT. Plafonnée à 4 s, ne bloque
         // donc jamais durablement une tentative de connexion.
         if (window.iceServersReady) await window.iceServersReady;
-        stream = await this.ensureLocalStream();
+        // On ne réclame le micro (et sa permission navigateur) QUE si on a
+        // réellement l'intention d'émettre sur ce canal (opts.wantsToSend —
+        // pour ProxVoice, Game.voiceOpen). Sans ça, un joueur qui n'a JAMAIS
+        // activé son propre micro se voyait quand même demander la
+        // permission micro dès qu'un joueur proche parlait — juste pour
+        // pouvoir l'ÉCOUTER. On peut recevoir de l'audio sans en envoyer
+        // (transceiver recvonly plus bas), donc pas besoin de micro local
+        // pour ça.
+        const wantsToSend = opts.wantsToSend ? opts.wantsToSend() : true;
+        if (wantsToSend) {
+          stream = await this.ensureLocalStream();
+          if (!stream) return; // on voulait émettre mais le micro a échoué : comportement inchangé, on annule
+        }
       } finally { this.connecting.delete(peerId); }
-      if (!stream) return;
       if (this.peers.has(peerId)) return; // connecté entre-temps par l'autre côté
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
-      const entry = { pc, pendingIce: [], remoteEl: null, audioNodes: null, announcedState: null };
+      // Écoute seule (pas de micro voulu ici) : un transceiver recvonly
+      // permet de recevoir l'audio de l'autre côté sans jamais rien envoyer,
+      // sans avoir eu besoin du moindre accès micro local.
+      if (stream) stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      else if (pc.addTransceiver) pc.addTransceiver('audio', { direction: 'recvonly' });
+      // sending : mémorise si CETTE connexion a été ouverte avec ma propre
+      // piste micro ou en pure écoute — sert à evaluateProxVoice/toggleProxVoice
+      // pour savoir quelles connexions ré-ouvrir quand j'active mon micro
+      // après coup (une connexion recvonly ne se transforme pas toute seule
+      // en sendrecv si je décide de parler plus tard).
+      const entry = { pc, pendingIce: [], remoteEl: null, audioNodes: null, announcedState: null, sending: !!stream };
       this.peers.set(peerId, entry);
       pc.onicecandidate = (e) => { if (e.candidate) Net.send({ type: 'mesh_ice', toId: peerId, channel: this.channel, data: e.candidate }); };
       pc.ontrack = (e) => opts.onRemoteStream(peerId, e.streams[0], entry);
@@ -358,12 +378,25 @@ function createPeerVoiceMesh(opts) {
     },
 
     // Ouvre les connexions manquantes vers les pairs désirés, ferme les autres.
-    // L'offreur est toujours celui dont l'identifiant réseau est le plus petit
-    // (comparaison déterministe) : ainsi les deux côtés sont toujours d'accord
-    // sur qui envoie l'offre, sans négociation ni conflit possible.
-    evaluate(desiredIds) {
+    // L'offreur est normalement celui dont l'identifiant réseau est le plus
+    // petit (comparaison déterministe) : quand les DEUX côtés désirent la
+    // connexion (cas symétrique classique, micro ouvert des deux côtés), ça
+    // suffit à départager sans négociation ni conflit possible.
+    //
+    // forceOffererIds (optionnel) : pour ProxVoice, désirer un pair peut
+    // désormais être asymétrique — j'écoute quelqu'un qui diffuse sans avoir
+    // moi-même mon micro ouvert. Dans ce cas, LUI ne me désire pas de son
+    // côté (son propre calcul ne me voit pas comme diffuseur) : il n'appelle
+    // donc jamais connect() vers moi, et si l'ordre des identifiants me
+    // désignait comme répondeur, personne n'enverrait jamais d'offre — la
+    // connexion resterait bloquée pour toujours. Pour ces pairs-là, je dois
+    // être l'offreur inconditionnellement, peu importe l'ordre des identifiants.
+    evaluate(desiredIds, forceOffererIds) {
       for (const peerId of desiredIds) {
-        if (!this.peers.has(peerId)) this.connect(peerId, Net.id < peerId);
+        if (!this.peers.has(peerId)) {
+          const isOfferer = (forceOffererIds && forceOffererIds.has(peerId)) ? true : Net.id < peerId;
+          this.connect(peerId, isOfferer);
+        }
       }
       for (const peerId of Array.from(this.peers.keys())) {
         if (!desiredIds.has(peerId)) this.disconnect(peerId);
@@ -386,6 +419,11 @@ function createPeerVoiceMesh(opts) {
 // (comme un appel qui raccroche), au lieu de s'estomper progressivement.
 const ProxVoice = createPeerVoiceMesh({
   channel: 'prox',
+  // Je n'émets (et ne réclame le micro) que si MON micro de proximité est
+  // activé — voir evaluateProxVoice ci-dessous : on peut désormais désirer
+  // une connexion uniquement pour ÉCOUTER quelqu'un qui diffuse, sans avoir
+  // ouvert le sien (connect() bascule alors sur un transceiver recvonly).
+  wantsToSend: () => Game.voiceOpen,
   onRemoteStream(peerId, stream, entry) {
     const ctx = Audio.ensure();
     const src = ctx.createMediaStreamSource(stream);
@@ -519,19 +557,37 @@ const PROX_VOICE_RADIUS = 15;
 // joueur croit avoir activé son micro mais ça n'a pas marché de son côté".
 // On ne l'annonce qu'UNE fois par entrée dans cet état (pas à chaque tick).
 let proxReachabilityAnnounced = false;
+// Écoute désormais indépendante de mon PROPRE micro : je peux entendre un
+// joueur proche qui diffuse (p.voiceOpen) même si Game.voiceOpen est faux
+// chez moi — je ne fais qu'écouter, sans jamais émettre ni réclamer de
+// permission micro pour ça (voir wantsToSend sur ProxVoice et le transceiver
+// recvonly dans connect()). Mon propre Game.voiceOpen ne contrôle donc plus
+// que si LES AUTRES m'entendent, pas si MOI j'entends les autres.
 function evaluateProxVoice() {
-  if (!Game.voiceOpen || !Net.connected) { if (ProxVoice.peers.size) ProxVoice.evaluate(new Set()); proxReachabilityAnnounced = false; return; }
+  if (!Net.connected) { if (ProxVoice.peers.size) ProxVoice.evaluate(new Set()); proxReachabilityAnnounced = false; return; }
   const desired = new Set();
+  // Pairs où JE dois forcément être l'offreur : je les désire (ils
+  // diffusent) mais je n'émets pas moi-même, donc EUX ne me désirent pas de
+  // leur côté et n'enverront jamais d'offre en premier (voir evaluate() plus
+  // haut) — sans ça la connexion resterait bloquée indéfiniment.
+  const listenOnly = new Set();
   const nearbyMicOff = [];
   Net.remotePlayers.forEach((p, pid) => {
     const d = UTIL.dist(Game, p);
     if (d > PROX_VOICE_RADIUS) return;
-    if (p.voiceOpen) desired.add(pid);
-    else nearbyMicOff.push(p);
+    if (p.voiceOpen) {
+      desired.add(pid);
+      if (!Game.voiceOpen) listenOnly.add(pid);
+    } else if (Game.voiceOpen) {
+      nearbyMicOff.push(p);
+    }
   });
-  ProxVoice.evaluate(desired);
+  ProxVoice.evaluate(desired, listenOnly);
   updateProxVoiceSpatial();
-  if (desired.size === 0 && nearbyMicOff.length) {
+  // Ce diagnostic ne concerne que mon PROPRE micro (activé mais personne à
+  // portée ne peut donc m'entendre) : n'a de sens que si Game.voiceOpen est
+  // activé — écouter sans émettre n'a pas besoin de cet avertissement.
+  if (Game.voiceOpen && desired.size === 0 && nearbyMicOff.length) {
     if (!proxReachabilityAnnounced) {
       proxReachabilityAnnounced = true;
       const names = nearbyMicOff.slice(0, 3).map(p => `${p.firstName} ${p.lastName}`).join(', ');
@@ -554,7 +610,9 @@ setInterval(() => { evaluateProxVoice(); evaluateTalkieVoice(); evaluateMusicVoi
 
 function toggleProxVoice() {
   Game.voiceOpen = !Game.voiceOpen;
-  let msg = Game.voiceOpen ? 'Micro de proximité activé : les gens autour de vous vous entendent.' : 'Micro de proximité coupé.';
+  let msg = Game.voiceOpen
+    ? 'Micro de proximité activé : les gens autour de vous vous entendent.'
+    : 'Micro de proximité coupé : vous ne serez plus entendu, mais vous pouvez toujours entendre les joueurs proches qui ont le leur activé.';
   if (Game.voiceOpen) {
     const netType = getNetworkTypeLabel();
     msg += netType ? ` Votre connexion : ${netType}.` : ' Type de connexion non détectable par ce navigateur.';
@@ -562,8 +620,23 @@ function toggleProxVoice() {
   announce(msg, 'assertive');
   const btn = document.getElementById('touchProxMic');
   if (btn) btn.className = Game.voiceOpen ? 'touch-btn mic-btn listening' : 'touch-btn mic-btn';
-  if (!Game.voiceOpen) ProxVoice.stopAll();
-  else { ProxVoice.micFailAnnounced = false; evaluateProxVoice(); } // nouvelle activation volontaire : redonner une chance à l'annonce d'échec
+  // On ne ferme plus TOUTES les connexions en coupant son micro (stopAll) :
+  // on peut désormais continuer à ÉCOUTER les joueurs proches qui diffusent
+  // encore (voir evaluateProxVoice / wantsToSend). setLocalMuted coupe
+  // seulement l'émission, immédiatement (sans attendre jusqu'à 1 s que le
+  // prochain cycle evaluate() s'en aperçoive côté des autres joueurs).
+  ProxVoice.setLocalMuted(!Game.voiceOpen);
+  if (Game.voiceOpen) {
+    ProxVoice.micFailAnnounced = false; // nouvelle activation volontaire : redonner une chance à l'annonce d'échec
+    // Les connexions déjà ouvertes en pure écoute (entry.sending === false,
+    // ouvertes avant que j'active mon micro) ne se transforment pas toutes
+    // seules en connexions à double sens : on les referme pour qu'elles se
+    // rouvrent avec ma piste micro cette fois, sinon je resterais entendu
+    // par personne sur ces connexions précises tant qu'elles ne se coupent
+    // pas d'elles-mêmes (changement de distance, déconnexion...).
+    ProxVoice.peers.forEach((entry, peerId) => { if (!entry.sending) ProxVoice.disconnect(peerId); });
+  }
+  evaluateProxVoice();
 }
 window.toggleProxVoice = toggleProxVoice;
 
