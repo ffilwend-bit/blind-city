@@ -211,6 +211,21 @@ async function testMicLevelAndAnnounce(stream) {
   } catch (e) { /* diagnostic non bloquant : un échec ici ne doit jamais casser la connexion */ }
 }
 
+// Au-delà de ce délai sans avoir atteint 'connected'/'completed', une
+// connexion est considérée bloquée et traitée comme un échec (voir le
+// "chien de garde" dans connect() ci-dessous). Repéré en conditions
+// réelles : quand la négociation ICE doit passer par un relais TURN (NAT
+// symétrique/CGNAT, cas typique des données mobiles), l'allocation TURN
+// peut rester bloquée en silence sur iceConnectionState 'new' — SANS
+// jamais déclencher 'failed' — pendant largement plus d'une minute. Sans
+// chien de garde, aucune des deux annonces ("connexion établie"/
+// "impossible") ne se déclenche jamais : silence total et permanent, sans
+// le moindre indice pour le joueur. 12 s laisse largement le temps à une
+// négociation normale (host/srflx quasi instantanés, TURN généralement
+// sous 3-5 s) tout en restant sous la patience raisonnable d'un joueur qui
+// attend d'être entendu.
+const CONNECT_TIMEOUT_MS = 12000;
+
 function createPeerVoiceMesh(opts) {
   return {
     channel: opts.channel,
@@ -303,6 +318,17 @@ function createPeerVoiceMesh(opts) {
       // en sendrecv si je décide de parler plus tard).
       const entry = { pc, pendingIce: [], remoteEl: null, audioNodes: null, announcedState: null, sending: !!stream };
       this.peers.set(peerId, entry);
+      // Chien de garde anti-blocage silencieux : voir CONNECT_TIMEOUT_MS
+      // plus haut. Sans lui, une connexion qui ne quitte jamais
+      // iceConnectionState 'new' (allocation TURN qui échoue en silence)
+      // reste bloquée pour toujours, sans jamais appeler reportState('failed')
+      // — donc sans jamais retenter ni prévenir le joueur.
+      entry.connectTimer = setTimeout(() => {
+        if (this.peers.get(peerId) !== entry) return; // déjà remplacée/fermée entre-temps
+        if (pc.connectionState === 'connected' || pc.connectionState === 'completed') return;
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') return;
+        reportState('failed');
+      }, CONNECT_TIMEOUT_MS);
       pc.onicecandidate = (e) => { if (e.candidate) Net.send({ type: 'mesh_ice', toId: peerId, channel: this.channel, data: e.candidate }); };
       // remoteStream mémorisé pour le contrôle de santé du track ci-dessous
       // (reportState) : "connexion établie" (ICE) ne garantit PAS que
@@ -330,6 +356,8 @@ function createPeerVoiceMesh(opts) {
         if (state === entry.announcedState) return;
         if (state !== 'connected' && state !== 'failed') return; // seuls ces deux états nous intéressent ici
         entry.announcedState = state;
+        clearTimeout(entry.connectTimer); // l'une des deux issues est arrivée : le chien de garde n'a plus lieu d'être
+
         if (this.channel === 'prox') {
           const p = Net.remotePlayers.get(peerId);
           const name = p ? `${p.firstName} ${p.lastName}` : 'un joueur proche';
@@ -438,6 +466,7 @@ function createPeerVoiceMesh(opts) {
     disconnect(peerId) {
       const entry = this.peers.get(peerId);
       if (!entry) return;
+      clearTimeout(entry.connectTimer);
       try { entry.pc.close(); } catch (e) { /* ignore */ }
       if (opts.onRemoteClose) opts.onRemoteClose(peerId, entry);
       this.peers.delete(peerId);
