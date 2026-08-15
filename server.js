@@ -1664,12 +1664,16 @@ wss.on('connection', (ws, req) => {
       if (other) send(other.ws, { type: 'voice_toggle', callId: msg.callId, on: !!msg.on });
     }
 
-    else if (msg.type === 'mesh_offer' || msg.type === 'mesh_answer' || msg.type === 'mesh_ice' || msg.type === 'mesh_reject') {
+    else if (msg.type === 'mesh_offer' || msg.type === 'mesh_answer' || msg.type === 'mesh_ice' || msg.type === 'mesh_reject' || msg.type === 'mesh_close') {
       // Signalisation WebRTC point-à-point générique, ciblée par joueur (pas liée à
       // un appel) : sert au micro de proximité et à la voix du talkie-walkie.
       // mesh_reject : réponse explicite quand le destinataire d'une offre ne
       // peut pas répondre (micro local indisponible) — sans ça l'offreur
       // restait bloqué en silence à attendre une réponse qui n'arrive jamais.
+      // mesh_close : prévient l'autre côté qu'une connexion établie vient
+      // d'être fermée volontairement (ex. rouverte avec le micro après coup)
+      // — sans ça l'autre gardait sa propre connexion "établie" mais devenue
+      // muette, jusqu'à un éventuel timeout ICE.
       const target = players.get(msg.toId);
       if (target && target.joined) {
         send(target.ws, { type: msg.type, fromId: id, channel: msg.channel, data: msg.data });

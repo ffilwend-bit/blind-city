@@ -477,6 +477,9 @@ const Net = {
     } else if (msg.type === 'mesh_reject') {
       const mesh = { prox: ProxVoice, talkie: TalkieVoice, music: MusicVoice }[msg.channel];
       if (mesh) mesh.onRejected(msg.fromId);
+    } else if (msg.type === 'mesh_close') {
+      const mesh = { prox: ProxVoice, talkie: TalkieVoice, music: MusicVoice }[msg.channel];
+      if (mesh) mesh.handleClose(msg.fromId);
     } else if (msg.type === 'staff_auth_result') {
       StaffMode.onAuthResult(!!msg.ok, msg.staffRole, !!msg.auto);
     } else if (msg.type === 'staff_log') {

@@ -502,13 +502,32 @@ function createPeerVoiceMesh(opts) {
       }
     },
 
-    disconnect(peerId) {
+    // notifyRemote (true par défaut) : prévient l'AUTRE côté (mesh_close)
+    // qu'on ferme cette connexion. Sans ça, fermer une pc localement (par
+    // exemple pour la rouvrir avec le micro — voir toggleProxVoice) était
+    // invisible pour l'autre joueur : lui gardait sa propre pc "établie",
+    // qui ne parlait plus jamais dans le vide, pendant que nous recréions
+    // une nouvelle pc qui attendait une offre qui n'arriverait jamais tant
+    // que SA vieille pc à lui n'expirait pas d'elle-même (ICE keepalive,
+    // potentiellement long, voire jamais) — silence mutuel malgré une
+    // "connexion établie" entendue plus tôt des deux côtés. Passé à false
+    // uniquement par handleClose (réponse à un mesh_close reçu), pour ne
+    // pas se répondre indéfiniment mesh_close contre mesh_close.
+    disconnect(peerId, notifyRemote = true) {
       const entry = this.peers.get(peerId);
       if (!entry) return;
       clearTimeout(entry.connectTimer);
       try { entry.pc.close(); } catch (e) { /* ignore */ }
       if (opts.onRemoteClose) opts.onRemoteClose(peerId, entry);
       this.peers.delete(peerId);
+      if (notifyRemote) Net.send({ type: 'mesh_close', toId: peerId, channel: this.channel });
+    },
+
+    // Reçu quand l'AUTRE côté ferme sa pc volontairement (voir disconnect
+    // ci-dessus) : on ferme la nôtre en miroir, sans le renvoyer (notifyRemote
+    // = false), sinon boucle mesh_close infinie entre les deux côtés.
+    handleClose(fromId) {
+      this.disconnect(fromId, false);
     },
 
     // Coupe/rétablit ma propre voix sans fermer les connexions (utile pour
