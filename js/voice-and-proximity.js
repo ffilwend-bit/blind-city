@@ -338,7 +338,19 @@ function createPeerVoiceMesh(opts) {
         if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') return;
         reportState('failed');
       }, CONNECT_TIMEOUT_MS);
-      pc.onicecandidate = (e) => { if (e.candidate) Net.send({ type: 'mesh_ice', toId: peerId, channel: this.channel, data: e.candidate }); };
+      // candidateTypes : compte les candidats ICE LOCAUX trouvés par type
+      // (host = accès direct, srflx = via STUN/réflexif, relay = via TURN).
+      // Sert uniquement au diagnostic envoyé au serveur en cas d'échec (voir
+      // reportState plus bas) — remplace le silence total qui empêchait
+      // jusqu'ici de savoir, pour un échec réel signalé par un joueur, si
+      // ne serait-ce qu'un seul candidat a pu être trouvé.
+      entry.candidateTypes = { host: 0, srflx: 0, prflx: 0, relay: 0 };
+      pc.onicecandidate = (e) => {
+        if (!e.candidate) return;
+        const t = e.candidate.type;
+        if (t && entry.candidateTypes[t] !== undefined) entry.candidateTypes[t]++;
+        Net.send({ type: 'mesh_ice', toId: peerId, channel: this.channel, data: e.candidate });
+      };
       // remoteStream mémorisé pour le contrôle de santé du track ci-dessous
       // (reportState) : "connexion établie" (ICE) ne garantit PAS que
       // l'audio circule réellement (piste fermée, coupée côté émetteur...).
@@ -391,6 +403,21 @@ function createPeerVoiceMesh(opts) {
           }
         }
         if (state === 'failed') {
+          // Diagnostic technique envoyé au serveur (jamais annoncé au
+          // joueur — trop technique pour être utile à l'oreille) : sert
+          // uniquement à comprendre après coup, pour un échec réel signalé,
+          // quels types de candidats ICE ont pu être trouvés (aucun candidat
+          // relay malgré un TURN configuré ? aucun candidat du tout ?) au
+          // lieu de deviner depuis un environnement de test qui ne peut pas
+          // fidèlement reproduire les conditions réseau réelles d'un joueur.
+          Net.send({
+            type: 'voice_diag',
+            channel: this.channel,
+            forceRelay: !!forceRelay,
+            iceGatheringState: pc.iceGatheringState,
+            candidateTypes: entry.candidateTypes,
+            networkType: (typeof getNetworkTypeLabel === 'function' ? getNetworkTypeLabel() : null),
+          });
           this.disconnect(peerId);
           // Retente une fois, rapidement, plutôt que d'attendre jusqu'à 1 s
           // le prochain cycle evaluate() : pas un vrai iceRestart (demanderait
