@@ -343,6 +343,14 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+  // Diagnostics techniques des échecs de connexion vocale récents (voir
+  // 'voice_diag' plus bas) — purement technique, aucune donnée vocale ni
+  // personnelle, pour comprendre un échec réel signalé sans avoir à deviner.
+  if (reqPath === '/voice-diagnostics') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ diagnostics: voiceDiagnostics }, null, 2));
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('Blind City Online — serveur relais actif.\nConnectez le client en WebSocket sur cette même adresse (wss://...).\n');
 });
@@ -355,6 +363,14 @@ const players = new Map();
 // le monde sur ce serveur (les 50 plus récentes suffisent, pas besoin de
 // persistance au-delà d'un redémarrage pour ce genre de contenu éphémère).
 const newsArticles = [];
+// Diagnostic technique (voir 'voice_diag' plus bas) envoyé par le client
+// quand une connexion vocale (proximité/talkie/musique) échoue vraiment :
+// permet de voir après coup, pour un échec réel signalé par un joueur, quels
+// types de candidats ICE ont pu être trouvés — sans avoir à deviner depuis un
+// environnement de test qui ne reproduit pas fidèlement les conditions
+// réseau réelles d'un joueur. Purement technique (aucune donnée vocale ni
+// personnelle) ; les 50 plus récents suffisent, consultables sur /voice-diagnostics.
+const voiceDiagnostics = [];
 /** @type {Map<string, any>} callId -> { callerId, targetId, status, timeout } */
 const calls = new Map();
 /** @type {Map<string, {id:string,name:string,role:string,roleName:string,time:number}>} candidatures de métier en attente, par id de joueur */
@@ -1658,6 +1674,31 @@ wss.on('connection', (ws, req) => {
       if (target && target.joined) {
         send(target.ws, { type: msg.type, fromId: id, channel: msg.channel, data: msg.data });
       }
+    }
+
+    // Diagnostic technique d'un échec de connexion vocale (voir
+    // js/voice-and-proximity.js) : purement informatif, jamais renvoyé au
+    // client, consultable sur /voice-diagnostics. Champs whitelistés
+    // strictement (mêmes principes que 'state' plus haut) — aucune donnée
+    // vocale ni personnelle, juste des types de candidats ICE et un état.
+    else if (msg.type === 'voice_diag') {
+      const VALID_CHANNELS = ['prox', 'talkie', 'music'];
+      const VALID_CANDIDATE_TYPES = ['host', 'srflx', 'prflx', 'relay'];
+      const candidateTypes = {};
+      if (msg.candidateTypes && typeof msg.candidateTypes === 'object') {
+        for (const k of VALID_CANDIDATE_TYPES) {
+          candidateTypes[k] = Number.isFinite(msg.candidateTypes[k]) ? msg.candidateTypes[k] : 0;
+        }
+      }
+      voiceDiagnostics.push({
+        t: Date.now(),
+        channel: VALID_CHANNELS.includes(msg.channel) ? msg.channel : 'inconnu',
+        forceRelay: !!msg.forceRelay,
+        iceGatheringState: typeof msg.iceGatheringState === 'string' ? msg.iceGatheringState.slice(0, 20) : null,
+        candidateTypes,
+        networkType: typeof msg.networkType === 'string' ? msg.networkType.slice(0, 30) : null,
+      });
+      if (voiceDiagnostics.length > 50) voiceDiagnostics.shift();
     }
 
     // --- Chat vocal direct (WebRTC) : le serveur relaie juste l'offre/réponse/ICE
