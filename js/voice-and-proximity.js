@@ -274,7 +274,16 @@ function createPeerVoiceMesh(opts) {
       return this.localStream;
     },
 
-    async connect(peerId, isOfferer) {
+    // forceRelay : utilisé pour la RETENTATIVE après un échec (voir plus bas)
+    // — une tentative normale ('all', hôte + réflexif + relais) qui a déjà
+    // échoué a de fortes chances d'avoir échoué à cause d'un NAT restrictif
+    // (symétrique/CGNAT, cas typique quand les deux joueurs sont sur des
+    // réseaux différents) que seul un relais TURN peut contourner. Retenter
+    // à l'identique répète la même négociation vouée au même échec ; forcer
+    // 'relay' saute directement à la seule option qui a une chance réelle de
+    // fonctionner, sans perdre de temps à re-collecter des candidats hôte/
+    // réflexifs inutiles dans ce cas précis.
+    async connect(peerId, isOfferer, forceRelay = false) {
       // Garde anti-doublon : evaluate() peut être rappelé (toutes les secondes)
       // avant qu'un connect() précédent pour ce même pair n'ait fini d'attendre
       // le micro — sans ça, chaque tick relançait un getUserMedia() concurrent
@@ -305,7 +314,7 @@ function createPeerVoiceMesh(opts) {
         }
       } finally { this.connecting.delete(peerId); }
       if (this.peers.has(peerId)) return; // connecté entre-temps par l'autre côté
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const pc = new RTCPeerConnection(forceRelay ? { iceServers: ICE_SERVERS, iceTransportPolicy: 'relay' } : { iceServers: ICE_SERVERS });
       // Écoute seule (pas de micro voulu ici) : un transceiver recvonly
       // permet de recevoir l'audio de l'autre côté sans jamais rien envoyer,
       // sans avoir eu besoin du moindre accès micro local.
@@ -392,7 +401,10 @@ function createPeerVoiceMesh(opts) {
           // plus désiré entre-temps (hors de portée, micro fermé...), le
           // prochain cycle evaluate() la refermera normalement — retenter
           // une fois pour rien ne fait pas de mal.
-          setTimeout(() => this.connect(peerId, isOfferer), 400);
+          // forceRelay=true : une tentative normale vient d'échouer, la
+          // retentative saute directement au relais TURN (voir le
+          // commentaire sur le paramètre forceRelay de connect()).
+          setTimeout(() => this.connect(peerId, isOfferer, true), 400);
         }
       };
       pc.onconnectionstatechange = () => {
