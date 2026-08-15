@@ -1328,10 +1328,17 @@ const Game = {
     // d'avancer sans choisir de destination d'abord »). Pour un guidage vers
     // un lieu précis, le téléphone (Lieux utiles / Carte, bouton 🧭) reste
     // disponible à tout moment, sans jamais bloquer la conduite libre.
-    // Boîte manuelle (motos et voitures sport) : annoncé une seule fois à la
-    // montée, sans quoi les touches (crochet droit/gauche du clavier, sans
-    // rapport avec le cap) restaient invisibles pour le joueur.
-    const gearboxHint = cls?.manualGearbox ? ` Boîte manuelle à ${this.GEAR_RATIOS.length} rapports : les deux touches à droite du clavier, juste avant la touche Entrée (crochet fermant pour monter d'un rapport, celle juste avant pour redescendre), plafonnent votre vitesse tant que vous ne passez pas le rapport suivant.` : '';
+    // Boîte manuelle (motos et voitures sport) : annoncée à la première
+    // montée d'un véhicule à boîte manuelle, sans quoi les touches (crochet
+    // droit/gauche du clavier, sans rapport avec le cap) restaient
+    // invisibles pour le joueur. Une seule fois PAR NAVIGATEUR (localStorage,
+    // audit véhicules/GPS, item 5) : avant, elle se répétait identique à
+    // chaque montée, y compris la centième fois sur le même type de véhicule.
+    let gearboxHint = '';
+    if (cls?.manualGearbox && !localStorage.getItem('blind_city_gearbox_tip_shown')) {
+      localStorage.setItem('blind_city_gearbox_tip_shown', '1');
+      gearboxHint = ` Boîte manuelle à ${this.GEAR_RATIOS.length} rapports : les deux touches à droite du clavier, juste avant la touche Entrée (crochet fermant pour monter d'un rapport, celle juste avant pour redescendre), plafonnent votre vitesse tant que vous ne passez pas le rapport suivant.`;
+    }
     if (trappedByCarjack) {
       announce(`Vous arrachez ${carjackedDriverName} de son véhicule et prenez le volant ! Mais ${carjackedDriverName} verrouille les portières de l'extérieur avant de fuir : vous êtes piégé(e) à l'intérieur.${gearboxHint} Il faudra qu'un autre joueur vienne vous libérer depuis l'extérieur.`, 'assertive');
     } else if (carjackedDriverName) {

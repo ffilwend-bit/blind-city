@@ -116,6 +116,37 @@ const AUTH_CODES = {
   principal: process.env.STAFF_CODE_PRINCIPAL || 'admin200016',
   moderateur: process.env.STAFF_CODE_MODERATEUR || 'Admin002061',
 };
+// Avertissement de démarrage si les codes par défaut (codés en dur) sont
+// utilisés faute de variables d'environnement — audit métiers/staff, item 6 :
+// ne change AUCUN comportement (les défauts restent un filet de secours
+// volontaire, voir plus haut), juste un signal visible dans les logs pour
+// qu'un déploiement en prod sans STAFF_CODE_* ne passe pas inaperçu.
+if (!process.env.STAFF_CODE_PRINCIPAL || !process.env.STAFF_CODE_MODERATEUR) {
+  console.warn('[staff] ATTENTION : STAFF_CODE_PRINCIPAL et/ou STAFF_CODE_MODERATEUR ne sont pas définis — les codes administrateur par défaut codés en dur sont utilisés. À définir en variables d\'environnement avant un déploiement public.');
+}
+// Note (audit métiers/staff, item 12) : tous les handlers ci-dessous qui
+// testent `player.staffRole` (valeur 'principal' ou 'moderateur', vérité)
+// traitent les deux rôles de façon IDENTIQUE — un modérateur peut
+// accorder/révoquer un métier, bannir, etc., au même titre que le principal.
+// Seules trois actions distinguent déjà les deux ('unban', 'codes' côté
+// client — menu réservé à StaffMode.role === 'principal' — et la conservation
+// des codes AUTH_CODES elle-même). C'est un choix de conception actuel, pas
+// un oubli : aucune séparation plus fine n'est prévue tant qu'elle n'est pas
+// explicitement demandée.
+// Liste blanche des métiers attribuables (audit métiers/staff, item 3) —
+// alignée sur Roles.list (js/roles-staff.js), 'citoyen' excepté (rôle libre,
+// jamais accordé via ce chemin). Utilisée à CHAQUE point où un rôle entre
+// dans l'état serveur : candidature (job_request), octroi (staff_grant_job),
+// et surtout restauration à la connexion (voir plus bas) — ce dernier point
+// faisait une confiance aveugle à account.saveData.role, un champ que
+// rien ne validait jamais côté serveur avant d'être écrit (save_progress)
+// ni avant d'être relu (login), avec pour seule protection un commentaire
+// affirmant (à tort, vu le mode "Tester un métier" côté client) que ce rôle
+// avait forcément été validé par staff_grant_job au préalable.
+const VALID_JOB_ROLES = new Set(['police', 'medecin', 'mecanicien', 'concessionnaire', 'agent_immo', 'avocat', 'mineur_pro', 'journaliste_pro', 'chauffeur_pro']);
+// Grades policiers valides (POLICE_RANKS, js/roles-staff.js) — même principe
+// de whitelist appliqué à promote_police (audit métiers/staff, item 3 étendu).
+const POLICE_RANK_IDS = new Set(['agent', 'brigadier', 'capitaine', 'chef']);
 // Comptes PROPRIÉTAIRES : reçoivent automatiquement l'accès administrateur
 // principal à la connexion, SANS avoir à saisir de code. On reconnaît un
 // propriétaire à son identifiant de compte (username, en minuscules) OU à son
@@ -155,6 +186,7 @@ function enforceAuthCodes() {
 let staffData = {
   codes: { principal: AUTH_CODES.principal, moderateur: AUTH_CODES.moderateur },
   bans: [], cityEdits: [], worldEdits: [], morgue: [], graves: [],
+  recruiters: {}, // roleId -> [accountUsername] — voir appoint_recruiter/recruiter_grant_job
 };
 // Garantit que toutes les listes attendues existent (compatibilité avec un
 // ancien fichier ou enregistrement Supabase créé avant morgue/graves).
@@ -162,6 +194,7 @@ function ensureStaffArrays() {
   for (const k of ['bans', 'cityEdits', 'worldEdits', 'morgue', 'graves']) {
     if (!Array.isArray(staffData[k])) staffData[k] = [];
   }
+  if (!staffData.recruiters || typeof staffData.recruiters !== 'object') staffData.recruiters = {};
 }
 try {
   const raw = fs.readFileSync(STAFF_FILE, 'utf8');
@@ -597,7 +630,16 @@ wss.on('connection', (ws, req) => {
       // haut) : le rôle a déjà été validé par staff_grant_job/promote_police
       // avant d'être sauvegardé, on peut donc le restaurer sans revalider.
       if (account.saveData) {
-        if (typeof account.saveData.role === 'string') player.role = account.saveData.role;
+        // Whitelist (audit métiers/staff, item 3+10) : le commentaire
+        // ci-dessus supposait que ce rôle avait forcément été validé par
+        // staff_grant_job — faux dès qu'un compte staff a utilisé « Tester
+        // un métier » (Roles.set() direct côté client, jamais passé par le
+        // serveur) et sauvegardé pendant le test. Un rôle absent de la
+        // whitelist retombe sur citoyen plutôt que d'être restauré tel quel.
+        if (typeof account.saveData.role === 'string') {
+          if (VALID_JOB_ROLES.has(account.saveData.role)) player.role = account.saveData.role;
+          else if (account.saveData.role !== 'citoyen') console.warn(`[compte] rôle sauvegardé invalide ignoré (« ${account.saveData.role} ») pour ${username}, retombe sur citoyen.`);
+        }
         if (typeof account.saveData.policeRank === 'string' || account.saveData.policeRank === null) player.policeRank = account.saveData.policeRank;
       }
       cacheEconomyFromSaveData(player, account.saveData);
@@ -675,6 +717,14 @@ wss.on('connection', (ws, req) => {
           return;
         }
       }
+      // Whitelist du rôle sauvegardé (audit métiers/staff, item 3+10) :
+      // sans ça, un rôle inventé (ou un test staff jamais désactivé, voir
+      // « Tester un métier ») s'installait tel quel dans le compte, prêt à
+      // être restauré tel quel à la prochaine connexion (voir plus haut).
+      if (typeof data.role === 'string' && data.role !== 'citoyen' && !VALID_JOB_ROLES.has(data.role)) {
+        console.warn(`[save_progress] rejeté (role=« ${data.role} » inconnu) pour ${player.accountUsername}`);
+        return;
+      }
       account.saveData = data;
       account.lastSaveAt = Date.now();
       cacheEconomyFromSaveData(player, data);
@@ -698,8 +748,20 @@ wss.on('connection', (ws, req) => {
     else if (msg.type === 'job_request') {
       // Candidature de métier : mise en file d'attente ET diffusée aux admins,
       // qui pourront la lister et l'approuver (voir staff_list_job_requests).
+      // Whitelist (audit métiers/staff, item 3) : un rôle absent de la liste
+      // (ex. "admin", ou n'importe quelle chaîne inventée) est refusé net —
+      // avant, seule safeName() filtrait, aucune vérification contre les
+      // vrais métiers du jeu.
       const role = safeName(msg.role, '', 40);
+      if (!VALID_JOB_ROLES.has(role)) { send(ws, { type: 'staff_error', text: 'Métier inconnu ou invalide.' }); return; }
       const roleName = safeName(msg.roleName, '', 60) || role;
+      // Signale explicitement le remplacement d'une candidature déjà en
+      // attente (audit métiers/staff, item 14) : avant, la nouvelle écrasait
+      // l'ancienne en silence côté serveur, sans que le joueur ne le sache.
+      if (jobRequests.has(player.id)) {
+        const old = jobRequests.get(player.id);
+        send(ws, { type: 'job_request_replaced', oldRoleName: old.roleName, newRoleName: roleName });
+      }
       jobRequests.set(player.id, { id: player.id, name: `${player.firstName} ${player.lastName}`, role, roleName, time: Date.now() });
       broadcastStaffLog(`${player.firstName} ${player.lastName} demande le métier « ${roleName} ».`);
       // Le journal staff (staff_log) est stocké silencieusement côté client,
@@ -711,25 +773,54 @@ wss.on('connection', (ws, req) => {
       }
     }
     else if (msg.type === 'staff_list_job_requests') {
-      if (!player.staffRole) { send(ws, { type: 'staff_error', text: 'Réservé au mode staff.' }); return; }
+      // Ouvert aussi aux recruteurs (audit métiers/staff, item 7), mais
+      // filtré aux seuls métiers pour lesquels ils ont été nommés — un
+      // recruteur ne voit ni ne peut traiter les candidatures des autres
+      // métiers, contrairement au staff qui voit tout.
+      const myRecruiterRoles = player.accountUsername
+        ? Object.keys(staffData.recruiters || {}).filter(r => (staffData.recruiters[r] || []).includes(player.accountUsername))
+        : [];
+      if (!player.staffRole && !myRecruiterRoles.length) { send(ws, { type: 'staff_error', text: 'Réservé au staff ou à un recruteur habilité.' }); return; }
       // Seules les demandes de joueurs encore connectés.
-      const list = [...jobRequests.values()].filter(r => players.has(r.id));
+      let list = [...jobRequests.values()].filter(r => players.has(r.id));
+      if (!player.staffRole) list = list.filter(r => myRecruiterRoles.includes(r.role));
       send(ws, { type: 'staff_job_requests', requests: list });
     }
-    else if (msg.type === 'staff_grant_job') {
-      if (!player.staffRole) { send(ws, { type: 'staff_error', text: 'Réservé au mode staff.' }); return; }
-      const target = players.get(msg.targetId);
+    else if (msg.type === 'staff_grant_job' || msg.type === 'recruiter_grant_job') {
+      const isRecruiterPath = msg.type === 'recruiter_grant_job';
       const req = jobRequests.get(msg.targetId);
+      // Un recruteur ne peut valider QUE les demandes du métier pour lequel
+      // il a été nommé (audit métiers/staff, item 7) — vérifié contre la
+      // liste persistée staffData.recruiters, remplie uniquement par
+      // appoint_recruiter (désormais réservé au staff, voir plus bas).
+      if (isRecruiterPath) {
+        const recruiterRole = req && req.role;
+        const list = recruiterRole && staffData.recruiters && staffData.recruiters[recruiterRole];
+        if (!player.accountUsername || !list || !list.includes(player.accountUsername)) {
+          send(ws, { type: 'staff_error', text: 'Vous n\'êtes pas recruteur pour ce métier.' }); return;
+        }
+      } else if (!player.staffRole) { send(ws, { type: 'staff_error', text: 'Réservé au mode staff.' }); return; }
+      const target = players.get(msg.targetId);
       jobRequests.delete(msg.targetId);
       if (!target || !req) { send(ws, { type: 'staff_error', text: 'Demande introuvable (joueur déconnecté ?).' }); return; }
+      // Re-validation whitelist (défense en profondeur, audit item 3) : la
+      // demande a déjà été filtrée à job_request, mais rien ne garantit
+      // qu'une ancienne demande stockée avant ce correctif reste valide.
+      if (!VALID_JOB_ROLES.has(req.role)) { send(ws, { type: 'staff_error', text: 'Métier invalide, demande ignorée.' }); return; }
+      const byName = `${player.firstName} ${player.lastName}`;
       if (msg.approve) {
         target.role = req.role;
-        send(target.ws, { type: 'job_granted', role: req.role, roleName: req.roleName, byName: `${player.firstName} ${player.lastName}` });
+        // Grade de base posé côté serveur à l'embauche (audit métiers/staff,
+        // item 8) : avant, seul le client posait 'agent' localement (voir
+        // Roles.set), le serveur ne connaissait le grade réel que plus tard,
+        // via une éventuelle promotion — désynchro possible entre-temps.
+        if (req.role === 'police' && !target.policeRank) target.policeRank = 'agent';
+        send(target.ws, { type: 'job_granted', role: req.role, roleName: req.roleName, policeRank: target.policeRank, byName });
       } else {
-        send(target.ws, { type: 'job_rejected', roleName: req.roleName, byName: `${player.firstName} ${player.lastName}` });
+        send(target.ws, { type: 'job_rejected', roleName: req.roleName, byName });
       }
       send(ws, { type: 'staff_job_review_result', name: req.name, roleName: req.roleName, approved: !!msg.approve });
-      broadcastStaffLog(`${player.firstName} ${player.lastName} a ${msg.approve ? 'accordé' : 'refusé'} le métier « ${req.roleName} » à ${req.name}.`);
+      broadcastStaffLog(`${byName} a ${msg.approve ? 'accordé' : 'refusé'} le métier « ${req.roleName} » à ${req.name}${isRecruiterPath ? ' (recruteur)' : ''}.`);
     }
 
     // Révocation de métier : jusqu'ici, staff_grant_job permettait
@@ -749,6 +840,17 @@ wss.on('connection', (ws, req) => {
       send(ws, { type: 'staff_job_review_result', name: `${target.firstName} ${target.lastName}`, roleName: oldRole, revoked: true });
       broadcastStaffLog(`${player.firstName} ${player.lastName} a révoqué le métier de ${target.firstName} ${target.lastName} (était « ${oldRole} »).`);
     }
+    // Démission volontaire (audit métiers/staff, item 12) : le joueur redevient
+    // citoyen de son propre chef, sans intervention staff — juste la mise à
+    // jour de l'état autoritaire côté serveur, le client s'est déjà mis à
+    // jour localement (voir Roles.resign).
+    else if (msg.type === 'staff_self_resign') {
+      if (player.role && player.role !== 'citoyen') {
+        const oldRole = player.role;
+        player.role = 'citoyen'; player.policeRank = null;
+        broadcastStaffLog(`${player.firstName} ${player.lastName} démissionne de son métier (était « ${oldRole} »).`);
+      }
+    }
     // Le staff demande à voir ce qu'un joueur connecté possède (inventaire,
     // véhicules, argent) : le serveur ne stocke pas ces données lui-même (le
     // jeu est côté client pour l'inventaire), donc il relaie la demande au
@@ -765,21 +867,37 @@ wss.on('connection', (ws, req) => {
       send(requester.ws, { type: 'staff_inspect_result', targetId: id, name: `${player.firstName} ${player.lastName}`, data: msg.data });
     }
     else if (msg.type === 'appoint_recruiter') {
+      // Réservé au staff (audit métiers/staff, item 1 — CONFIRMÉ ouvert à
+      // tout client connecté jusqu'ici) : n'importe qui pouvait se nommer
+      // (ou nommer un complice) recruteur pour n'importe quel métier.
+      if (!player.staffRole) { send(ws, { type: 'staff_error', text: 'Réservé au mode staff.' }); return; }
       const target = players.get(msg.targetId);
       if (!target) return;
       const role = safeName(msg.role, '', 40);
+      if (!VALID_JOB_ROLES.has(role)) { send(ws, { type: 'staff_error', text: 'Métier inconnu ou invalide.' }); return; }
+      if (!target.accountUsername) { send(ws, { type: 'staff_error', text: 'Ce joueur doit être connecté avec un compte pour être nommé recruteur.' }); return; }
       const roleName = safeName(msg.roleName, '', 60) || role;
+      // Persisté (audit métiers/staff, item 8) : sans ça, un recruteur
+      // « nommé » ne pouvait de toute façon rien valider réellement, faute
+      // d'existence côté serveur (voir recruiter_grant_job, plus haut).
+      staffData.recruiters = staffData.recruiters || {};
+      staffData.recruiters[role] = staffData.recruiters[role] || [];
+      if (!staffData.recruiters[role].includes(target.accountUsername)) staffData.recruiters[role].push(target.accountUsername);
+      saveStaffData();
       send(target.ws, { type: 'recruiter_appointed', role, roleName, byName: `${player.firstName} ${player.lastName}` });
       broadcastStaffLog(`${player.firstName} ${player.lastName} nomme ${target.firstName} ${target.lastName} recruteur pour « ${roleName} ».`);
     }
     else if (msg.type === 'promote_police') {
       // Règle déjà affichée aux joueurs côté client (Game.openPoliceHierarchyMenu,
       // js/police-and-startup.js) mais jamais vérifiée ici : seul un CHEF de
-      // la police peut promouvoir un autre policier, jamais soi-même.
-      if (player.policeRank !== 'chef') { send(ws, { type: 'staff_error', text: 'Seul un chef de la police peut promouvoir un autre policier.' }); return; }
+      // la police (OU le staff, audit métiers/staff item 5 — le client
+      // autorisait déjà StaffMode.active, le serveur non, d'où un échec
+      // silencieux pour un admin non-chef) peut promouvoir, jamais soi-même.
+      if (player.policeRank !== 'chef' && !player.staffRole) { send(ws, { type: 'staff_error', text: 'Réservé au chef de la police ou au staff.' }); return; }
       const target = players.get(msg.targetId);
       if (!target || target.id === player.id || target.role !== 'police') return;
       const rank = safeName(msg.rank, '', 20);
+      if (!POLICE_RANK_IDS.has(rank)) { send(ws, { type: 'staff_error', text: 'Grade invalide.' }); return; }
       target.policeRank = rank;
       send(target.ws, { type: 'police_promoted', rank, byName: `${player.firstName} ${player.lastName}` });
       broadcastStaffLog(`${player.firstName} ${player.lastName} nomme ${target.firstName} ${target.lastName} : ${rank}.`);
@@ -819,6 +937,11 @@ wss.on('connection', (ws, req) => {
     }
 
     else if (msg.type === 'toggle_cuffs') {
+      // Réservé à la police (audit métiers/staff, item 4 — CONFIRMÉ non
+      // vérifié jusqu'ici, contrairement à toggle_jail juste en dessous qui,
+      // lui, vérifiait déjà le rôle) : un citoyen pouvait menotter n'importe
+      // qui d'autre en multijoueur.
+      if (player.role !== 'police') { send(ws, { type: 'staff_error', text: 'Réservé à la police.' }); return; }
       const target = players.get(msg.targetId);
       if (!target) return;
       // Proximité réelle exigée : impossible de menotter quelqu'un à distance.

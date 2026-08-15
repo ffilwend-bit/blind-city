@@ -211,6 +211,21 @@ async function testMicLevelAndAnnounce(stream) {
   } catch (e) { /* diagnostic non bloquant : un échec ici ne doit jamais casser la connexion */ }
 }
 
+// Au-delà de ce délai sans avoir atteint 'connected'/'completed', une
+// connexion est considérée bloquée et traitée comme un échec (voir le
+// "chien de garde" dans connect() ci-dessous). Repéré en conditions
+// réelles : quand la négociation ICE doit passer par un relais TURN (NAT
+// symétrique/CGNAT, cas typique des données mobiles), l'allocation TURN
+// peut rester bloquée en silence sur iceConnectionState 'new' — SANS
+// jamais déclencher 'failed' — pendant largement plus d'une minute. Sans
+// chien de garde, aucune des deux annonces ("connexion établie"/
+// "impossible") ne se déclenche jamais : silence total et permanent, sans
+// le moindre indice pour le joueur. 12 s laisse largement le temps à une
+// négociation normale (host/srflx quasi instantanés, TURN généralement
+// sous 3-5 s) tout en restant sous la patience raisonnable d'un joueur qui
+// attend d'être entendu.
+const CONNECT_TIMEOUT_MS = 12000;
+
 function createPeerVoiceMesh(opts) {
   return {
     channel: opts.channel,
@@ -259,7 +274,16 @@ function createPeerVoiceMesh(opts) {
       return this.localStream;
     },
 
-    async connect(peerId, isOfferer) {
+    // forceRelay : utilisé pour la RETENTATIVE après un échec (voir plus bas)
+    // — une tentative normale ('all', hôte + réflexif + relais) qui a déjà
+    // échoué a de fortes chances d'avoir échoué à cause d'un NAT restrictif
+    // (symétrique/CGNAT, cas typique quand les deux joueurs sont sur des
+    // réseaux différents) que seul un relais TURN peut contourner. Retenter
+    // à l'identique répète la même négociation vouée au même échec ; forcer
+    // 'relay' saute directement à la seule option qui a une chance réelle de
+    // fonctionner, sans perdre de temps à re-collecter des candidats hôte/
+    // réflexifs inutiles dans ce cas précis.
+    async connect(peerId, isOfferer, forceRelay = false) {
       // Garde anti-doublon : evaluate() peut être rappelé (toutes les secondes)
       // avant qu'un connect() précédent pour ce même pair n'ait fini d'attendre
       // le micro — sans ça, chaque tick relançait un getUserMedia() concurrent
@@ -290,7 +314,7 @@ function createPeerVoiceMesh(opts) {
         }
       } finally { this.connecting.delete(peerId); }
       if (this.peers.has(peerId)) return; // connecté entre-temps par l'autre côté
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const pc = new RTCPeerConnection(forceRelay ? { iceServers: ICE_SERVERS, iceTransportPolicy: 'relay' } : { iceServers: ICE_SERVERS });
       // Écoute seule (pas de micro voulu ici) : un transceiver recvonly
       // permet de recevoir l'audio de l'autre côté sans jamais rien envoyer,
       // sans avoir eu besoin du moindre accès micro local.
@@ -303,6 +327,17 @@ function createPeerVoiceMesh(opts) {
       // en sendrecv si je décide de parler plus tard).
       const entry = { pc, pendingIce: [], remoteEl: null, audioNodes: null, announcedState: null, sending: !!stream };
       this.peers.set(peerId, entry);
+      // Chien de garde anti-blocage silencieux : voir CONNECT_TIMEOUT_MS
+      // plus haut. Sans lui, une connexion qui ne quitte jamais
+      // iceConnectionState 'new' (allocation TURN qui échoue en silence)
+      // reste bloquée pour toujours, sans jamais appeler reportState('failed')
+      // — donc sans jamais retenter ni prévenir le joueur.
+      entry.connectTimer = setTimeout(() => {
+        if (this.peers.get(peerId) !== entry) return; // déjà remplacée/fermée entre-temps
+        if (pc.connectionState === 'connected' || pc.connectionState === 'completed') return;
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') return;
+        reportState('failed');
+      }, CONNECT_TIMEOUT_MS);
       pc.onicecandidate = (e) => { if (e.candidate) Net.send({ type: 'mesh_ice', toId: peerId, channel: this.channel, data: e.candidate }); };
       // remoteStream mémorisé pour le contrôle de santé du track ci-dessous
       // (reportState) : "connexion établie" (ICE) ne garantit PAS que
@@ -330,6 +365,8 @@ function createPeerVoiceMesh(opts) {
         if (state === entry.announcedState) return;
         if (state !== 'connected' && state !== 'failed') return; // seuls ces deux états nous intéressent ici
         entry.announcedState = state;
+        clearTimeout(entry.connectTimer); // l'une des deux issues est arrivée : le chien de garde n'a plus lieu d'être
+
         if (this.channel === 'prox') {
           const p = Net.remotePlayers.get(peerId);
           const name = p ? `${p.firstName} ${p.lastName}` : 'un joueur proche';
@@ -364,7 +401,10 @@ function createPeerVoiceMesh(opts) {
           // plus désiré entre-temps (hors de portée, micro fermé...), le
           // prochain cycle evaluate() la refermera normalement — retenter
           // une fois pour rien ne fait pas de mal.
-          setTimeout(() => this.connect(peerId, isOfferer), 400);
+          // forceRelay=true : une tentative normale vient d'échouer, la
+          // retentative saute directement au relais TURN (voir le
+          // commentaire sur le paramètre forceRelay de connect()).
+          setTimeout(() => this.connect(peerId, isOfferer, true), 400);
         }
       };
       pc.onconnectionstatechange = () => {
@@ -438,6 +478,7 @@ function createPeerVoiceMesh(opts) {
     disconnect(peerId) {
       const entry = this.peers.get(peerId);
       if (!entry) return;
+      clearTimeout(entry.connectTimer);
       try { entry.pc.close(); } catch (e) { /* ignore */ }
       if (opts.onRemoteClose) opts.onRemoteClose(peerId, entry);
       this.peers.delete(peerId);

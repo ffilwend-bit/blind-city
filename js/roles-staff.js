@@ -156,8 +156,20 @@ const Roles = {
     if (typeof Net !== 'undefined' && Net.connected) Net.send({ type: 'job_request', role, roleName: this.list[role].name });
     announce(`Candidature envoyée pour le métier ${this.list[role].name}. En attente de validation par un administrateur ou un recruteur habilité.`, 'assertive');
   },
+  // Faille de sécurité corrigée (audit métiers/staff, item 2/5) : Roles.pending
+  // ne représente QUE la candidature du joueur LOCAL lui-même (jamais celle
+  // d'un autre joueur — chaque client a son propre Roles.pending, jamais
+  // partagé sur le réseau). En multijoueur, StaffMode.active implique
+  // toujours Net.connected (voir StaffMode.toggle) : un membre du staff qui
+  // avait lui-même postulé pouvait donc s'auto-accorder n'importe quel
+  // métier payant, entièrement en local, sans jamais passer par
+  // staff_grant_job côté serveur. Seule la validation par un AUTRE
+  // administrateur (file serveur, « Demandes de métier des joueurs ») est
+  // désormais possible en multijoueur ; ce chemin local reste utilisable
+  // hors ligne (solo), où il n'y a par définition personne d'autre à berner.
   approve() {
     if (!this.pending) return announce('Aucune candidature en attente.', 'polite');
+    if (typeof Net !== 'undefined' && Net.connected) return announce('En multijoueur, votre propre candidature doit être validée par un AUTRE administrateur, via « Demandes de métier des joueurs ». Impossible de vous l\'accorder vous-même.', 'assertive');
     const roleName = this.list[this.pending.role].name;
     this.set(this.pending.role);
     announce(`Candidature approuvée : ${roleName}.`, 'assertive');
@@ -165,8 +177,21 @@ const Roles = {
   },
   reject() {
     if (!this.pending) return announce('Aucune candidature en attente.', 'polite');
+    if (typeof Net !== 'undefined' && Net.connected) return announce('En multijoueur, votre propre candidature doit être traitée par un autre administrateur, via « Demandes de métier des joueurs ».', 'assertive');
     announce(`Candidature refusée pour ${this.list[this.pending.role].name}.`, 'assertive');
     this.pending = null;
+  },
+  // Démission volontaire (audit métiers/staff, item 12) : redevenir citoyen
+  // sans passer par une révocation staff. En multi, synchronisé côté serveur
+  // (staff_self_resign) pour que l'état serveur reste la source de vérité ;
+  // en solo, purement local.
+  resign() {
+    if (this.current === 'citoyen') return announce('Vous êtes déjà citoyen.', 'polite');
+    const oldName = this.list[this.current].name;
+    this.set('citoyen');
+    Game.policeRank = null;
+    if (typeof Net !== 'undefined' && Net.connected) Net.send({ type: 'staff_self_resign' });
+    announce(`Vous démissionnez de votre métier de ${oldName}. Vous êtes de nouveau citoyen.`, 'assertive');
   },
   appointRecruiter(role, name) {
     if (!this.list[role]) return announce('Métier inconnu.', 'assertive');
@@ -188,6 +213,16 @@ const StaffMode = {
   toggle(inputCode) {
     if (this.active) {
       this.active = false; this.role = null;
+      // Restauration automatique d'un rôle de test resté actif (audit
+      // métiers/staff, item 10) : sans ça, un admin qui oublie de revenir à
+      // « Revenir à mon vrai métier » (voir openStaffRoleTestMenu) avant de
+      // désactiver le mode staff pouvait finir avec ce rôle de test
+      // sauvegardé comme si c'était son vrai métier.
+      if (typeof Game !== 'undefined' && Game._realRoleBeforeTest !== undefined) {
+        Roles.set(Game._realRoleBeforeTest.role);
+        Game.policeRank = Game._realRoleBeforeTest.policeRank;
+        Game._realRoleBeforeTest = undefined;
+      }
       if (Net.connected) Net.send({ type: 'staff_deauth' });
       announce('Mode staff désactivé.', 'assertive'); updateHud();
       return;
